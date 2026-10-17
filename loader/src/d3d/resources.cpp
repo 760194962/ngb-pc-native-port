@@ -324,4 +324,24 @@ const Hle *hle_resource_table(size_t *count)
     return kTable;
 }
 
+// Ninja Gaiden Black x2.1: the generated entries (tools/gen_ngb_hle.py) plus the functions XbSymbolDatabase does
+// not name there, identified by their neighbours and sizes against BLACK's D3D section (docs/02 §2, docs/04):
+//   0x3CEAB0 (564 bytes, after Get2DSurfaceDesc) = BLACK 0x26D6D0 D3D_GetLevelInfo, 8 stack arguments (ret 0x20);
+//   0x3CA170 (106 bytes) = BLACK 0x269AC0 D3D_CreateSurfaceHeader (eax = data, edi = parent, format, size on the stack);
+//   0x3C8580 (70 bytes, calls the two above) = BLACK 0x26C780 D3DTexture_GetSurfaceLevel2 (eax = texture, level on the stack).
+static const Hle kNgbTable[] = {
+#include "ngb/resources_table.inc"
+    {0x003ceab0u, "D3D_GetLevelInfo", (void *)&D3D_GetLevelInfo, "s s s s s s s s", false},
+    {0x003ca170u, "D3D_CreateSurfaceHeader", (void *)&D3D_CreateSurfaceHeader, "eax edi s s", true},
+    {0x003c8580u, "D3DTexture_GetSurfaceLevel2", (void *)&D3DTexture_GetSurfaceLevel2, "eax s", true},
+    // XbSymbolDatabase names it Get2DSurfaceDesc here (edi = pixel container, ebx = level, esi = desc), as in BLACK.
+    {0x003cea10u, "Get2DSurfaceDesc", (void *)&D3D_Get2DSurfaceDesc, "edi ebx esi", false},
+};
+
+const Hle *hle_resource_table_ngb(size_t *count)
+{
+    *count = sizeof kNgbTable / sizeof kNgbTable[0];
+    return kNgbTable;
+}
+
 } // namespace xd3d

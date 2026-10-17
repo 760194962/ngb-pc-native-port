@@ -2,6 +2,8 @@
 
 #include "build_profile.h"
 #include "d3d/draw.h"
+#include "d3d/state.h"
+#include "d3d/xd3d.h"
 #include "hooks.h"
 #include "image.h"
 #include "xbe.h"
@@ -13,6 +15,7 @@
 #include <vector>
 
 bool g_trace_d3d = false;
+xd3d::DataLayout xd3d::g_layout = xd3d::kLayoutBlack;
 
 namespace {
 
@@ -199,6 +202,8 @@ namespace xd3d {
 
 bool install_d3d_hooks(const BuildProfile &profile)
 {
+    g_layout = profile.black ? kLayoutBlack : kLayoutNgb;
+    g_st.vs_constants = (float (*)[4])(uintptr_t)g_layout.vs_constants;
     if (profile.black) {
         g_funcs.assign(std::begin(kD3D), std::end(kD3D));
         g_funcs.insert(g_funcs.end(), std::begin(kDSound), std::end(kDSound));
@@ -221,7 +226,8 @@ bool install_d3d_hooks(const BuildProfile &profile)
             all.insert(all.end(), t, t + n);
         }
     } else {
-        for (auto table : {hle_input_table_ngb}) {
+        for (auto table : {hle_device_table_ngb, hle_resource_table_ngb, hle_draw_table_ngb, hle_dsound_table_ngb, hle_input_table_ngb,
+                           hle_ngb_extra_table}) {
             size_t n = 0;
             const Hle *t = table(&n);
             all.insert(all.end(), t, t + n);

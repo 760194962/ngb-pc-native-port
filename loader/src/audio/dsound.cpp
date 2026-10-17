@@ -1068,6 +1068,92 @@ static const xd3d::Hle kTable[] = {
     HN(0x0021a20f, "IDirectSoundStream_SetMixBins", Voice_SetMixBins, "s s", true),
 };
 
+// ---- Ninja Gaiden Black x2.1: buffer methods BLACK never called (docs/02 §2) ----
+
+// Lock gives pointers into the buffer's own memory (SetBufferData); the Xbox library's Unlock is `xor eax, eax`.
+// The game streams CRI ADX music through Lock / SetCurrentPosition instead of DirectSound streams.
+HRESULT __stdcall IDirectSoundBuffer_Lock(void *p, uint32_t offset, uint32_t bytes, void **ppv1, uint32_t *pbytes1, void **ppv2,
+                                          uint32_t *pbytes2, uint32_t flags)
+{
+    STRACE("%p, off %u, %u bytes, flags 0x%x", p, offset, bytes, flags);
+    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    Buffer *b = as_buffer(p);
+    if (!b || !b->data) return E_FAIL;
+    if (flags & 2) { // DSBLOCK_ENTIREBUFFER
+        offset = 0;
+        bytes = b->bytes;
+    }
+    if (offset > b->bytes) offset = b->bytes;
+    uint32_t n1 = bytes <= b->bytes - offset ? bytes : b->bytes - offset;
+    *ppv1 = b->data + offset;
+    *pbytes1 = n1;
+    if (ppv2) *ppv2 = bytes > n1 ? b->data : nullptr;
+    if (pbytes2) *pbytes2 = bytes > n1 ? bytes - n1 : 0;
+    return S_OK;
+}
+
+HRESULT __stdcall IDirectSoundBuffer_Unlock(void *p, void *pv1, uint32_t b1, void *pv2, uint32_t b2)
+{
+    STRACE("%p", p);
+    return S_OK;
+}
+
+HRESULT __stdcall IDirectSoundBuffer_Stop(void *p) { return IDirectSoundBuffer_StopEx(p, 0, 0, 0); }
+
+// Per-voice 3D parameters set one at a time (BLACK used SetAllParameters only).
+#define DS3D_SETTER(fn, field)                                             \
+    HRESULT __stdcall fn(void *p, float v, uint32_t apply)                 \
+    {                                                                      \
+        STRACE("%p, %g, %u", p, v, apply);                                 \
+        std::lock_guard<std::recursive_mutex> g(g_mutex);                  \
+        if (Voice *vo = as_voice(p)) vo->ds3d.field = v;                   \
+        return S_OK;                                                       \
+    }
+DS3D_SETTER(IDirectSoundBuffer_SetMaxDistance, flMaxDistance)
+DS3D_SETTER(IDirectSoundBuffer_SetMinDistance, flMinDistance)
+DS3D_SETTER(IDirectSoundBuffer_SetRolloffFactor, flRolloffFactor)
+DS3D_SETTER(IDirectSoundBuffer_SetDistanceFactor, flDistanceFactor)
+#undef DS3D_SETTER
+
+HRESULT __stdcall IDirectSoundBuffer_SetPosition(void *p, float x, float y, float z, uint32_t apply)
+{
+    STRACE("%p, %g %g %g, %u", p, x, y, z, apply);
+    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    if (Voice *v = as_voice(p)) v->ds3d.vPosition = {x, y, z};
+    return S_OK;
+}
+
+HRESULT __stdcall IDirectSoundBuffer_SetVelocity(void *p, float x, float y, float z, uint32_t apply)
+{
+    STRACE("%p, %g %g %g, %u", p, x, y, z, apply);
+    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    if (Voice *v = as_voice(p)) v->ds3d.vVelocity = {x, y, z};
+    return S_OK;
+}
+
+// 0x37A942: an IDirectSound method the library implements as `xor eax, eax; ret 0xC` (three arguments, always DS_OK),
+// called once after DirectSoundCreate with (pDirectSound, 0, 2, 0).
+HRESULT __stdcall IDirectSound_Stub3(void *p, uint32_t a, uint32_t b)
+{
+    STRACE("%p, 0x%x, 0x%x", p, a, b);
+    return S_OK;
+}
+
+// Ninja Gaiden Black x2.1 (tools/gen_ngb_hle.py): the same DSOUND 5849 build at the game's addresses, plus the above.
+static const xd3d::Hle kNgbTable[] = {
+#include "ngb/dsound_table.inc"
+    H(0x0037b830, IDirectSoundBuffer_Lock, "s s s s s s s s", true),
+    H(0x0037a95d, IDirectSoundBuffer_Unlock, "s s s s s", true),
+    H(0x0037b77c, IDirectSoundBuffer_Stop, "s", true),
+    H(0x0037bff7, IDirectSoundBuffer_SetMaxDistance, "s s s", true),
+    H(0x0037c01b, IDirectSoundBuffer_SetMinDistance, "s s s", true),
+    H(0x0037c03f, IDirectSoundBuffer_SetPosition, "s s s s s", true),
+    H(0x0037c074, IDirectSoundBuffer_SetVelocity, "s s s s s", true),
+    H(0x0037c0a9, IDirectSoundBuffer_SetDistanceFactor, "s s s", true),
+    H(0x0037c0cd, IDirectSoundBuffer_SetRolloffFactor, "s s s", true),
+    H(0x0037a942, IDirectSound_Stub3, "s s s", true),
+};
+
 } // namespace xdsound
 
 namespace xd3d {
@@ -1075,5 +1161,10 @@ const Hle *hle_dsound_table(size_t *count)
 {
     *count = sizeof xdsound::kTable / sizeof xdsound::kTable[0];
     return xdsound::kTable;
+}
+const Hle *hle_dsound_table_ngb(size_t *count)
+{
+    *count = sizeof xdsound::kNgbTable / sizeof xdsound::kNgbTable[0];
+    return xdsound::kNgbTable;
 }
 } // namespace xd3d

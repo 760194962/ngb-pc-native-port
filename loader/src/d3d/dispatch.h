@@ -27,8 +27,14 @@ const Hle *hle_resource_table(size_t *count);
 const Hle *hle_draw_table(size_t *count);
 const Hle *hle_dsound_table(size_t *count); // audio/dsound.cpp
 const Hle *hle_input_table(size_t *count);  // input/xinput.cpp
-// Ninja Gaiden Black x2.1 tables (same implementations where the semantics match, the game's own addresses).
+// Ninja Gaiden Black x2.1 tables (same implementations where the semantics match, the game's own addresses;
+// the generated ones come from tools/gen_ngb_hle.py, the extra table from ngb/d3d_ngb.cpp).
 const Hle *hle_input_table_ngb(size_t *count);
+const Hle *hle_device_table_ngb(size_t *count);
+const Hle *hle_draw_table_ngb(size_t *count);
+const Hle *hle_resource_table_ngb(size_t *count);
+const Hle *hle_dsound_table_ngb(size_t *count);
+const Hle *hle_ngb_extra_table(size_t *count);
 
 bool install_d3d_hooks(const ::BuildProfile &profile);
 

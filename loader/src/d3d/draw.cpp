@@ -1181,4 +1181,14 @@ const Hle *hle_draw_table(size_t *count)
     return kTable;
 }
 
+static const Hle kNgbTable[] = { // Ninja Gaiden Black x2.1 (tools/gen_ngb_hle.py)
+#include "ngb/draw_table.inc"
+};
+
+const Hle *hle_draw_table_ngb(size_t *count)
+{
+    *count = sizeof kNgbTable / sizeof kNgbTable[0];
+    return kNgbTable;
+}
+
 } // namespace xd3d

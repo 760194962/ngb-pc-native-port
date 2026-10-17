@@ -884,9 +884,9 @@ HRESULT __stdcall Direct3D_CreateDevice(uint32_t Adapter, uint32_t DeviceType, u
     host3d::dev()->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &g_host_backbuffer);
     host3d::dev()->GetDepthStencilSurface(&g_host_depth);
 
-    // The library's device object is static (g_Device at 0x279B50, up to D3D_g_pDevice); game code reads
+    // The library's device object is static (g_Device, DEVICE_SIZE below D3D_g_pDevice; g_layout); game code reads
     // some of its fields by absolute address, so use that storage.
-    g_dev = (uint8_t *)(uintptr_t)ADDR_DEVICE_OBJECT;
+    g_dev = (uint8_t *)(uintptr_t)g_layout.device_object;
     memset(g_dev, 0, DEVICE_SIZE);
     g_push_base = (uint32_t *)VirtualAlloc(nullptr, PUSH_BYTES, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     g_push_dwords = PUSH_BYTES / 4;
@@ -894,13 +894,15 @@ HRESULT __stdcall Direct3D_CreateDevice(uint32_t Adapter, uint32_t DeviceType, u
     dev_field<uint32_t *>(DEV_THRESHOLD) = g_push_base + g_push_dwords - 0x4000; // keep 64 KB headroom
     dev_field<float>(0x096C) = 1.0f; // back buffer scale x (read by GetBackBufferScale, run natively)
     dev_field<float>(0x0970) = 1.0f; // back buffer scale y
-    *(uint32_t *)(uintptr_t)ADDR_PUSH_SEGMENT = 0x2000;
+    *(uint32_t *)(uintptr_t)g_layout.push_segment = 0x2000;
 
     g_backbuffer = make_surface(g_width, g_height, pp->BackBufferFormat ? pp->BackBufferFormat : XFMT_LIN_X8R8G8B8);
     if (pp->EnableAutoDepthStencil)
         g_depthbuffer = make_surface(g_width, g_height, pp->AutoDepthStencilFormat ? pp->AutoDepthStencilFormat : XFMT_LIN_D24S8);
     dev_field<Surface *>(DEV_RENDERTARGET) = g_backbuffer;
     dev_field<Surface *>(DEV_ZBUFFER) = g_depthbuffer;
+    dev_field<Surface *>(DEV_BACKBUFFER) = g_backbuffer;
+    dev_field<Surface *>(DEV_RT_ALIAS) = g_depthbuffer;
     g_st.render_target = g_backbuffer;
     g_st.depth_stencil = g_depthbuffer;
     bind_render_target(g_backbuffer, g_depthbuffer);
@@ -914,7 +916,7 @@ HRESULT __stdcall Direct3D_CreateDevice(uint32_t Adapter, uint32_t DeviceType, u
         g_st.transforms[i] = m;
         memcpy(g_dev + DEV_TRANSFORMS + i * 0x40, &m, 0x40);
     }
-    *(uint8_t **)(uintptr_t)ADDR_G_PDEVICE = g_dev;
+    *(uint8_t **)(uintptr_t)g_layout.g_pdevice = g_dev;
     if (ppDevice) *ppDevice = g_dev;
     init_default_states();
     render_state()[XRS_PRESENTATIONINTERVAL] = pp->FullScreen_PresentationInterval;
@@ -1772,6 +1774,17 @@ const Hle *hle_device_table(size_t *count)
 {
     *count = sizeof kTable / sizeof kTable[0];
     return kTable;
+}
+
+// Ninja Gaiden Black x2.1: the same functions at the game's addresses and LTCG conventions (tools/gen_ngb_hle.py).
+static const Hle kNgbTable[] = {
+#include "ngb/device_table.inc"
+};
+
+const Hle *hle_device_table_ngb(size_t *count)
+{
+    *count = sizeof kNgbTable / sizeof kNgbTable[0];
+    return kNgbTable;
 }
 
 void request_device_reset() { g_reset_requested = true; }

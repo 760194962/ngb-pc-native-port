@@ -3,28 +3,47 @@
 #include "kernel/kexports.h"
 #include "kernel/nt.h"
 
+#include <map>
 #include <mutex>
 
 namespace xk {
 
 // XAPI fibers (CreateFiber / SwitchToFiber, used by the game) get their stacks from the kernel. Nothing on the host
-// needs to know about them: natively executed code just switches esp into the block. Guard page below the stack as
-// on the console; the returned pointer is the stack base (top), as MmCreateKernelStack returns.
+// needs to know about them: natively executed code just switches esp into the block. The game asks for 16 KB
+// (enough for its own code on the console), but host code called from a fiber (the Direct3D 9 driver under the D3D
+// HLE) needs far more, and an overflow of a 16 KB block killed the process before any handler could log it
+// (docs/04). So the block is at least MIN_FIBER_STACK bytes: the game sees StackBase and StackLimit = StackBase -
+// NumberOfBytes as asked, and the memory below its limit is ours, committed, with a guard page at the bottom.
+constexpr uint32_t MIN_FIBER_STACK = 1u << 20;
+static std::mutex g_stack_mutex;
+static std::map<void *, void *> g_stack_alloc; // StackBase -> allocation
+
 void *__stdcall MmCreateKernelStack(uint32_t NumberOfBytes, BOOLEAN DebuggerThread)
 {
     KTRACE("0x%x, %u", NumberOfBytes, DebuggerThread);
     uint32_t size = (NumberOfBytes + 0xFFF) & ~0xFFFu;
-    uint8_t *limit = (uint8_t *)VirtualAlloc(nullptr, size + 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!limit) return nullptr;
+    uint32_t total = size < MIN_FIBER_STACK ? MIN_FIBER_STACK : size;
+    uint8_t *alloc = (uint8_t *)VirtualAlloc(nullptr, total + 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!alloc) return nullptr;
     DWORD old;
-    VirtualProtect(limit, 0x1000, PAGE_NOACCESS, &old); // guard page
-    return limit + 0x1000 + size;
+    VirtualProtect(alloc, 0x1000, PAGE_NOACCESS, &old); // guard page
+    void *base = alloc + 0x1000 + total;
+    std::lock_guard<std::mutex> g(g_stack_mutex);
+    g_stack_alloc[base] = alloc;
+    return base;
 }
 
 void __stdcall MmDeleteKernelStack(void *StackBase, void *StackLimit)
 {
     KTRACE("%p, %p", StackBase, StackLimit);
-    if (StackLimit) VirtualFree((uint8_t *)StackLimit - 0x1000, 0, MEM_RELEASE);
+    std::lock_guard<std::mutex> g(g_stack_mutex);
+    auto it = g_stack_alloc.find(StackBase);
+    if (it == g_stack_alloc.end()) {
+        logf("[k] MmDeleteKernelStack(%p, %p): not a stack this kernel made", StackBase, StackLimit);
+        return;
+    }
+    VirtualFree(it->second, 0, MEM_RELEASE);
+    g_stack_alloc.erase(it);
 }
 
 void __stdcall DbgBreakPoint() { KTRACE(""); } // retail kernel: no debugger, nothing happens

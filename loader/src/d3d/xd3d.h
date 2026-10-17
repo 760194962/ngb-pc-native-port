@@ -130,6 +130,12 @@ constexpr uint32_t DEV_TEXTURES = 0x0F98;     // Resource* [4]
 constexpr uint32_t DEV_VERTEXSHADER = 0x0794;  // m_VertexShader (XbSymbolDatabase)
 constexpr uint32_t DEV_RENDERTARGET = 0x1A04; // Surface*
 constexpr uint32_t DEV_ZBUFFER = 0x1A08;      // Surface*
+// Two more surface pointers of the library's device: SetViewport (0x3C7270 in Ninja Gaiden Black) sizes the viewport
+// from +0x1A18 when the current render target is +0x1A14, and the game's FUN_003221A0 AddRefs both and asks
+// Get2DSurfaceDesc about +0x1A18. The HLE fills them at CreateDevice with the back buffer and the depth buffer
+// (verified only as far as the boot path uses them; docs/04).
+constexpr uint32_t DEV_RT_ALIAS = 0x1A14;
+constexpr uint32_t DEV_BACKBUFFER = 0x1A18;
 constexpr uint32_t DEV_SWAPCALLBACK = 0x1DB4;  // m_SwapCallback
 constexpr uint32_t DEV_VBLANKCALLBACK = 0x1DB8; // m_VBlankCallback (set by game code)
 constexpr uint32_t DEV_VBLANKEVENT = 0x1DBC;   // m_VerticalBlankEvent
@@ -140,19 +146,27 @@ constexpr uint32_t DEV_SWAPCOUNT = 0x2478;
 constexpr uint32_t DEV_GAMMA_RAMP = 0x1E04;
 constexpr uint32_t DEV_GAMMA_DIRTY = 0x2404;
 constexpr uint32_t DEV_GAMMA_INDEX = 0x240C;
-constexpr uint32_t ADDR_DEVICE_OBJECT = 0x00279B50; // static g_Device
-constexpr uint32_t DEVICE_SIZE = 0x24A8;            // up to D3D_g_pDevice (0x27BFF8)
+constexpr uint32_t DEVICE_SIZE = 0x24A8;            // static g_Device up to D3D_g_pDevice (same D3D8LTCG 5849 build in both games)
 
-// Xbox data in the D3D section that game code reads or writes
-constexpr uint32_t ADDR_G_PDEVICE = 0x0027BFF8;    // D3D_g_pDevice
-constexpr uint32_t ADDR_PUSH_SEGMENT = 0x0027CEB0; // size the game passes to MakeRequestedSpace
-constexpr uint32_t ADDR_RENDERSTATE = 0x0027C008;  // D3D_g_RenderState[166]
-constexpr uint32_t ADDR_TEXTURESTATE = 0x00279948; // D3D_g_DeferredTextureState[4][32]
-constexpr uint32_t ADDR_STREAMS = 0x00279758;      // D3D_g_Stream
-constexpr uint32_t ADDR_DIRTYFLAGS = 0x0027C000;
+// Xbox data in the D3D section that game code reads or writes: the library is the same build in BLACK and in
+// Ninja Gaiden Black (D3D8LTCG 5849 qfe 15), linked at different addresses. XbSymbolDatabase names the
+// variables in both; the static device object sits DEVICE_SIZE below D3D_g_pDevice in both.
+struct DataLayout {
+    uint32_t g_pdevice;      // D3D_g_pDevice
+    uint32_t device_object;  // static g_Device = g_pdevice - DEVICE_SIZE
+    uint32_t push_segment;   // size the game passes to MakeRequestedSpace (BLACK: D3D_g_pDevice + 0xEB8; NGB: 0x3D9588, read before each call)
+    uint32_t render_state;   // D3D_g_RenderState[166] = g_pdevice + 0x10
+    uint32_t texture_state;  // D3D_g_DeferredTextureState[4][32]
+    uint32_t streams;        // D3D_g_Stream
+    uint32_t dirty_flags;    // g_pdevice + 8
+    uint32_t vs_constants;   // vertex shader constant shadow, slots 0-191 = render_state + 166*4 + 8 (D3DRS_DoNotCullUncompressed + 0xC)
+};
+inline constexpr DataLayout kLayoutBlack = {0x0027BFF8, 0x00279B50, 0x0027CEB0, 0x0027C008, 0x00279948, 0x00279758, 0x0027C000, 0x0027C2A8};
+inline constexpr DataLayout kLayoutNgb = {0x003D83C8, 0x003D5F20, 0x003D9588, 0x003D83D8, 0x003D5D10, 0x003D93A8, 0x003D83D0, 0x003D8678};
+extern DataLayout g_layout; // chosen at install_d3d_hooks from the build profile
 
-inline uint32_t *render_state() { return (uint32_t *)(uintptr_t)ADDR_RENDERSTATE; }
-inline uint32_t *texture_state(int stage) { return (uint32_t *)(uintptr_t)ADDR_TEXTURESTATE + stage * 32; }
+inline uint32_t *render_state() { return (uint32_t *)(uintptr_t)g_layout.render_state; }
+inline uint32_t *texture_state(int stage) { return (uint32_t *)(uintptr_t)g_layout.texture_state + stage * 32; }
 
 // Xbox D3DRENDERSTATETYPE for XDK 5849 (verified against the XbSymbolDatabase variable addresses).
 enum XRS : uint32_t {

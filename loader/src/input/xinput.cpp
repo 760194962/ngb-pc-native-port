@@ -309,6 +309,9 @@ void read_pad(uint32_t port, XGamepad &g)
         merge_stick(g.sThumbRX, g.sThumbRY, p.sThumbRX, p.sThumbRY);
     }
     apply_presses(g);
+    // Mouse look, the key bindings and the movie skip read BLACK's game objects (binding table 0x2F3BD4, the
+    // movie player at *0x2D45F0): BLACK only. Another build gets the pads and scripted presses until it has its own.
+    if (!g_cfg.profile || !g_cfg.profile->black) return;
     bool focus = GetForegroundWindow() == host3d::window();
     bool live = focus && host3d::mouse_captured();
     int raw_wheel;
