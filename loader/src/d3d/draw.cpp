@@ -14,6 +14,7 @@
 #include "perf.h"
 
 #include <wincodec.h>
+#include <intrin.h> // _AddressOfReturnAddress: MSVC 14.16 (VS2017) does not declare it via <windows.h>
 
 #include <cstring>
 #include <unordered_map>
