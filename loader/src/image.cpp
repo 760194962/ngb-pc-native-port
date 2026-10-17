@@ -3,6 +3,7 @@
 #include "kernel/xboxkrnl.h"
 #include "xbe.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <mutex>
@@ -42,17 +43,30 @@ bool image_map(const Xbe &xbe)
     // from it, via PEB->ImageBaseAddress = 0x10000). The XBE header must sit at 0x10000 too, so splice a
     // minimal PE header into it: "MZ" over the first two magic bytes, e_lfanew (offset 0x3C, inside the
     // XBE's RSA signature, which only the boot ROM checks) pointing at a copy of the exe's NT headers placed
-    // in the unused gap between the end of the XBE headers and the first section.
+    // in an unused gap of the image: between the end of the XBE headers and the first section (BLACK: 0x5C0
+    // bytes there), or else between two sections (Ninja Gaiden Black's headers leave only 0x13C bytes, but
+    // 0x450 bytes lie between the end of .XTLID and HANZI; no code references either gap, docs/02 §6).
     uint32_t nt_size = (uint32_t)(offsetof(IMAGE_NT_HEADERS32, OptionalHeader) + nt->FileHeader.SizeOfOptionalHeader +
                                   nt->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER));
     std::vector<uint8_t> nt_copy((uint8_t *)nt, (uint8_t *)nt + nt_size);
-    uint32_t first_section = 0xFFFFFFFF;
-    for (const auto &s : xbe.sections) first_section = s.vaddr < first_section ? s.vaddr : first_section;
-    uint32_t nt_off = (xbe.size_of_headers + 0xFF) & ~0xFFu;
-    if (xbe.base + nt_off + nt_size > first_section) {
-        logf("image: no room for the PE header between the XBE headers and the first section");
+    std::vector<XbeSection> by_va = xbe.sections;
+    std::sort(by_va.begin(), by_va.end(), [](const XbeSection &a, const XbeSection &b) { return a.vaddr < b.vaddr; });
+    std::vector<std::pair<uint32_t, uint32_t>> gaps; // [start, end) virtual addresses
+    gaps.push_back({(xbe.base + xbe.size_of_headers + 15) & ~15u, by_va.empty() ? xbe.base : by_va.front().vaddr});
+    for (size_t i = 0; i + 1 < by_va.size(); i++)
+        gaps.push_back({(by_va[i].vaddr + by_va[i].vsize + 15) & ~15u, by_va[i + 1].vaddr});
+    uint32_t nt_off = 0;
+    for (const auto &g : gaps) {
+        if (g.second > g.first && g.second - g.first >= nt_size) {
+            nt_off = g.first - xbe.base;
+            break;
+        }
+    }
+    if (!nt_off) {
+        logf("image: no gap of %u bytes between the XBE headers or sections for the PE header copy", nt_size);
         return false;
     }
+    logf("image: PE header copy (%u bytes) at 0x%08x", nt_size, xbe.base + nt_off);
 
     // From here on the exe's own headers and code are gone: only blackrt.dll code may run.
     DWORD old;

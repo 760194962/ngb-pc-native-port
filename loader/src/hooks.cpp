@@ -205,6 +205,29 @@ LONG CALLBACK vectored_handler(EXCEPTION_POINTERS *ep)
         c->Dr6 = 0;
         return EXCEPTION_CONTINUE_EXECUTION;
     }
+    // Privileged instructions in game or XAPI code that are no-ops in a user-mode process: wbinvd / invd (cache
+    // flushes, Ninja Gaiden Black's resource flush 0x31E0D0 after D3D_BlockOnResource), cli / sti (interrupt masking
+    // around XAPI's kernel-version workarounds). Skip them and count; the first few are logged with the site.
+    if (code == EXCEPTION_PRIV_INSTRUCTION && in_image(ep->ContextRecord->Eip)) {
+        CONTEXT *c = ep->ContextRecord;
+        const uint8_t *p = (const uint8_t *)(uintptr_t)c->Eip;
+        int len = 0;
+        const char *what = nullptr;
+        if (p[0] == 0x0F && p[1] == 0x09) { len = 2; what = "wbinvd"; }
+        else if (p[0] == 0x0F && p[1] == 0x08) { len = 2; what = "invd"; }
+        else if (p[0] == 0xFA) { len = 1; what = "cli"; }
+        else if (p[0] == 0xFB) { len = 1; what = "sti"; }
+        if (len) {
+            static std::atomic<uint32_t> skipped{0};
+            uint32_t n = ++skipped;
+            if (n <= 8 || g_cfg.trace) {
+                XThread *t = xthread_current_or_null();
+                logf("priv: %s at %08lx %s skipped (#%u), thread '%s'", what, c->Eip, where(c->Eip).c_str(), n, t ? t->name : "host");
+            }
+            c->Eip += len;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+    }
     switch (code) {
     case 0x40010006: // OutputDebugString
     case 0x4001000A:

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "build_profile.h"
 #include "d3d/dispatch.h"
 #include "fe/calls.h"
 #include "fe/pages.h"
@@ -24,9 +25,7 @@
 
 namespace {
 
-// The build the address tables (D3D hook list, expected fs patch count) were made for.
-const char kKnownXbeSha256[] = "df2739c372d254a90aeeccf5971d12097f22d89fbb90db021fda96dd4deb68f6";
-constexpr int kKnownFsPatchCount = 34;
+// The builds the address tables are made for are in build_profile.h (BLACK NTSC-U, Ninja Gaiden Black x2.1).
 
 HANDLE g_exit_event;
 std::atomic<int> g_exit_code{-1};
@@ -418,15 +417,20 @@ int run(void *reserve, unsigned reserve_size)
     logf("xbe: '%s' title id %08X, base 0x%08x size 0x%x entry 0x%08x, %zu sections, %zu kernel imports", title.c_str(),
          g_xbe.title_id, g_xbe.base, g_xbe.size_of_image, g_xbe.entry, g_xbe.sections.size(), g_xbe.kernel_imports().size());
     std::string hash = sha256_hex(g_xbe.data);
-    bool known_build = hash == kKnownXbeSha256;
+    const BuildProfile *profile = build_profile_for(hash.c_str());
+    bool known_build = profile != nullptr;
     g_cfg.known_build = known_build;
-    logc("xbe: sha256 %s (%s)", hash.c_str(), known_build ? "known NTSC-U build" : "UNKNOWN build");
+    g_cfg.profile = profile;
+    logc("xbe: sha256 %s (%s)", hash.c_str(), profile ? profile->name : "UNKNOWN build");
     if (!known_build && !g_cfg.force) {
-        startup_error("This default.xbe is not the NTSC-U build of BLACK that the port supports (its SHA-256 is " + hash +
-                      ", expected " + kKnownXbeSha256 + "). The port's address tables are for that build only; --force "
-                      "tries anyway.");
+        std::string known;
+        for (const BuildProfile *p : kProfiles) known += std::string("\n  ") + p->name + ": " + p->sha256;
+        startup_error("This default.xbe is not a build the port supports (its SHA-256 is " + hash + "). Supported:" + known +
+                      "\nThe port's address tables are for those builds only; --force tries anyway.");
         return 1;
     }
+    if (profile && profile->title_id != g_xbe.title_id)
+        logf("warning: profile %s expects title id %08X, the XBE says %08X", profile->name, profile->title_id, g_xbe.title_id);
 
     if (!g_cfg.symbols_path.empty()) symbols_load(g_cfg.symbols_path);
     if (!g_cfg.multicore) pin_to_one_cpu();
@@ -435,23 +439,26 @@ int run(void *reserve, unsigned reserve_size)
     g_image_mapped = true; // set before mapping: a partial copy also destroys the stub
     if (!image_map(g_xbe)) return 1;
     int patched = patch_fs_accesses(g_xbe);
-    if (known_build && patched != kKnownFsPatchCount)
-        logf("warning: expected %d fs patches for this build, made %d", kKnownFsPatchCount, patched);
+    if (profile && patched != profile->fs_patch_count)
+        logf("warning: expected %d fs patches for this build, made %d", profile->fs_patch_count, patched);
     if (!kernel_resolve_thunks(g_xbe)) return 1;
     if (!kfile_init()) return 1;
     install_crash_handlers();
     install_probes();
-    if (known_build && !xd3d::install_d3d_hooks()) return 1;
-    if (known_build) install_timing_patches();
-    if (known_build) install_mouselook_patches();
-    if (known_build) install_autoaim_patch();
-    if (known_build) install_fov_patch();
-    if (known_build) install_fe_calls();
-    if (known_build && g_cfg.pc_menus) { // the in-game PC SETTINGS pages, from the user's own front-end file
+    if (profile && !xd3d::install_d3d_hooks(*profile)) return 1;
+    bool black = profile && profile->black; // BLACK's own game patches and front-end work; nothing of it applies elsewhere
+    if (black) install_timing_patches();
+    if (black) install_mouselook_patches();
+    if (black) install_autoaim_patch();
+    if (black) install_fov_patch();
+    if (black) install_fe_calls();
+    if (black && g_cfg.pc_menus) { // the in-game PC SETTINGS pages, from the user's own front-end file
         std::wstring cache = g_cfg.port_dir + L"\\cache\\menus";
         if (fe_build_pages(host_full_path(g_cfg.game_dir), cache)) g_cfg.menu_cache = cache;
     }
-    if (g_cfg.fps == 60 && (!known_build || !install_60fps_patches())) g_cfg.fps = 30; // other builds: no 60 fps patches
+    // BLACK runs at 30 fps and needs patches for 60; Ninja Gaiden Black is a 60 fps game as it is.
+    if (black && g_cfg.fps == 60 && !install_60fps_patches()) g_cfg.fps = 30;
+    if (!profile) g_cfg.fps = 30;
     if (!kdpc_init()) {
         logf("could not start the kernel DPC/timer thread");
         return 1;

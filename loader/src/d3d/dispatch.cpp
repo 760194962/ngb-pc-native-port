@@ -1,5 +1,6 @@
 #include "d3d/dispatch.h"
 
+#include "build_profile.h"
 #include "d3d/draw.h"
 #include "hooks.h"
 #include "image.h"
@@ -19,8 +20,9 @@ struct LibFunc {
     uint32_t addr, size;
     const char *name;
 };
-// Every function in the XBE sections whose library is replaced (D3D, DSOUND): each one is either
+// Every function in the XBE sections whose library is replaced (D3D, DSOUND, XPP): each one is either
 // replaced by HLE or stops the run on first call, so library code never touches GPU/APU hardware.
+// One set of tables per supported build (build_profile.h); the loader picks the set by the XBE's hash.
 const LibFunc kD3D[] = {
 #include "d3d_functions.inc"
 };
@@ -30,8 +32,17 @@ const LibFunc kDSound[] = {
 const LibFunc kXpp[] = {
 #include "xpp_functions.inc"
 };
+const LibFunc kNgbD3D[] = {
+#include "ngb/d3d_functions.inc"
+};
+const LibFunc kNgbDSound[] = {
+#include "ngb/dsound_functions.inc"
+};
+const LibFunc kNgbXpp[] = {
+#include "ngb/xpp_functions.inc"
+};
 
-std::vector<LibFunc> g_funcs; // kD3D + kDSound, sorted by address
+std::vector<LibFunc> g_funcs; // the build's D3D + DSOUND + XPP tables, sorted by address
 std::vector<bool> g_int3_hook;
 std::atomic<bool> g_unimplemented_hit{false};
 
@@ -63,7 +74,8 @@ extern "C" void __stdcall blackrt_lib_unimplemented(uint32_t index, const uint32
     if (g_unimplemented_hit.exchange(true)) Sleep(INFINITE);
     const LibFunc &f = g_funcs[index];
     XThread *t = xthread_current_or_null();
-    const char *lib = f.addr >= 0x27cf20 ? "XPP" : f.addr >= 0x268880 ? "D3D" : "DSOUND";
+    const XbeSection *sec = image_xbe() ? image_xbe()->section_containing(f.addr) : nullptr;
+    const char *lib = sec ? sec->name.c_str() : "?";
     logf("==== UNIMPLEMENTED %s: %s (0x%08x), thread '%s'", lib, f.name, f.addr, t ? t->name : "host");
     logf("    called from %08x %s", frame[0], sym_name(frame[0]).c_str());
     logf("    eax=%08x ecx=%08x edx=%08x  stack args: %08x %08x %08x %08x %08x %08x", eax, ecx, edx, frame[1], frame[2], frame[3],
@@ -185,26 +197,45 @@ LONG CALLBACK int3_handler(EXCEPTION_POINTERS *ep)
 
 namespace xd3d {
 
-bool install_d3d_hooks()
+bool install_d3d_hooks(const BuildProfile &profile)
 {
-    g_funcs.assign(std::begin(kD3D), std::end(kD3D));
-    g_funcs.insert(g_funcs.end(), std::begin(kDSound), std::end(kDSound));
-    g_funcs.insert(g_funcs.end(), std::begin(kXpp), std::end(kXpp));
+    if (profile.black) {
+        g_funcs.assign(std::begin(kD3D), std::end(kD3D));
+        g_funcs.insert(g_funcs.end(), std::begin(kDSound), std::end(kDSound));
+        g_funcs.insert(g_funcs.end(), std::begin(kXpp), std::end(kXpp));
+    } else {
+        g_funcs.assign(std::begin(kNgbD3D), std::end(kNgbD3D));
+        g_funcs.insert(g_funcs.end(), std::begin(kNgbDSound), std::end(kNgbDSound));
+        g_funcs.insert(g_funcs.end(), std::begin(kNgbXpp), std::end(kNgbXpp));
+    }
     std::sort(g_funcs.begin(), g_funcs.end(), [](const LibFunc &a, const LibFunc &b) { return a.addr < b.addr; });
     g_int3_hook.assign(g_funcs.size(), false);
 
+    // The HLE tables hold BLACK's addresses; for another build nothing matches and every library function stops on
+    // its first call, which is the state the port is brought up from (one function at a time, from the log).
     std::vector<Hle> all;
-    for (auto table : {hle_device_table, hle_resource_table, hle_draw_table, hle_dsound_table, hle_input_table}) {
-        size_t n = 0;
-        const Hle *t = table(&n);
-        all.insert(all.end(), t, t + n);
+    if (profile.black) {
+        for (auto table : {hle_device_table, hle_resource_table, hle_draw_table, hle_dsound_table, hle_input_table}) {
+            size_t n = 0;
+            const Hle *t = table(&n);
+            all.insert(all.end(), t, t + n);
+        }
+    } else {
+        for (auto table : {hle_input_table_ngb}) {
+            size_t n = 0;
+            const Hle *t = table(&n);
+            all.insert(all.end(), t, t + n);
+        }
+        logf("hooks: %s: %zu HLE entries; every other function in the hooked sections stops on first call", profile.name, all.size());
     }
     // C++ static initializers of the libraries (run by _cinit before main) only set up globals: keep them.
-    // Initializer tables of this build: 0x2964F0-0x296B6C (C++) and 0x296B70-0x296B84 (C).
+    // The initializer table ranges come from the build profile (read from XAPI's _rtinit / _cinit).
     std::vector<uint32_t> initializers;
-    for (uint32_t p = 0x2964F0; p < 0x296B84; p += 4) {
-        uint32_t fn = *(uint32_t *)(uintptr_t)p;
-        if (fn && fn != 0xFFFFFFFF) initializers.push_back(fn);
+    for (const InitTableRange &r : profile.init_tables) {
+        for (uint32_t p = r.begin; p < r.end; p += 4) {
+            uint32_t fn = *(uint32_t *)(uintptr_t)p;
+            if (fn && fn != 0xFFFFFFFF) initializers.push_back(fn);
+        }
     }
     int replaced = 0, stopped = 0, traps = 0, native = 0;
     for (size_t i = 0; i < g_funcs.size(); i++) {
@@ -254,15 +285,15 @@ bool install_d3d_hooks()
     for (const Hle &r : all) {
         bool found = false;
         for (const LibFunc &f : g_funcs) found |= f.addr == r.addr;
-        if (!found && r.impl) { // replacement outside the library sections
+        if (!found && r.impl) { // replacement outside the library sections (BLACK: InsertFence-style LTCG strays)
             write_jmp((uint8_t *)(uintptr_t)r.addr, make_thunk(r));
             replaced++;
         }
     }
     AddVectoredExceptionHandler(1, int3_handler);
     FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
-    logf("hooks: D3D+DSOUND: %d functions replaced by HLE, %d run natively, %d stop on first call (%d via int3)", replaced, native,
-         stopped, traps);
+    logf("hooks: D3D+DSOUND+XPP (%zu functions): %d replaced by HLE, %d run natively, %d stop on first call (%d via int3)",
+         g_funcs.size(), replaced, native, stopped, traps);
     return true;
 }
 

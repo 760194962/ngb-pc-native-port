@@ -161,4 +161,22 @@ extern uint8_t XboxAlternateSignatureKeys[16][16];
 extern XANSI_STRING XeImageFileName;
 extern uint8_t IdexChannelObject[256];
 
+// Imports BLACK does not have, used by Ninja Gaiden Black (k_ngb.cpp): implemented where the game's own code
+// (.text) calls them; the ones only XNET / XONLINE / XPP's MU driver reach are logging stubs in ktable.cpp.
+void __stdcall DbgBreakPoint();
+void *__stdcall MmCreateKernelStack(uint32_t NumberOfBytes, BOOLEAN DebuggerThread);
+void __stdcall MmDeleteKernelStack(void *StackBase, void *StackLimit);
+uint32_t __stdcall KeSetDisableBoostThread(void *Thread, BOOLEAN Disable);
+LARGE_INTEGER __stdcall KeQueryPerformanceCounter();
+LARGE_INTEGER __stdcall KeQueryPerformanceFrequency();
+BOOLEAN __stdcall HalIsResetOrShutdownPending();
+uint32_t __stdcall PhyGetLinkState(BOOLEAN Verify);
+NTSTATUS __stdcall PhyInitialize(BOOLEAN ForceReset, void *Param2);
+extern volatile uint32_t KeTickCount; // milliseconds since boot; advanced by the DPC thread
+extern uint8_t XboxLANKey[6];
+extern uint8_t XePublicKeyData[284];
+extern XANSI_STRING HalDiskModelNumber;
+extern XANSI_STRING HalDiskSerialNumber;
+void ktick_update(); // called by the DPC thread each time it wakes
+
 } // namespace xk

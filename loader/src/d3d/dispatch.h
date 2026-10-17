@@ -4,6 +4,8 @@
 
 #include "common.h"
 
+struct BuildProfile; // build_profile.h
+
 namespace xd3d {
 
 // One replacement. `params` lists where each parameter of the __stdcall implementation comes from, in
@@ -25,8 +27,10 @@ const Hle *hle_resource_table(size_t *count);
 const Hle *hle_draw_table(size_t *count);
 const Hle *hle_dsound_table(size_t *count); // audio/dsound.cpp
 const Hle *hle_input_table(size_t *count);  // input/xinput.cpp
+// Ninja Gaiden Black x2.1 tables (same implementations where the semantics match, the game's own addresses).
+const Hle *hle_input_table_ngb(size_t *count);
 
-bool install_d3d_hooks();
+bool install_d3d_hooks(const ::BuildProfile &profile);
 
 } // namespace xd3d
 

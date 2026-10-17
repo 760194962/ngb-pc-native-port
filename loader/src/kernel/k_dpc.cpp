@@ -26,7 +26,8 @@ void __stdcall dpc_worker(void *)
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
     for (;;) {
         std::vector<std::pair<XKDPC *, int64_t>> run;
-        DWORD wait_ms = INFINITE;
+        DWORD wait_ms = 4; // KeTickCount (k_ngb.cpp) is refreshed on every pass: never sleep for long
+        xk::ktick_update();
         EnterCriticalSection(&g_q);
         int64_t now = ktime_now_100ns();
         for (size_t i = 0; i < g_timers.size();) {

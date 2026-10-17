@@ -35,7 +35,10 @@ constexpr NTSTATUS XSTATUS_INVALID_DEVICE_REQUEST = (NTSTATUS)0xC0000010;
 
 #define NT_OK(s) ((NTSTATUS)(s) >= 0)
 
+struct BuildProfile; // build_profile.h: per-build facts (hash, fs patch count, initializer tables, hooked sections)
+
 struct Config {
+    const BuildProfile *profile = nullptr; // the build default.xbe matched (main.cpp); nullptr with --force on an unknown build
     std::wstring xbe_path;     // game\default.xbe
     std::wstring game_dir;     // directory holding default.xbe = \Device\CdRom0
     std::wstring port_dir;     // black.exe's folder: the port's own files (savedata, black.ini, black.log, cache, perf)

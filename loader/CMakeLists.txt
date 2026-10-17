@@ -48,6 +48,7 @@ add_library(blackrt SHARED
   src/kernel/k_file.cpp
   src/kernel/k_rtl.cpp
   src/kernel/k_misc.cpp
+  src/kernel/k_ngb.cpp
   src/d3d/dispatch.cpp
   src/d3d/device.cpp
   src/d3d/host.cpp

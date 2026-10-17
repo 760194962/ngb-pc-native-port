@@ -24,9 +24,50 @@ struct KExport {
 #define FC(ord, name) {ord, #name, K_CDECL, 0, (void *)&xk::name}
 #define V(ord, name) {ord, #name, K_VAR, 0, (void *)&xk::name}
 #define STUB(ord, name, argc) {ord, #name, K_STD, argc, nullptr}
+#define STUBF(ord, name, argc) {ord, #name, K_FAST, argc, nullptr}
 
-// Every ordinal default.xbe imports (115), plus room for more. Argument counts are from the Xbox kernel ABI.
+// Every ordinal BLACK's default.xbe imports (115) and the 36 more Ninja Gaiden Black imports (docs/02 §3; the ones
+// its own code calls are implemented in k_ngb.cpp, the rest are logging stubs). Argument counts are from the
+// Xbox kernel ABI (dword slots; fastcall counts ecx/edx as the first two).
 const KExport kExports[] = {
+    // --- Ninja Gaiden Black additions ---
+    F(5, DbgBreakPoint, 0),
+    V(41, HalDiskModelNumber),
+    V(42, HalDiskSerialNumber),
+    STUB(62, IoBuildSynchronousFsdRequest, 7),
+    STUB(65, IoCreateDevice, 6),
+    STUB(74, IoInvalidDeviceRequest, 2),
+    STUB(81, IoStartNextPacket, 2),
+    STUB(83, IoStartPacket, 4),
+    STUB(84, IoSynchronousDeviceIoControlRequest, 8),
+    STUB(85, IoSynchronousFsdRequest, 5),
+    STUBF(86, IofCallDriver, 2),
+    F(126, KeQueryPerformanceCounter, 0),
+    F(127, KeQueryPerformanceFrequency, 0),
+    F(144, KeSetDisableBoostThread, 2),
+    STUB(150, KeSetTimerEx, 5), // Timer, DueTime (two dwords), Period, Dpc
+    V(156, KeTickCount),
+    STUB(158, KeWaitForMultipleObjects, 8),
+    F(169, MmCreateKernelStack, 2),
+    F(170, MmDeleteKernelStack, 2),
+    STUB(181, MmQueryStatistics, 1),
+    STUB(195, NtDeleteFile, 1),
+    STUB(228, NtSetSystemTime, 2),
+    STUB(247, ObReferenceObjectByName, 5),
+    F(252, PhyGetLinkState, 1),
+    F(253, PhyInitialize, 2),
+    STUB(338, XcRC4Key, 3),
+    STUB(339, XcRC4Crypt, 3),
+    STUB(344, XcVerifyPKCS1Signature, 3),
+    STUB(345, XcModExp, 5),
+    STUB(346, XcDESKeyParity, 2),
+    STUB(347, XcKeyTable, 3),
+    STUB(349, XcBlockCryptCBC, 7),
+    V(353, XboxLANKey),
+    V(355, XePublicKeyData),
+    F(358, HalIsResetOrShutdownPending, 0),
+    STUB(359, IoMarkIrpMustComplete, 1),
+    // --- BLACK's imports ---
     F(1, AvGetSavedDataAddress, 0),
     F(2, AvSendTVEncoderOption, 4),
     F(3, AvSetDisplayMode, 6),
