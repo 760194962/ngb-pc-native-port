@@ -135,6 +135,12 @@ XThread *xthread_from_kthread(const void *kthread)
     return nullptr;
 }
 
+void xthread_mark_terminated(XThread *t, NTSTATUS exit_status)
+{
+    *(uint32_t *)(t->ethread + ETHREAD_EXIT_STATUS) = (uint32_t)exit_status;
+    t->ethread[KTHREAD_HAS_TERMINATED] = 1;
+}
+
 XThread *xthread_from_handle(HANDLE h)
 {
     if (h == (HANDLE)(LONG_PTR)-2) return xthread_current();

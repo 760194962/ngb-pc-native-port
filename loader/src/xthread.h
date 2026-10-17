@@ -23,6 +23,8 @@ enum XSlot { XSLOT_TLS_ARRAY, XSLOT_PRCB, XSLOT_IRQL, XSLOT_THREAD, XSLOT_DPC_AC
 constexpr uint32_t KTHREAD_TLS_DATA = 0x28;        // KTHREAD.TlsData
 constexpr uint32_t ETHREAD_UNIQUE_THREAD = 0x12C;  // ETHREAD.UniqueThread (XAPI GetCurrentThreadId)
 constexpr uint32_t ETHREAD_START_ADDRESS = 0x130;  // ETHREAD.StartAddress
+constexpr uint32_t KTHREAD_HAS_TERMINATED = 0x04;  // KTHREAD.HasTerminated (byte): XAPI GetExitCodeThread tests it
+constexpr uint32_t ETHREAD_EXIT_STATUS = 0x120;    // ETHREAD.ExitStatus, read when HasTerminated (else STILL_ACTIVE)
 constexpr uint32_t KPRCB_DEBUG_MONITOR = 0x250;    // checked for a debugger; 0 = none
 
 struct XThread {
@@ -42,6 +44,9 @@ struct XThread {
     char name[32] = {};
 };
 
+// The thread has ended: HasTerminated and ExitStatus in its ETHREAD, which XAPI's GetExitCodeThread and
+// WaitForSingleObject-on-a-thread paths read (Ninja Gaiden Black polls a worker thread's exit this way).
+void xthread_mark_terminated(XThread *t, NTSTATUS exit_status);
 bool xthread_init_slots();                 // allocate the TLS slots; call once before patching
 uint32_t xthread_slot_fs_offset(XSlot s);  // fs displacement of a slot
 XThread *xthread_create_context(uint32_t tls_size);

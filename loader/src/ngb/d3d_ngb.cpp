@@ -96,6 +96,10 @@ uint32_t __stdcall IsResourceBusy(Resource *pResource)
     return 0;
 }
 
+// D3D_BlockOnResource (eax = resource): wait until the GPU is done with it before the CPU writes it. The host
+// copies every draw's data when it is submitted, so there is nothing to wait for (BLACK's BlockUntilNotBusy).
+void __stdcall BlockOnResource(Resource *pResource) { DTRACE("%p", pResource); }
+
 // D3DResource_GetType (ecx = resource): D3DRESOURCETYPE from the header's type bits, textures split by dimension
 // (Xbox: SURFACE 1, VOLUME 2, TEXTURE 3, VOLUMETEXTURE 4, CUBETEXTURE 5, VERTEXBUFFER 6, INDEXBUFFER 7, PUSHBUFFER 8,
 // PALETTE 9, FIXUP 10).
@@ -282,6 +286,7 @@ static const Hle kTable[] = {
     H(0x003c8f10, D3D_UpdateFogState, "", false),
     H(0x003ca0e0, IsResourceBusy, "ecx", true),
     H(0x003ca060, GetType, "ecx", true),
+    H(0x003cadf0, BlockOnResource, "eax", false),
     H(0x003ca1e0, CreateSurface2, "s s edx", true),
     H(0x003cecf0, ComputeTextureHeader, "eax edx s s s s s s s s", true),
     H(0x003c88a0, LoadVertexShader, "eax s", false),

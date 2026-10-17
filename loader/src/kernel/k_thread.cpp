@@ -21,6 +21,7 @@ DWORD WINAPI xbox_thread_main(void *param)
     else
         ((XPKSTART_ROUTINE)(uintptr_t)t->start_routine)((void *)(uintptr_t)t->start_context);
     logf("thread '%s' returned", t->name);
+    xthread_mark_terminated(t, 0);
     return 0;
 }
 
@@ -90,6 +91,7 @@ void __stdcall PsTerminateSystemThread(NTSTATUS ExitStatus)
     XThread *t = xthread_current();
     logf("[k] PsTerminateSystemThread(0x%08x) thread '%s'", ExitStatus, t->name);
     if (t->holds_dispatch_lock) xthread_lower_irql(0);
+    xthread_mark_terminated(t, ExitStatus);
     ExitThread((DWORD)ExitStatus);
 }
 
