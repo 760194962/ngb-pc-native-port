@@ -3,6 +3,7 @@
 // focus: the mouse rotates the view directly (input/mouselook.cpp; a click in the window captures the mouse),
 // keys and mouse buttons are bound to the game's actions (input/bindings.cpp, PC SETTINGS > CONTROLS > KEY BINDINGS).
 #include "audio/output.h"
+#include "build_profile.h"
 #include "d3d/dispatch.h"
 #include "d3d/draw.h"
 #include "d3d/host.h"
@@ -331,12 +332,42 @@ BOOL __stdcall XGetDeviceChanges(void *DeviceType, uint32_t *pdwInsertions, uint
     DTRACE("%p", DeviceType);
     *pdwInsertions = 0;
     *pdwRemovals = 0;
-    if (DeviceType == (void *)(uintptr_t)0x0027cf4c && !g_reported_insertion) { // XDEVICE_TYPE_GAMEPAD
+    bool gamepad = g_cfg.profile && DeviceType == (void *)(uintptr_t)g_cfg.profile->xdevice_type_gamepad; // XDEVICE_TYPE_GAMEPAD
+    if (gamepad && !g_reported_insertion) {
         g_reported_insertion = true;
         *pdwInsertions = 1;
         return TRUE;
     }
     return FALSE;
+}
+
+// Ports with a device of this type right now: port 0 for gamepads. It does not consume the insertion
+// notification: the game asks XGetDevices first and XGetDeviceChanges after, and only the latter lets it open the
+// pad (genma-pc's finding; Ninja Gaiden Black calls both).
+uint32_t __stdcall XGetDevices(void *DeviceType)
+{
+    DTRACE("%p", DeviceType);
+    bool gamepad = g_cfg.profile && DeviceType == (void *)(uintptr_t)g_cfg.profile->xdevice_type_gamepad;
+    return gamepad ? 1u : 0u;
+}
+
+uint32_t __stdcall XGetDeviceEnumerationStatus()
+{
+    DTRACE("");
+    return 0; // XDEVICE_ENUMERATION_IDLE
+}
+
+// XINPUT_CAPABILITIES: {BYTE SubType; WORD Reserved; XINPUT_GAMEPAD In; XINPUT_RUMBLE Out}: In/Out hold the
+// supported fields with every bit set; SubType 1 = XINPUT_DEVSUBTYPE_GC_GAMEPAD (the Controller S).
+uint32_t __stdcall XInputGetCapabilities(Device *h, uint8_t *pCapabilities)
+{
+    DTRACE("%p, %p", h, pCapabilities);
+    if (!h || h->magic != DEV_MAGIC) return ERROR_DEVICE_NOT_CONNECTED;
+    memset(pCapabilities, 0, 4 + sizeof(XGamepad) + 4);
+    pCapabilities[0] = 1;
+    memset(pCapabilities + 4, 0xFF, sizeof(XGamepad)); // packed after SubType + Reserved (4 bytes)
+    memset(pCapabilities + 4 + sizeof(XGamepad), 0xFF, 4);
+    return ERROR_SUCCESS;
 }
 
 HANDLE __stdcall XInputOpen(void *DeviceType, uint32_t dwPort, uint32_t dwSlot, void *pPollingParameters)
@@ -397,6 +428,7 @@ uint32_t __stdcall XInputSetState(Device *h, uint8_t *pFeedback)
 
 #define H(addr, fn, params, ret) {addr, #fn, (void *)&fn, params, ret}
 
+// BLACK NTSC-U (addresses from black-pc's notes/functions.csv).
 static const xd3d::Hle kTable[] = {
     H(0x0027dd24, XInitDevices, "s s", false),
     H(0x0027dd29, XGetDeviceChanges, "s s s", true),
@@ -406,6 +438,20 @@ static const xd3d::Hle kTable[] = {
     H(0x0027de6b, XInputSetState, "s s", true),
 };
 
+// NINJA GAIDEN BLACK x2.1: the entry points its code calls (docs/02 §2; 0x3DA5D4 is XAPI's `jmp XInitDevices`
+// thunk, the body 0x3D996F is what XbSymbolDatabase names). All stdcall with stack parameters (XbSymbolDatabase).
+static const xd3d::Hle kNgbTable[] = {
+    H(0x003da5d4, XInitDevices, "s s", false),
+    H(0x003da5d9, XGetDevices, "s", true),
+    H(0x003da5fb, XGetDeviceChanges, "s s s", true),
+    H(0x003dad86, XGetDeviceEnumerationStatus, "", true),
+    H(0x003db931, XInputOpen, "s s s s", true),
+    H(0x003db987, XInputClose, "s", false),
+    H(0x003db993, XInputGetCapabilities, "s s", true),
+    H(0x003dbb6b, XInputGetState, "s s", true),
+    H(0x003dbbde, XInputSetState, "s s", true),
+};
+
 } // namespace xinput
 
 namespace xd3d {
@@ -413,5 +459,10 @@ const Hle *hle_input_table(size_t *count)
 {
     *count = sizeof xinput::kTable / sizeof xinput::kTable[0];
     return xinput::kTable;
+}
+const Hle *hle_input_table_ngb(size_t *count)
+{
+    *count = sizeof xinput::kNgbTable / sizeof xinput::kNgbTable[0];
+    return xinput::kNgbTable;
 }
 } // namespace xd3d
