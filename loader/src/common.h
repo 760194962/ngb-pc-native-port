@@ -109,6 +109,7 @@ struct Config {
     int probe_count = 0;
     unsigned debug_draws = 0;  // --debug-draws: describe the first N draws
     unsigned debug_frame = 0;  // --debug-frame: describe every draw of this frame
+    bool no_fog = false;       // --no-fog: never enable host fog (diagnosis of dark scenes)
     std::wstring press_script; // --press: "frame:button,frame:button" scripted controller input
     std::wstring perf_at;      // --perf-at S:D: record performance for D seconds from S seconds after the first frame
     std::wstring memdump;      // --memdump [*]ADDR:SIZE:F1,F2,...: raw memory to the --screenshot dir at those frames

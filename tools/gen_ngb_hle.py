@@ -61,8 +61,14 @@ def main():
             if not s:
                 missing_syms.append((short, api))
                 continue
-            # psh = one stack dword, psh2 = a 64-bit stack value (two dwords for the thunk), else a register
-            p = ' '.join('s' if q['where'] == 'psh' else 's s' if q['where'] == 'psh2' else q['where'] for q in s['params'])
+            # psh = one stack dword, psh2 = a 64-bit stack value (two dwords for the thunk), else a register.
+            # XbSymbolDatabase marks register parameters only reliably in LTCG names (e.g. _4__LTCG_eax1); for a plain
+            # stdcall name it may still say "eax" (D3DDevice_DrawIndexedVertices: "eax VertexCount" in both games, yet
+            # the function reads three stack arguments and BLACK's table uses "s s s"), so keep BLACK's sources there.
+            if '__LTCG' in s['name']:
+                p = ' '.join('s' if q['where'] == 'psh' else 's s' if q['where'] == 'psh2' else q['where'] for q in s['params'])
+            else:
+                p = params
             if len(p.split()) != len(params.split()):
                 # LTCG dropped or added parameters: BLACK's implementation cannot take the call as is (ngb/d3d_ngb.cpp wraps it)
                 print('  needs a wrapper (parameter count %d, BLACK %d): %s at 0x%08x' % (len(p.split()), len(params.split()), s['name'], s['addr']))

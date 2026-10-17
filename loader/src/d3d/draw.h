@@ -1,6 +1,20 @@
 // Draw paths: immediate mode and inline arrays from the push buffer, plus the HLE Draw* functions.
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
+namespace xd3d {
+// The last indexed draws handed to the host runtime (ring of 4, newest at g_last_draw_next - 1), for crash dumps.
+struct LastDraw {
+    const void *verts, *src, *conv;
+    size_t bytes, conv_bytes;
+    uint32_t stride, mn, mx, nidx, prim;
+};
+extern LastDraw g_last_draws[4];
+extern unsigned g_last_draw_next;
+} // namespace xd3d
+
 #include "common.h"
 
 #include <d3d9.h>

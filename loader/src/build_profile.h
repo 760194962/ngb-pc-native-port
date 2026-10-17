@@ -22,6 +22,8 @@ struct BuildProfile {
     InitTableRange init_tables[3]; // _rtinit, _cinit C and C++ tables (XAPI 5849 layout); unused = {0, 0}
     const char *hooked_sections[8]; // library sections whose every function is HLE or stop-on-first-call; nullptr-terminated
     uint32_t xdevice_type_gamepad; // XAPI's g_DeviceType_Gamepad descriptor (XbSymbolDatabase), the XDEVICE_TYPE_GAMEPAD value
+    uint32_t switch_to_fiber;      // XAPI SwitchToFiber, replaced so Windows knows the fiber stacks (fiber.cpp); 0 = no fibers
+    uint32_t fiber_tls_index;      // the dword holding XAPI's fiber TLS index (read by SwitchToFiber's first instruction)
 };
 
 // BLACK (Criterion, NTSC-U): numbers from black-pc NOTES.md.
@@ -34,6 +36,8 @@ inline const BuildProfile kProfileBlack = {
     {{0x2964F0, 0x296B6C}, {0x296B70, 0x296B84}, {0, 0}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x0027CF4C,
+    0,
+    0,
 };
 
 // NINJA GAIDEN BLACK vb-zh-x2.1 (title 5443000D, XDK 5849): numbers from docs/02_静态分析.md of the port project.
@@ -51,6 +55,8 @@ inline const BuildProfile kProfileNgbHurricaneX21 = {
     {{0x4162C0, 0x4162CC}, {0x4162D0, 0x41634C}, {0x416350, 0x416368}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x003D9694,
+    0x0032A293,
+    0x0045E84C,
 };
 
 inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21};

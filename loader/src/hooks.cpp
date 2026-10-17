@@ -1,5 +1,7 @@
 #include "hooks.h"
 
+#include "d3d/draw.h"
+
 #include "image.h"
 #include "xbe.h"
 #include "xthread.h"
@@ -39,12 +41,17 @@ std::string where(uint32_t addr)
 }
 
 
+thread_local int t_probing; // > 0 while safe_read is reading: its faults are expected and handled by its __except
+
 bool safe_read(const uint32_t *p, uint32_t *out)
 {
+    t_probing++;
     __try {
         *out = *p;
+        t_probing--;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        t_probing--;
         return false;
     }
 }
@@ -54,8 +61,12 @@ bool safe_read(const uint32_t *p, uint32_t *out)
 // Return addresses on the stack: values inside the image preceded by a call instruction.
 void log_stack_trace(const uint32_t *esp)
 {
-    // Stay inside the current thread's stack (reading past its top faults).
-    log_stack_trace_ex(esp, (const uint32_t *)((NT_TIB *)NtCurrentTeb())->StackBase);
+    // Stay inside the current thread's stack (reading past its top faults). On a stack Windows does not know (an
+    // XAPI fiber's, see fiber.cpp) walk 16 KB from esp; safe_read stops at the first unmapped page.
+    NT_TIB *tib = (NT_TIB *)NtCurrentTeb();
+    const uint32_t *top = (const uint32_t *)tib->StackBase;
+    if (esp < (const uint32_t *)tib->StackLimit || esp >= top) top = esp + 0x1000;
+    log_stack_trace_ex(esp, top);
 }
 
 void log_stack_trace_ex(const uint32_t *esp, const uint32_t *top)
@@ -70,16 +81,23 @@ void log_stack_trace_ex(const uint32_t *esp, const uint32_t *top)
         rt_lo = (uint32_t)(uintptr_t)m;
         rt_hi = rt_lo + nt->OptionalHeader.SizeOfImage;
     }
+    // Return addresses into the game image, blackrt.dll and (after those two, so a host-library crash still shows
+    // the port frame that called into it) any other loaded module. 16 KB of stack covers d3d9's deepest paths.
     int found = 0;
-    for (int i = 0; i < 512 && found < 16 && esp + i < top; i++) {
+    for (int i = 0; i < 4096 && found < 24 && esp + i < top; i++) {
         uint32_t v;
         if (!safe_read(esp + i, &v)) break;
-        if (!(in_image(v) && v >= x->base + 8) && !(v >= rt_lo + 8 && v < rt_hi)) continue;
-        const uint8_t *p = (const uint8_t *)(uintptr_t)v;
-        bool call = p[-5] == 0xE8 || (p[-2] == 0xFF && (p[-1] & 0x38) == 0x10) || (p[-3] == 0xFF && (p[-2] & 0x38) == 0x10) ||
-                    (p[-6] == 0xFF && (p[-5] & 0x38) == 0x10);
+        bool ours = (in_image(v) && v >= x->base + 8) || (v >= rt_lo + 8 && v < rt_hi);
+        if (!ours && (v < 0x10000 || module_offset(v).empty())) continue;
+        uint32_t lo, hi; // the 8 bytes before the candidate return address
+        if (!safe_read((const uint32_t *)(uintptr_t)(v - 8), &lo) || !safe_read((const uint32_t *)(uintptr_t)(v - 4), &hi)) continue;
+        uint8_t p[8];
+        memcpy(p, &lo, 4);
+        memcpy(p + 4, &hi, 4);
+        bool call = p[3] == 0xE8 || (p[6] == 0xFF && (p[7] & 0x38) == 0x10) || (p[5] == 0xFF && (p[6] & 0x38) == 0x10) ||
+                    (p[2] == 0xFF && (p[3] & 0x38) == 0x10);
         if (!call) continue;
-        logf("    ret [esp+0x%03x] %08x %s", i * 4, v, where(v).c_str());
+        logf("    ret [esp+0x%04x] %08x %s", i * 4, v, where(v).c_str());
         found++;
     }
 }
@@ -127,6 +145,11 @@ void dump_exception(EXCEPTION_POINTERS *ep, const char *kind)
         logf("    code: %02x %02x %02x %02x %02x %02x %02x %02x", p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
     }
     log_stack_trace((const uint32_t *)(uintptr_t)c->Esp);
+    for (unsigned i = 0; i < 4 && i < xd3d::g_last_draw_next; i++) {
+        const xd3d::LastDraw &d = xd3d::g_last_draws[(xd3d::g_last_draw_next - 1 - i) % 4];
+        logf("    draw -%u: prim %u, %u indices %u..%u, stride %u: host reads %p+0x%zx (vertex-0 pointer %p); converted block %p+0x%zx", i,
+             d.prim, d.nidx, d.mn, d.mx, d.stride, d.src, d.bytes, d.verts, d.conv, d.conv_bytes);
+    }
 }
 
 uint8_t g_probe_orig[16];
@@ -237,6 +260,7 @@ LONG CALLBACK vectored_handler(EXCEPTION_POINTERS *ep)
         return EXCEPTION_CONTINUE_SEARCH;
     }
     if (code < 0x80000000) return EXCEPTION_CONTINUE_SEARCH;
+    if (t_probing > 0) return EXCEPTION_CONTINUE_SEARCH; // safe_read's own probe
     static std::atomic<int> logged{0};
     if (logged++ < 20) dump_exception(ep, "first-chance");
     return EXCEPTION_CONTINUE_SEARCH;

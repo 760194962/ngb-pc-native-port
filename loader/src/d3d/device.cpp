@@ -2,6 +2,7 @@
 // the game reads directly (device object fields, render/texture state arrays) up to date and drives the
 // host Direct3D 9 device.
 #include "d3d/device.h"
+#include "build_profile.h"
 
 #include "d3d/dispatch.h"
 #include "d3d/draw.h"
@@ -1025,12 +1026,28 @@ void pace_swap()
     }
     if (n) {
         uint32_t target = last_vb + n, now = g_vblank_count.load();
-        if (now >= target && !(iv & 0x80000000)) target = now + 1;
+        // A plain interval (no _OR_IMMEDIATE bit) flips at the next vblank even when the frame is late: BLACK's loop is
+        // paced by that. Ninja Gaiden Black paces itself (it waits for its vblank callback each frame, interval ONE), so
+        // forcing another vblank here made every frame take two (genma-pc saw the same, docs/04): for it the flip is
+        // immediate once the interval has passed.
+        bool black = g_cfg.profile && g_cfg.profile->black;
+        if (now >= target && !(iv & 0x80000000) && black) target = now + 1;
+        if (g_trace_d3d) logf("[d3d] pace_swap: interval 0x%x n %u last_vb %u now %u target %u", iv, n, last_vb, now, target);
         while (g_vblank_count.load() < target) WaitForSingleObject(g_vblank_wake, 4); // Sleep(1) polling woke 0-2 ms late
     }
     uint32_t now_vb = g_vblank_count.load();
     perf::pace_end(now_vb - last_vb, n ? n : 1);
     last_vb = now_vb;
+}
+
+// D3DDevice_BlockUntilVerticalBlank: block until the *next* emulated vblank, whatever the vblank KEVENT's state. The
+// event is a notification event that the vblank thread sets and nothing resets, so a wait on it returns at once;
+// Ninja Gaiden Black's worker threads (0x332FF0, 0x333070) call BlockUntilVerticalBlank in a loop and spun at
+// thousands of iterations a second on that (docs/04).
+void wait_next_vblank()
+{
+    uint32_t target = g_vblank_count.load() + 1;
+    while (g_vblank_count.load() < target) WaitForSingleObject(g_vblank_wake, 4);
 }
 
 // Debug (--memdump "[*]ADDR:SIZE:F1,F2"): save SIZE bytes at ADDR (or at the pointer stored at ADDR) at the
@@ -1353,6 +1370,19 @@ HRESULT __stdcall D3DDevice_SetRenderTarget(Surface *pRenderTarget, Surface *pNe
     g_st.depth_stencil = pNewZStencil;
     dev_field<Surface *>(DEV_ZBUFFER) = pNewZStencil;
     bind_render_target(g_st.render_target ? g_st.render_target : g_backbuffer, pNewZStencil);
+    // Like Direct3D 8, the library resets the viewport to the whole new target: SetRenderTarget (0x3C6A80 in x2.1)
+    // ends in D3D_CommonSetMultiSampleModeAndScale, which tail-jumps to SetViewport with a full-size viewport.
+    // Ninja Gaiden Black relies on it: it sets a 128x128 viewport for its small shadow target once per frame and
+    // never calls SetViewport again before drawing the scene into the back buffer.
+    if (pRenderTarget) {
+        uint32_t w, h;
+        surface_size(pRenderTarget, &w, &h);
+        if (pRenderTarget == g_backbuffer) {
+            w = (uint32_t)g_width;
+            h = (uint32_t)g_height;
+        }
+        g_requested_viewport = {0, 0, w, h, 0.0f, 1.0f};
+    }
     fit_viewport();
     return D3D_OK;
 }
@@ -1375,10 +1405,46 @@ Surface *__stdcall D3DDevice_GetDepthStencilSurface2()
 
 // ---- transforms, viewport, lights ----
 
+// Ninja Gaiden Black's LTCG build inlines SetTransform: game code copies matrices straight into the device object
+// (FUN_00042690+0x68: rep movsd of its view matrix into device+0xC60, then or [0x3D83D0], 0xFF0200; 762 sites set
+// that dirty word) and the library reads them at draw time. So the HLE does the same: before a fixed-function draw,
+// whatever differs between the device's copy and what the host was last given is pushed to the host.
+int sync_transforms_from_device()
+{
+    if (!g_dev) return 0;
+    int changed = 0;
+    for (int i = 0; i < 10; i++) {
+        const D3DMATRIX *m = (const D3DMATRIX *)(g_dev + DEV_TRANSFORMS + i * 0x40);
+        if (memcmp(m, &g_st.transforms[i], sizeof(D3DMATRIX)) == 0) continue;
+        g_st.transforms[i] = *m;
+        host3d::dev()->SetTransform(kTransforms[i], m);
+        changed |= 1 << i;
+    }
+    return changed;
+}
+
+// The material too: the game's inlined SetMaterial (FUN_0030D630+0x76) copies the 68-byte D3DMATERIAL8 into
+// device+0xF00 (the library reads it there: FUN_003D1610 builds SET_SCENE_AMBIENT_COLOR / SET_MATERIAL_EMISSION from
+// +0xF00.., FUN_003D1520 the light products; the back material is at +0xF44) and sets dirty bits 0x9000.
+constexpr uint32_t DEV_MATERIAL = 0x0F00;
+bool sync_material_from_device()
+{
+    if (!g_dev) return false;
+    const D3DMATERIAL9 *m = (const D3DMATERIAL9 *)(g_dev + DEV_MATERIAL); // same 68-byte layout as D3DMATERIAL8
+    if (g_material_set && memcmp(m, &g_material, sizeof(D3DMATERIAL9)) == 0) return false;
+    g_material = *m;
+    g_material_set = true;
+    host3d::dev()->SetMaterial(m);
+    return true;
+}
+
 void __stdcall D3DDevice_SetTransform(uint32_t State, const D3DMATRIX *pMatrix)
 {
     DTRACE("%u, %p", State, pMatrix);
     if (State >= 10) return;
+    if (debug_frame_active())
+        logf("[rt] SetTransform %u: row0 %g %g %g %g | row3 %g %g %g %g", State, pMatrix->_11, pMatrix->_12, pMatrix->_13, pMatrix->_14,
+             pMatrix->_41, pMatrix->_42, pMatrix->_43, pMatrix->_44);
     g_st.transforms[State] = *pMatrix;
     memcpy(g_dev + DEV_TRANSFORMS + State * 0x40, pMatrix, 0x40);
     host3d::dev()->SetTransform(kTransforms[State], pMatrix);
@@ -1481,22 +1547,97 @@ uint32_t *__stdcall D3D_WriteViewportTransform(uint32_t *pPush)
 void __stdcall D3DDevice_SetMaterial(const D3DMATERIAL9 *pMaterial)
 {
     DTRACE("%p", pMaterial);
+    if (debug_frame_active())
+        logf("[rt] SetMaterial: diffuse %g %g %g %g ambient %g %g %g emissive %g %g %g power %g", pMaterial->Diffuse.r, pMaterial->Diffuse.g,
+             pMaterial->Diffuse.b, pMaterial->Diffuse.a, pMaterial->Ambient.r, pMaterial->Ambient.g, pMaterial->Ambient.b, pMaterial->Emissive.r,
+             pMaterial->Emissive.g, pMaterial->Emissive.b, pMaterial->Power);
     g_material = *pMaterial;
     g_material_set = true;
     host3d::dev()->SetMaterial(pMaterial);
 }
 
+// The Xbox device keeps its lights in an array the game can read back directly: Ninja Gaiden Black's
+// FUN_0019E150 walks m_pLights (device+0x7A4) and copies entries whose hardware slot (+0x8C) is not -1. The library
+// grows the array in SetLight (16 entries at a time, 0x90 bytes each: D3DLIGHT8, flags, the negated direction, the
+// slot) and LightEnable assigns one of the eight NV2A light slots (device+0x7AC.., control word at +0x7CC). The HLE
+// keeps that shadow in a static array (the game only follows the pointer; it never frees it).
+namespace {
+constexpr uint32_t DEV_LIGHTS = 0x7A4, DEV_MAXLIGHTS = 0x7A8, DEV_LIGHTSLOTS = 0x7AC, DEV_LIGHTCONTROL = 0x7CC;
+constexpr uint32_t LIGHT_ENTRY = 0x90, LIGHT_CAPACITY = 256;
+constexpr uint32_t LE_FLAGS = 0x68, LE_NEGDIR = 0x6C, LE_SLOT = 0x8C;
+alignas(16) uint8_t g_light_shadow[LIGHT_ENTRY * LIGHT_CAPACITY];
+
+uint8_t *light_entry(uint32_t Index)
+{
+    if (!g_dev || Index >= LIGHT_CAPACITY) return nullptr;
+    uint32_t &count = *(uint32_t *)(g_dev + DEV_MAXLIGHTS);
+    uint8_t *&arr = *(uint8_t **)(g_dev + DEV_LIGHTS);
+    if (Index >= count) {
+        uint32_t n = (Index + 0x10) & ~0xFu;
+        if (n > LIGHT_CAPACITY) n = LIGHT_CAPACITY;
+        for (uint32_t i = count; i < n; i++) {
+            memset(g_light_shadow + i * LIGHT_ENTRY, 0, LIGHT_ENTRY);
+            *(uint32_t *)(g_light_shadow + i * LIGHT_ENTRY + LE_SLOT) = 0xFFFFFFFFu;
+        }
+        count = n;
+        arr = g_light_shadow;
+    }
+    return arr + Index * LIGHT_ENTRY;
+}
+} // namespace
+
 void __stdcall D3DDevice_SetLight(uint32_t Index, const D3DLIGHT9 *pLight)
 {
     DTRACE("%u, %p", Index, pLight);
+    if (debug_frame_active())
+        logf("[rt] SetLight %u: type %u diffuse %g %g %g ambient %g %g %g dir %g %g %g pos %g %g %g range %g", Index, pLight->Type,
+             pLight->Diffuse.r, pLight->Diffuse.g, pLight->Diffuse.b, pLight->Ambient.r, pLight->Ambient.g, pLight->Ambient.b,
+             pLight->Direction.x, pLight->Direction.y, pLight->Direction.z, pLight->Position.x, pLight->Position.y, pLight->Position.z,
+             pLight->Range);
     g_lights[Index] = *pLight;
+    if (uint8_t *e = light_entry(Index)) {
+        memcpy(e, pLight, sizeof(D3DLIGHT9)); // D3DLIGHT8 and D3DLIGHT9 have the same 104-byte layout
+        *(uint32_t *)(e + LE_FLAGS) |= 3;
+        float *nd = (float *)(e + LE_NEGDIR);
+        nd[0] = -pLight->Direction.x;
+        nd[1] = -pLight->Direction.y;
+        nd[2] = -pLight->Direction.z;
+    }
     host3d::dev()->SetLight(Index, pLight);
 }
 
 void __stdcall D3DDevice_LightEnable(uint32_t Index, BOOL bEnable)
 {
     DTRACE("%u, %d", Index, bEnable);
+    if (debug_frame_active()) logf("[rt] LightEnable %u, %d", Index, bEnable);
     g_lights_on[Index] = bEnable;
+    if (!g_lights.count(Index)) {
+        D3DLIGHT9 l = {};
+        l.Type = D3DLIGHT_DIRECTIONAL;
+        l.Diffuse.r = l.Diffuse.g = l.Diffuse.b = 1.0f;
+        l.Direction.z = 1.0f;
+        D3DDevice_SetLight(Index, &l);
+    }
+    if (uint8_t *e = light_entry(Index)) {
+        uint32_t &slot = *(uint32_t *)(e + LE_SLOT);
+        uint32_t *slots = (uint32_t *)(g_dev + DEV_LIGHTSLOTS);
+        uint32_t &control = *(uint32_t *)(g_dev + DEV_LIGHTCONTROL);
+        *(uint32_t *)(e + LE_FLAGS) |= 4;
+        if (bEnable && slot == 0xFFFFFFFFu) {
+            uint32_t s = 0;
+            while (s < 8 && (control >> (2 * s)) & 3) s++;
+            if (s < 8) {
+                slot = s;
+                slots[s] = (uint32_t)(uintptr_t)e;
+                uint32_t type = *(uint32_t *)e;
+                control |= (type == D3DLIGHT_DIRECTIONAL ? 1u : type + 1u) << (2 * s);
+            }
+        } else if (!bEnable && slot != 0xFFFFFFFFu) {
+            control &= ~(3u << (2 * slot));
+            slots[slot] = 0;
+            slot = 0xFFFFFFFFu;
+        }
+    }
     host3d::dev()->LightEnable(Index, bEnable);
 }
 

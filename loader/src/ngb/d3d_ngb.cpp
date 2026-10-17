@@ -3,6 +3,7 @@
 // LTCG kept the per-state setters as functions here (BLACK inlined them), and a few functions have a different
 // register convention. New behaviour (gamma ramp, vertical blank wait, pixel shader creation, vertex shader
 // slots) is kept minimal and logged on first use.
+#include "common.h"
 #include "d3d/device.h"
 #include "d3d/dispatch.h"
 #include "d3d/nv2a_psh.h"
@@ -11,7 +12,12 @@
 #include "d3d/xd3d.h"
 #include "kernel/kexports.h"
 
+#include <cstdio>
 #include <cstring>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
 
 namespace xd3d {
 
@@ -24,6 +30,8 @@ void __stdcall D3DDevice_SetVertexShader(uint32_t Handle);
 uint32_t *__stdcall D3D_WriteViewportTransform(uint32_t *pPush);
 void __stdcall D3D_UpdateFogState();
 Surface *__stdcall D3D_CreateSurface2(uint32_t Width, uint32_t Height, uint32_t Usage, uint32_t Format);
+
+void __stdcall D3DDevice_DrawIndexedVertices(uint32_t PrimitiveType, uint32_t VertexCount, const uint16_t *pIndexData); // d3d/draw.cpp
 
 namespace ngb {
 
@@ -236,10 +244,79 @@ void __stdcall SetGammaRamp(uint32_t Flags, const uint8_t *pRamp)
 void __stdcall BlockUntilVerticalBlank()
 {
     DTRACE("");
-    xk::KeWaitForSingleObject(g_dev + DEV_VBLANKEVENT, 0, 1, FALSE, nullptr);
+    wait_next_vblank(); // not the KEVENT: it is a notification event nothing resets, a wait on it returns at once
 }
 
 void __stdcall PersistDisplay() { DTRACE(""); } // keeps the front buffer across a reboot: nothing to keep here
+
+// D3DDevice_RunPushBuffer(pPushBuffer, pFixup): the game queues a pre-recorded NV2A method stream (a D3DPushBuffer
+// resource: Common, Data, Lock, Size, AllocationSize; six call sites, first one from 0x30BCA0 when chapter 1 loads).
+// Every buffer seen while chapter 1 loads (35 distinct, docs/04) is what D3DDevice_DrawIndexedVertices records:
+// NV097_SET_BEGIN_END(primitive), NV097_ARRAY_ELEMENT16 pairs of indices (non-incrementing), one
+// NV097_ARRAY_ELEMENT32 for an odd last index, NV097_SET_BEGIN_END(0). The indices refer to the vertex streams bound
+// at the time the buffer runs, so the whole thing is an indexed draw with the current state. Anything else in a
+// buffer (other methods, jumps, a fixup table) is logged once and skipped.
+struct PushBufferHeader {
+    uint32_t Common, Data, Lock, Size, AllocationSize;
+};
+
+void __stdcall RunPushBuffer(const PushBufferHeader *pPushBuffer, const void *pFixup)
+{
+    enum { NV097_SET_BEGIN_END = 0x17FC, NV097_ARRAY_ELEMENT16 = 0x1800, NV097_ARRAY_ELEMENT32 = 0x1808 };
+    static std::set<uint32_t> reported;
+    static std::vector<uint16_t> indices;
+    static uint32_t calls, draws;
+    calls++;
+    DTRACE("%p, %p", pPushBuffer, pFixup);
+    if (pFixup && reported.insert(0xFFFFFFFFu).second) logf("[pb] RunPushBuffer: fixup table %p ignored", pFixup);
+    const uint32_t *p = (const uint32_t *)phys_to_virt(pPushBuffer->Data);
+    uint32_t n = pPushBuffer->Size / 4;
+    if (calls == 1 && !g_cfg.screenshot_dir.empty()) { // docs/04 §6: is the stream disc data or built by the game?
+        std::wstring path = g_cfg.screenshot_dir + L"\\pb_first.bin";
+        if (FILE *f = _wfopen(path.c_str(), L"wb")) {
+            fwrite(p, 1, pPushBuffer->Size, f);
+            fclose(f);
+            logf("[pb] first push buffer (%u bytes at 0x%08x) written to %s", pPushBuffer->Size, pPushBuffer->Data, narrow(path).c_str());
+        }
+    }
+    uint32_t prim = 0;
+    bool unknown = false;
+    indices.clear();
+    for (uint32_t i = 0; i < n;) {
+        uint32_t cmd = p[i++];
+        if (cmd == 0) continue;
+        if ((cmd & 3) == 1 || (cmd & 3) == 2 || (cmd & 0xE0000000) == 0x20000000) { unknown = true; break; }
+        uint32_t count = (cmd >> 18) & 0x7FF, m = cmd & 0x1FFC;
+        bool noninc = (cmd & 0x40000000) != 0;
+        if (i + count > n) { unknown = true; break; }
+        if (((cmd >> 13) & 7) != 0) { unknown = true; i += count; continue; }
+        for (uint32_t k = 0; k < count; k++) {
+            uint32_t method = noninc ? m : m + 4 * k, v = p[i + k];
+            if (method == NV097_SET_BEGIN_END) {
+                if (v) {
+                    prim = v;
+                    indices.clear();
+                } else if (!indices.empty()) {
+                    D3DDevice_DrawIndexedVertices(prim, (uint32_t)indices.size(), indices.data());
+                    draws++;
+                    indices.clear();
+                }
+            } else if (method == NV097_ARRAY_ELEMENT16) {
+                indices.push_back((uint16_t)v);
+                indices.push_back((uint16_t)(v >> 16));
+            } else if (method == NV097_ARRAY_ELEMENT32) {
+                indices.push_back((uint16_t)v);
+            } else {
+                unknown = true;
+            }
+        }
+        i += count;
+    }
+    if (unknown && reported.insert((uint32_t)(uintptr_t)pPushBuffer).second)
+        logf("[pb] RunPushBuffer: buffer %p (data 0x%08x, %u bytes) holds methods other than an indexed draw; those were skipped",
+             pPushBuffer, pPushBuffer->Data, pPushBuffer->Size);
+    if (calls == 1 || calls == 1000 || calls == 10000) logf("[pb] RunPushBuffer: %u calls, %u draws so far", calls, draws);
+}
 
 // DSOUND: DirectSoundUseFullHRTF selects the head-related transfer function of the 3D sound hardware; the software
 // mixer has distance and panning only (BLACK's DirectSoundUseLightHRTF is the same no-op).
@@ -297,6 +374,7 @@ static const Hle kTable[] = {
     H(0x003c7cb0, BlockUntilVerticalBlank, "", false),
     H(0x003c8120, PersistDisplay, "", false),
     H(0x0037a978, DirectSoundUseFullHRTF, "", false),
+    H(0x003cafc0, RunPushBuffer, "s s", false),
 };
 
 } // namespace ngb

@@ -1,5 +1,6 @@
 // blackrt.dll entry: BlackMain is called by black.exe (the address-space stub) and never returns.
 #include "common.h"
+#include "fiber.h"
 
 #include <algorithm>
 #include <vector>
@@ -166,6 +167,7 @@ bool parse_args()
         else if (a == L"--normal-aspect") { g_cfg.widescreen = false; settings_mark_cli("widescreen"); }
         else if (a == L"--fullscreen") { g_cfg.fullscreen = true; settings_mark_cli("fullscreen"); }
         else if (a == L"--no-reverb") { g_cfg.reverb = false; settings_mark_cli("reverb"); }
+        else if (a == L"--no-fog") g_cfg.no_fog = true;
         else if (a == L"--no-ramp") g_cfg.ramp = false;
         else if (a == L"--no-aa") { g_cfg.aa = false; settings_mark_cli("aa"); }
         else if (a == L"--no-seamfill") { g_cfg.seam_fill = false; settings_mark_cli("seamfill"); }
@@ -446,6 +448,7 @@ int run(void *reserve, unsigned reserve_size)
     install_crash_handlers();
     install_probes();
     if (profile && !xd3d::install_d3d_hooks(*profile)) return 1;
+    if (profile && !install_fiber_switch(*profile)) return 1;
     bool black = profile && profile->black; // BLACK's own game patches and front-end work; nothing of it applies elsewhere
     if (black) install_timing_patches();
     if (black) install_mouselook_patches();

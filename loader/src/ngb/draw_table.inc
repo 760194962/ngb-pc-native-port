@@ -2,4 +2,4 @@
 // {address, name, implementation, parameter sources, returns a value}
 {0x003c98c0u, "D3DDevice_DrawVerticesUP", (void *)&D3DDevice_DrawVerticesUP, "s s s s", false}, // BLACK 0x00269c90 "s s s s"
 {0x003c9a70u, "D3DDevice_DrawVertices_4__LTCG_ecx2_eax3", (void *)&D3DDevice_DrawVertices, "s ecx eax", false}, // BLACK 0x00269e40 "s s s"
-{0x003c9b40u, "D3DDevice_DrawIndexedVertices", (void *)&D3DDevice_DrawIndexedVertices, "s eax s", false}, // BLACK 0x00269f10 "s s s"
+{0x003c9b40u, "D3DDevice_DrawIndexedVertices", (void *)&D3DDevice_DrawIndexedVertices, "s s s", false}, // BLACK 0x00269f10 "s s s"

@@ -12,6 +12,9 @@ extern uint32_t g_push_dwords;
 extern int g_width, g_height; // back buffer size
 
 void hle_flush(); // interpret pending inline push-buffer commands
+int sync_transforms_from_device(); // take matrices game code wrote into the device object (bit mask of the ones that changed)
+bool sync_material_from_device();  // same for the material at device+0xF00 (true when it changed)
+void wait_next_vblank(); // block until the next emulated vblank (D3DDevice_BlockUntilVerticalBlank)
 
 // Render resolution: host render targets are scale_x() x scale_y() times the Xbox size (--scale; in widescreen
 // the Xbox pixels are 4/3 wider than tall, so x is scaled 4/3 more to keep host pixels square).

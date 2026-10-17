@@ -165,6 +165,7 @@ extern uint8_t IdexChannelObject[256];
 // (.text) calls them; the ones only XNET / XONLINE / XPP's MU driver reach are logging stubs in ktable.cpp.
 void __stdcall DbgBreakPoint();
 void *__stdcall MmCreateKernelStack(uint32_t NumberOfBytes, BOOLEAN DebuggerThread);
+bool kernel_stack_bounds(uint32_t esp, uint32_t *lo, uint32_t *hi); // the kernel stack esp lies in, if any (k_ngb.cpp)
 void __stdcall MmDeleteKernelStack(void *StackBase, void *StackLimit);
 uint32_t __stdcall KeSetDisableBoostThread(void *Thread, BOOLEAN Disable);
 LARGE_INTEGER __stdcall KeQueryPerformanceCounter();

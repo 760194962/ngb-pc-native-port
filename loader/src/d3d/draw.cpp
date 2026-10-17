@@ -11,7 +11,9 @@
 #include "d3d/state.h"
 #include "d3d/vshader.h"
 #include "fov.h"
+#include "image.h"
 #include "perf.h"
+#include "xbe.h"
 
 #include <wincodec.h>
 #include <intrin.h> // _AddressOfReturnAddress: MSVC 14.16 (VS2017) does not declare it via <windows.h>
@@ -21,6 +23,9 @@
 #include <vector>
 
 namespace xd3d {
+
+LastDraw g_last_draws[4];
+unsigned g_last_draw_next;
 
 IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_serial, bool linear); // device.cpp
 uint32_t g_draw_serial; // increments per draw (render-target snapshots are shared within a draw)
@@ -230,7 +235,7 @@ void apply_render_states(IDirect3DDevice9 *d)
     on_change(XRS_FILLMODE, [&](uint32_t v) {
         set(D3DRS_FILLMODE, v == 0x1B00 ? D3DFILL_POINT : v == 0x1B01 ? D3DFILL_WIREFRAME : D3DFILL_SOLID);
     });
-    on_change(XRS_FOGENABLE, [&](uint32_t v) { set(D3DRS_FOGENABLE, v != 0); });
+    on_change(XRS_FOGENABLE, [&](uint32_t v) { set(D3DRS_FOGENABLE, v != 0 && !g_cfg.no_fog); });
     on_change(XRS_FOGSTART, [&](uint32_t v) { set(D3DRS_FOGSTART, v); });
     on_change(XRS_FOGEND, [&](uint32_t v) { set(D3DRS_FOGEND, v); });
     on_change(XRS_FOGDENSITY, [&](uint32_t v) { set(D3DRS_FOGDENSITY, v); });
@@ -656,14 +661,24 @@ std::atomic<int> g_debug_draws{-1};
 
 // The game code above a draw: return addresses into the XBE's game code found on the stack (values right after a
 // call instruction), nearest first. A heuristic, like the profiler's: stale values happen.
+// End of the game's own code: the D3D section's start (BLACK 0x269000, Ninja Gaiden Black x2.1 0x3C5100).
+static uint32_t game_code_end()
+{
+    if (const Xbe *x = image_xbe())
+        for (const XbeSection &s : x->sections)
+            if (s.name == "D3D") return s.vaddr;
+    return 0x00269000;
+}
+
 std::string game_callers(const uint32_t *sp)
 {
     const uint32_t *top = (const uint32_t *)((NT_TIB *)NtCurrentTeb())->StackBase;
+    static const uint32_t code_end = game_code_end();
     std::string out;
     int found = 0;
     for (const uint32_t *p = sp; p < top && p < sp + 0x800 && found < 5; p++) {
         uint32_t v = *p;
-        if (v < 0x00011005 || v >= 0x00269000) continue; // game code (.text and the libraries before D3D)
+        if (v < 0x00011005 || v >= code_end) continue; // game code (.text and the libraries before D3D)
         const uint8_t *c = (const uint8_t *)(uintptr_t)v;
         bool call = c[-5] == 0xE8 || (c[-2] == 0xFF && (c[-1] & 0x38) == 0x10) || (c[-3] == 0xFF && (c[-2] & 0x38) == 0x10) ||
                     (c[-6] == 0xFF && (c[-5] & 0x38) == 0x10);
@@ -686,6 +701,43 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
     logf("[draw] %s prim %u count %u, %s 0x%x, ps 0x%x, tex0 %p", what, prim, count, ctx.path == Path::Prog ? "vs" : "fvf",
          g_st.vertex_shader, g_st.pixel_shader, g_st.textures[0]);
     if (this_frame) logf("[draw]   from %s", game_callers((const uint32_t *)_AddressOfReturnAddress()).c_str());
+    {
+        float fs, fe, fd;
+        memcpy(&fs, &rs[XRS_FOGSTART], 4);
+        memcpy(&fe, &rs[XRS_FOGEND], 4);
+        memcpy(&fd, &rs[XRS_FOGDENSITY], 4);
+        logf("[draw]   fog %u table %u start %g end %g density %g color 0x%08x range %u | lighting %u ambient 0x%08x specular %u colorvertex %u "
+             "sources d%u a%u s%u e%u",
+             rs[XRS_FOGENABLE], rs[XRS_FOGTABLEMODE], fs, fe, fd, rs[XRS_FOGCOLOR], rs[XRS_RANGEFOGENABLE],
+             rs[XRS_LIGHTING], rs[XRS_AMBIENT], rs[XRS_SPECULARENABLE], rs[XRS_COLORVERTEX], rs[XRS_DIFFUSEMATERIALSOURCE],
+             rs[XRS_AMBIENTMATERIALSOURCE], rs[XRS_SPECULARMATERIALSOURCE], rs[XRS_EMISSIVEMATERIALSOURCE]);
+        if (rs[XRS_LIGHTING]) {
+            D3DMATERIAL9 mat = {};
+            host3d::dev()->GetMaterial(&mat);
+            std::string on;
+            for (DWORD i = 0; i < 8; i++) {
+                BOOL e = FALSE;
+                if (SUCCEEDED(host3d::dev()->GetLightEnable(i, &e)) && e) on += std::to_string(i) + " ";
+            }
+            logf("[draw]   host material diffuse %g %g %g ambient %g %g %g emissive %g %g %g | host lights on: %s", mat.Diffuse.r, mat.Diffuse.g,
+                 mat.Diffuse.b, mat.Ambient.r, mat.Ambient.g, mat.Ambient.b, mat.Emissive.r, mat.Emissive.g, mat.Emissive.b,
+                 on.empty() ? "none" : on.c_str());
+        }
+    }
+    if (ctx.path == Path::Fvf && verts && (ctx.fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZ) {
+        // Where the first vertex lands: v * world0 * view * projection (row vectors, D3D convention), then / w.
+        const D3DMATRIX *m[3] = {&g_st.transforms[6], &g_st.transforms[0], &g_st.transforms[1]};
+        float v[4] = {verts[0], verts[1], verts[2], 1.0f};
+        for (int k = 0; k < 3; k++) {
+            const float *a = &m[k]->_11;
+            float o[4];
+            for (int c = 0; c < 4; c++) o[c] = v[0] * a[c] + v[1] * a[4 + c] + v[2] * a[8 + c] + v[3] * a[12 + c];
+            memcpy(v, o, sizeof v);
+        }
+        logf("[draw]   clip %g %g %g %g -> ndc %g %g %g | world0 row3 %g %g %g | view row3 %g %g %g | proj diag %g %g %g %g", v[0], v[1], v[2],
+             v[3], v[3] != 0 ? v[0] / v[3] : 0.f, v[3] != 0 ? v[1] / v[3] : 0.f, v[3] != 0 ? v[2] / v[3] : 0.f, m[0]->_41, m[0]->_42, m[0]->_43,
+             m[1]->_41, m[1]->_42, m[1]->_43, m[2]->_11, m[2]->_22, m[2]->_33, m[2]->_34);
+    }
     logf("[draw]   z %u func 0x%x write %u | blend %u 0x%x/0x%x op 0x%x | atest %u func 0x%x ref %u | cull 0x%x | cwrite 0x%x | stencil %u",
          rs[XRS_ZENABLE], rs[XRS_ZFUNC], rs[XRS_ZWRITEENABLE], rs[XRS_ALPHABLENDENABLE], rs[XRS_SRCBLEND], rs[XRS_DESTBLEND],
          rs[XRS_BLENDOP], rs[XRS_ALPHATESTENABLE], rs[XRS_ALPHAFUNC], rs[XRS_ALPHAREF], rs[XRS_CULLMODE], rs[XRS_COLORWRITEENABLE],
@@ -821,6 +873,16 @@ bool begin_draw(DrawCtx &ctx)
         g_st.draws_skipped++;
         return false;
     }
+    if (ctx.path == Path::Fvf) {
+        static uint32_t synced_once;
+        if (sync_material_from_device() && debug_frame_active()) logf("[rt] material changed in the device object");
+        int changed = sync_transforms_from_device();
+        if (changed && (!synced_once || debug_frame_active())) {
+            if (!synced_once) logf("[d3d] transforms taken from the device object (mask 0x%x): the game writes them inline", changed);
+            else logf("[rt] transforms changed in the device object: mask 0x%x", changed);
+            synced_once = 1;
+        }
+    }
     // Vertex shaders compute the fog factor themselves (oFog -> table function): D3D9 vertex fog.
     DWORD fog_table = ctx.path == Path::Prog ? D3DFOG_NONE : render_state()[XRS_FOGTABLEMODE];
     if (fog_table != g_fog_table_sent) {
@@ -843,6 +905,20 @@ void draw_up(uint32_t xprim, uint32_t verts, const void *data, uint32_t stride)
         d->DrawPrimitiveUP(p.type, p.count, data, stride);
 }
 
+// Every page of [p, p+n) is committed and readable. Direct3D 9 copies the vertices of a DrawIndexedPrimitiveUP
+// itself, so a range that runs past the game's vertex buffer (Ninja Gaiden Black's recorded push buffers index
+// past the stream bound at run time, which the NV2A reads as garbage) would fault inside d3d9.dll.
+bool pages_readable(const void *p, size_t n)
+{
+    const uint8_t *a = (const uint8_t *)p, *end = a + n;
+    while (a < end) {
+        MEMORY_BASIC_INFORMATION mbi;
+        if (!VirtualQuery(a, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) return false;
+        a = (const uint8_t *)mbi.BaseAddress + mbi.RegionSize;
+    }
+    return true;
+}
+
 void draw_indexed_up(uint32_t xprim, uint32_t nidx, const uint16_t *idx, const void *verts, uint32_t stride)
 {
     if (!nidx) return;
@@ -853,17 +929,55 @@ void draw_indexed_up(uint32_t xprim, uint32_t nidx, const uint16_t *idx, const v
     }
     Prim p = conv_prim(xprim, nidx);
     if (!p.count) return;
+    const uint8_t *src = (const uint8_t *)verts + (size_t)mn * stride;
+    size_t bytes = (size_t)(mx - mn + 1) * stride;
+    bool in_conv = src >= (const uint8_t *)g_conv.data() && src + bytes <= (const uint8_t *)(g_conv.data() + g_conv.size());
+    {
+        // What the host runtime was last asked to copy (dump_exception prints it: a fault inside d3d9's vertex copy
+        // then tells how far past the block it read).
+        LastDraw &ld = g_last_draws[g_last_draw_next++ % 4];
+        ld.verts = verts;
+        ld.src = src;
+        ld.bytes = bytes;
+        ld.stride = stride;
+        ld.mn = mn;
+        ld.mx = mx;
+        ld.nidx = nidx;
+        ld.prim = xprim;
+        ld.conv = g_conv.data();
+        ld.conv_bytes = g_conv.size() * 4;
+    }
+    if (!in_conv && !pages_readable(src, bytes)) {
+        static int reported;
+        if (reported < 8) {
+            reported++;
+            logf("[draw] indexed draw skipped: vertices %p stride %u, indices %u..%u (%u of them) need %zu bytes that are not all readable; from %s",
+                 verts, stride, mn, mx, nidx, bytes, game_callers((const uint32_t *)_AddressOfReturnAddress()).c_str());
+        }
+        g_st.draws_skipped++;
+        return;
+    }
     perf::add_draw(mx - mn + 1, (mx - mn + 1) * stride);
+    // Indices rebased to the first used vertex, data pointer at that vertex: the host then copies exactly the
+    // vertices [mn, mx]. Passing MinVertexIndex = mn with the pointer backed up mn vertices (so index 0 would be
+    // "vertex 0") is what d3d9.dll accepts, but D3D9On12 (Windows 11 on GPUs without a native D3D9 driver, the Intel
+    // Iris Xe here) copies (MinVertexIndex + NumVertices) vertices from the pointer: 4483 x 64 bytes from a block
+    // of 442 that starts 4041 vertices later, reading into unmapped memory (run r013, docs/04).
+    uint16_t mnw = (uint16_t)mn;
     if (p.quads) {
         g_tmp_indices.resize(p.count * 3);
         for (uint32_t q = 0; q < nidx / 4; q++) {
             const uint16_t *s = idx + q * 4;
             uint16_t *o = &g_tmp_indices[q * 6];
-            o[0] = s[0]; o[1] = s[1]; o[2] = s[2]; o[3] = s[0]; o[4] = s[2]; o[5] = s[3];
+            o[0] = s[0] - mnw; o[1] = s[1] - mnw; o[2] = s[2] - mnw; o[3] = s[0] - mnw; o[4] = s[2] - mnw; o[5] = s[3] - mnw;
         }
         idx = g_tmp_indices.data();
+    } else if (mn) {
+        g_tmp_indices.resize(nidx);
+        for (uint32_t i = 0; i < nidx; i++) g_tmp_indices[i] = idx[i] - mnw;
+        idx = g_tmp_indices.data();
     }
-    host3d::dev()->DrawIndexedPrimitiveUP(p.type, mn, mx - mn + 1, p.count, idx, D3DFMT_INDEX16, verts, stride);
+    host3d::dev()->DrawIndexedPrimitiveUP(p.type, 0, mx - mn + 1, p.count, idx, D3DFMT_INDEX16, src, stride);
 }
 
 const uint8_t *stream_data(uint32_t stream)
@@ -1003,6 +1117,11 @@ void __stdcall D3DDevice_DrawIndexedVertices(uint32_t PrimitiveType, uint32_t Ve
         }
         base = scale_rhw(ctx, base, mn, mx - mn + 1, stride);
     }
+    if (debug_frame_active()) {
+        uint32_t mn = 0xFFFF;
+        for (uint32_t i = 0; i < VertexCount; i++) mn = pIndexData[i] < mn ? pIndexData[i] : mn;
+        debug_draw("DrawIndexedVertices(fvf)", ctx, PrimitiveType, VertexCount, (const float *)(base + (size_t)mn * stride), stride / 4);
+    }
     draw_indexed_up(PrimitiveType, VertexCount, pIndexData, base, stride);
 }
 
@@ -1126,8 +1245,11 @@ bool save_surface_png(IDirect3DSurface9 *src, const wchar_t *path, bool alpha_as
         desc.Height = crop->bottom - crop->top;
     }
     bool ok = false;
-    if (SUCCEEDED(d->CreateOffscreenPlainSurface(full_w, full_h, format, D3DPOOL_SYSTEMMEM, &sys, nullptr)) &&
-        SUCCEEDED(d->GetRenderTargetData(src, sys))) {
+    HRESULT hr_sys = d->CreateOffscreenPlainSurface(full_w, full_h, format, D3DPOOL_SYSTEMMEM, &sys, nullptr);
+    HRESULT hr_get = SUCCEEDED(hr_sys) ? d->GetRenderTargetData(src, sys) : hr_sys;
+    if (FAILED(hr_get))
+        logf("screenshot: CreateOffscreenPlainSurface 0x%08lx, GetRenderTargetData 0x%08lx (%ux%u fmt %u)", hr_sys, hr_get, full_w, full_h, format);
+    if (SUCCEEDED(hr_sys) && SUCCEEDED(hr_get)) {
         D3DLOCKED_RECT lr;
         if (SUCCEEDED(sys->LockRect(&lr, crop, D3DLOCK_READONLY))) {
             std::vector<uint8_t> px(desc.Width * desc.Height * 4);

@@ -33,6 +33,22 @@ void *__stdcall MmCreateKernelStack(uint32_t NumberOfBytes, BOOLEAN DebuggerThre
     return base;
 }
 
+// The kernel stack esp lies in: [lo, hi) is its committed range (above the guard page). fiber.cpp keeps the Windows
+// thread's stack bounds on it while a fiber runs there.
+bool kernel_stack_bounds(uint32_t esp, uint32_t *lo, uint32_t *hi)
+{
+    std::lock_guard<std::mutex> g(g_stack_mutex);
+    for (const auto &kv : g_stack_alloc) {
+        uint32_t base = (uint32_t)(uintptr_t)kv.first, alloc = (uint32_t)(uintptr_t)kv.second;
+        if (esp > alloc + 0x1000 && esp <= base) {
+            *lo = alloc + 0x1000;
+            *hi = base;
+            return true;
+        }
+    }
+    return false;
+}
+
 void __stdcall MmDeleteKernelStack(void *StackBase, void *StackLimit)
 {
     KTRACE("%p, %p", StackBase, StackLimit);
