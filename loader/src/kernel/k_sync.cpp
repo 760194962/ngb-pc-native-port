@@ -197,6 +197,15 @@ NTSTATUS __stdcall NtWaitForSingleObjectEx(HANDLE Handle, uint8_t WaitMode, BOOL
     return host::NtWaitForSingleObject(Handle, Alertable, Timeout);
 }
 
+// Ninja Gaiden Black's bundled NES / SNES programs (NinjaTomoe.xbe, NinjaTrilogy.xbe) import it; Xbox WaitAll = 0 and
+// WaitAny = 1 are the NT values.
+NTSTATUS __stdcall NtWaitForMultipleObjectsEx(uint32_t Count, HANDLE *Handles, uint32_t WaitType, uint8_t WaitMode, BOOLEAN Alertable,
+                                             LARGE_INTEGER *Timeout)
+{
+    KTRACE("%u, %p, %u, %u, %u, %lld", Count, Handles, WaitType, WaitMode, Alertable, Timeout ? Timeout->QuadPart : -1LL);
+    return host::NtWaitForMultipleObjects(Count, Handles, (int)WaitType, Alertable, Timeout);
+}
+
 int32_t __stdcall KeSetEvent(XKEVENT *Event, int32_t Increment, BOOLEAN Wait)
 {
     KTRACE("%p, %d, %u", Event, Increment, Wait);

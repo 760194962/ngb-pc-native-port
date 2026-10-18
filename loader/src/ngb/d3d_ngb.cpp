@@ -330,6 +330,21 @@ HRESULT __stdcall EndVisibilityTest(uint32_t Index)
 // mixer has distance and panning only (BLACK's DirectSoundUseLightHRTF is the same no-op).
 void __stdcall DirectSoundUseFullHRTF() { DTRACE(""); }
 
+// XNET: XNetStartup (0x3AFB34) brings up the network stack, and XnInit programs the NIC's registers directly
+// (0xFEF00110 written by FUN_003B786C: an access violation in r116, when the Ranking menu started the online
+// module). There is no network here: report it down. The caller FUN_00300BA0 checks the result and gives up
+// (0x300C91), the same as with a console without a working connection.
+int __stdcall XNetStartup(const void *pParams)
+{
+    DTRACE("%p", pParams);
+    static bool noted;
+    if (!noted) {
+        noted = true;
+        logf("[net] XNetStartup: no network (WSAENETDOWN); the game's online features stay unavailable");
+    }
+    return 10050; // WSAENETDOWN
+}
+
 #undef RS_SETTER
 #define H(addr, fn, params, ret) {addr, #fn, (void *)&fn, params, ret}
 
@@ -384,9 +399,14 @@ static const Hle kTable[] = {
     H(0x0037a978, DirectSoundUseFullHRTF, "", false),
     H(0x003cafc0, RunPushBuffer, "s s", false),
     H(0x003c7c50, EndVisibilityTest, "eax", true),
+    H(0x003afb34, XNetStartup, "s", true),
 };
 
+#include "auxtab/ngbextra_tables.inc"
+
 } // namespace ngb
+
+const Hle *hle_ngb_extra_table_aux(const char *xbe, size_t *count) { return ngb::hle_ngb_extra_table_aux(xbe, count); }
 
 const Hle *hle_ngb_extra_table(size_t *count)
 {

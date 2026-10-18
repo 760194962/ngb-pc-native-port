@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 typedef LONG NTSTATUS;
 
@@ -44,6 +45,9 @@ struct Config {
     std::wstring port_dir;     // black.exe's folder: the port's own files (savedata, black.ini, black.log, cache, perf)
     std::wstring hdd_dir;      // host folder backing \Device\Harddisk0\PartitionN (default port_dir\savedata)
     std::wstring log_path;     // default port_dir\black.log
+    std::wstring launch_data;  // --launch-data FILE: the 4 KB XLAUNCH_DATA_PAGE the previous XBE left (XLaunchNewImage)
+    std::vector<std::wstring> args; // the command line as given (without the program), for relaunching another XBE
+    int xbe_arg = -1;               // index in args of the XBE path, -1 = none given
     std::wstring symbols_path; // optional functions.csv for crash reports
     std::wstring screenshot_dir; // --screenshot: PNG frames go here
     bool trace = false;        // log every kernel call, not just the first of each kind
@@ -114,7 +118,7 @@ struct Config {
     bool no_specular = false;  // press-file "spec:0": never enable host specular lighting (diagnosis of light patches)
     unsigned tsc_divisor = 4;  // --tsc-divisor N: the engine's frame timer (rdtsc) runs N times slower than the Xbox TSC
     std::wstring coverage;     // --coverage FILE: one-shot probes at the hex addresses listed (first word of each line)
-    int untex = 1;             // press-file "cfg:untex:N": an unbound stage texture reads as 0 white, 1 the diffuse colour (1: game over overlay, docs/04 §3.13)
+    int untex = 3;             // press-file "cfg:untex:N": a stage reading an unbound texture is 3 skipped, or the texture reads as 1 the diffuse colour, 0 white (d3d/ffp_ps.cpp)
     bool flash_watch = false;  // press-file "cfg:flashwatch:1": detect single dark / flat frames, save them with draw statistics
     bool vis_all = false;      // press-file "cfg:visall:1": visibility tests report every pixel visible (diagnosis of culling)
     bool draw_ring = true;        // press-file "cfg:ring:0": indexed draws through DrawIndexedPrimitiveUP again (d3d/draw.cpp)

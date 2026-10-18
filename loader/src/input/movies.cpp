@@ -10,6 +10,7 @@
 // itself within 10 frames (a movie it already lets you skip moves on to the next one, which is not stopped again).
 #include "input/movies.h"
 
+#include "build_profile.h"
 #include "common.h"
 
 #include <cstring>
@@ -39,7 +40,9 @@ void movies_poll(uint16_t buttons, const uint8_t analog[8], bool enter)
     bool down = analog[0] > 30 || (buttons & 0x10) || enter; // A, START or Enter
     bool press = down && !g_was_down;
     g_was_down = down;
-    if (!g_cfg.skip_movies || !g_cfg.known_build) return;
+    // BLACK's player object (kGameObject): in any other build that address holds unrelated bytes, and a press would
+    // write kStop into whatever they point at.
+    if (!g_cfg.skip_movies || !g_cfg.profile || !g_cfg.profile->black) return;
     uint8_t *p = player();
     if (!p) return;
     static bool told;

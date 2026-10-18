@@ -21,6 +21,10 @@
 #include "xbe.h"
 #include "xthread.h"
 
+namespace xk {
+void load_launch_data(const std::wstring &file); // kernel/k_misc.cpp
+}
+
 #include <bcrypt.h>
 #include <shellapi.h>
 
@@ -108,6 +112,7 @@ bool parse_args()
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     std::wstring target;
+    for (int i = 1; i < argc; i++) g_cfg.args.push_back(argv[i]);
     for (int i = 1; i < argc; i++) {
         std::wstring a = argv[i];
         auto next = [&](std::wstring &out) {
@@ -280,6 +285,7 @@ bool parse_args()
         else if (a == L"--force") g_cfg.force = true;
         else if (a == L"--hdd") { if (!next(g_cfg.hdd_dir)) return false; }
         else if (a == L"--log") { if (!next(g_cfg.log_path)) return false; }
+        else if (a == L"--launch-data") { if (!next(g_cfg.launch_data)) return false; }
         else if (a == L"--symbols") { if (!next(g_cfg.symbols_path)) return false; }
         else if (a == L"--timeout") {
             std::wstring v;
@@ -287,7 +293,10 @@ bool parse_args()
             g_cfg.timeout_s = (unsigned)_wtoi(v.c_str());
         } else if (a == L"--help" || a == L"-h" || a == L"/?") return false;
         else if (!a.empty() && a[0] == L'-') return false;
-        else target = a;
+        else {
+            target = a;
+            g_cfg.xbe_arg = i - 1;
+        }
     }
     LocalFree(argv);
     if (target.empty()) target = L"game\\default.xbe";
@@ -481,6 +490,7 @@ int run(void *reserve, unsigned reserve_size)
         return 1;
     }
 
+    if (!g_cfg.launch_data.empty()) xk::load_launch_data(g_cfg.launch_data);
     logf("starting XBE entry point 0x%08x", g_xbe.entry);
     HANDLE boot = nullptr;
     if (!NT_OK(kthread_create(&boot, nullptr, g_xbe.stack_commit, 0, g_xbe.entry, 0, 0, false, "boot", true))) {

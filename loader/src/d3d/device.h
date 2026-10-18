@@ -29,6 +29,7 @@ void flash_add_var(uint32_t addr); // press-file "flashvar:ADDR"
 void logvar_add(uint32_t addr);    // press-file "logvar:ADDR": log a guest dword at each Swap where it changed
 void logvar_check(uint32_t frame); // called at every Swap
 bool is_backbuffer(const Surface *s);
+void backbuffer_cpu_lock(); // D3DSurface_LockRect on the back buffer: the title draws it with the CPU
 void vis_begin();                  // NV097_SET_ZPASS_PIXEL_COUNT_ENABLE = 1: start counting (host occlusion query)
 HRESULT vis_end(uint32_t Index);   // D3DDevice_EndVisibilityTest: finish the query, write the report slot
 void wait_next_vblank(); // block until the next emulated vblank (D3DDevice_BlockUntilVerticalBlank)

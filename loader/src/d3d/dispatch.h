@@ -35,6 +35,13 @@ const Hle *hle_draw_table_ngb(size_t *count);
 const Hle *hle_resource_table_ngb(size_t *count);
 const Hle *hle_dsound_table_ngb(size_t *count);
 const Hle *hle_ngb_extra_table(size_t *count);
+// The bundled programs (loader/src/aux, tools/gen_aux_tables.py): the same implementations, by XBE name.
+const Hle *hle_device_table_aux(const char *xbe, size_t *count);
+const Hle *hle_draw_table_aux(const char *xbe, size_t *count);
+const Hle *hle_resource_table_aux(const char *xbe, size_t *count);
+const Hle *hle_dsound_table_aux(const char *xbe, size_t *count);
+const Hle *hle_input_table_aux(const char *xbe, size_t *count);
+const Hle *hle_ngb_extra_table_aux(const char *xbe, size_t *count);
 
 bool install_d3d_hooks(const ::BuildProfile &profile);
 

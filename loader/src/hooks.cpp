@@ -405,6 +405,22 @@ void log_coverage_summary()
 
 uint32_t probe_hit_count(int i) { return i >= 0 && i < 16 ? g_probe_hits[i].load() : 0; }
 
+void probe_add(uint32_t addr)
+{
+    if (g_cfg.probe_count >= 16 || !in_image(addr) || probe_index(addr) >= 0) return;
+    int i = g_cfg.probe_count;
+    uint8_t *p = (uint8_t *)(uintptr_t)addr;
+    g_cfg.probe[i] = addr;
+    g_probe_hits[i] = 0;
+    g_probe_orig[i] = *p;
+    g_cfg.probe_count = i + 1; // before the int3, so the handler knows the address
+    DWORD old;
+    VirtualProtect(p, 1, PAGE_EXECUTE_READWRITE, &old);
+    *p = 0xCC;
+    VirtualProtect(p, 1, old, &old);
+    logf("probe armed at %08x %s (frame %u)", addr, where(addr).c_str(), g_frame_count.load());
+}
+
 void install_probes()
 {
     for (int i = 0; i < g_cfg.probe_count; i++) {

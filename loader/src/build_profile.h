@@ -27,6 +27,8 @@ struct BuildProfile {
     const uint32_t *rdtsc_sites;   // rdtsc instructions in game / XAPI code, trapped to a 733.33 MHz counter (hooks.cpp)
     int rdtsc_site_count;
     uint32_t rdtsc_qpc_site;       // the one inside XAPI's QueryPerformanceCounter: full rate; the engine's timer sites get --tsc-divisor
+    const char *aux;               // a bundled program of Ninja Gaiden Black (loader/src/aux, tools/gen_aux_tables.py): its tables'
+                                   // name; nullptr for BLACK and Ninja Gaiden Black itself
 };
 
 // BLACK (Criterion, NTSC-U): numbers from black-pc NOTES.md.
@@ -75,7 +77,48 @@ inline const BuildProfile kProfileNgbHurricaneX21 = {
     0x00376E44,
 };
 
-inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21};
+// The programs Ninja Gaiden Black x2.1 launches (docs/06 of the port project): the NES trilogy of the original release
+// (NinjaTomoe.xbe Japanese, NinjaTrilogy.xbe US; XDK 5849) and the SNES trilogy added by x2.1 (NinjaFCJ.xbe Japanese,
+// NinjaFCU.xbe US; XDK 5659). Plain (non-LTCG) D3D8 / DSOUND: the HLE tables come from XbSymbolDatabase names
+// (tools/gen_aux_tables.py). Initializer tables read from each XAPI's _rtinit / _cinit; rdtsc only in QueryPerformanceCounter.
+inline const uint32_t kTomoeQpc[] = {0x0006CD14};
+inline const BuildProfile kProfileNinjaTomoe = {
+    "NINJA GAIDEN BLACK x2.1: NinjaTomoe.xbe (NES trilogy, Japanese)",
+    "2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff",
+    0x5443000D, 31, false,
+    {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTomoe",
+};
+inline const BuildProfile kProfileNinjaTrilogy = {
+    "NINJA GAIDEN BLACK x2.1: NinjaTrilogy.xbe (NES trilogy, US)",
+    "31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621",
+    0x5443000D, 31, false,
+    {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTrilogy",
+};
+inline const uint32_t kFcjQpc[] = {0x0033B5D4};
+inline const BuildProfile kProfileNinjaFCJ = {
+    "NINJA GAIDEN BLACK x2.1: NinjaFCJ.xbe (SNES trilogy, Japanese)",
+    "b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31",
+    0x5443000D, -1, false,
+    {{0x35C3C0, 0x35C3CC}, {0x35C3D0, 0x35C3E8}, {0x35C3EC, 0x35C3FC}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x003547AC, 0, 0, kFcjQpc, 1, 0x0033B5D4, "NinjaFCJ",
+};
+inline const uint32_t kFcuQpc[] = {0x001D5E94};
+inline const BuildProfile kProfileNinjaFCU = {
+    "NINJA GAIDEN BLACK x2.1: NinjaFCU.xbe (SNES trilogy, US)",
+    "9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1",
+    0x5443000D, -1, false,
+    {{0x1F6C00, 0x1F6C0C}, {0x1F6C10, 0x1F6C28}, {0x1F6C2C, 0x1F6C3C}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x001EF06C, 0, 0, kFcuQpc, 1, 0x001D5E94, "NinjaFCU",
+};
+
+inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
+                                                &kProfileNinjaFCJ, &kProfileNinjaFCU};
 
 // The profile whose SHA-256 matches, or nullptr for an unknown build.
 inline const BuildProfile *build_profile_for(const char *sha256_hex)

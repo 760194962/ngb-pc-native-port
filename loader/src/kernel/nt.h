@@ -72,6 +72,7 @@ __declspec(dllimport) NTSTATUS NTAPI NtReleaseSemaphore(HANDLE, LONG, PLONG);
 __declspec(dllimport) NTSTATUS NTAPI NtResumeThread(HANDLE, PULONG);
 __declspec(dllimport) NTSTATUS NTAPI NtSuspendThread(HANDLE, PULONG);
 __declspec(dllimport) NTSTATUS NTAPI NtWaitForSingleObject(HANDLE, BOOLEAN, PLARGE_INTEGER);
+__declspec(dllimport) NTSTATUS NTAPI NtWaitForMultipleObjects(ULONG, HANDLE *, int, BOOLEAN, PLARGE_INTEGER); // WaitType: 0 all, 1 any
 __declspec(dllimport) NTSTATUS NTAPI NtDelayExecution(BOOLEAN, PLARGE_INTEGER);
 __declspec(dllimport) NTSTATUS NTAPI NtYieldExecution(void);
 __declspec(dllimport) NTSTATUS NTAPI NtDuplicateObject(HANDLE, HANDLE, HANDLE, PHANDLE, ACCESS_MASK, ULONG, ULONG);

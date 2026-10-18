@@ -85,7 +85,16 @@ std::string op_expr(D3DTEXTUREOP op, const std::string &a0, const std::string &a
     }
 }
 
-std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, bool def_specular)
+bool stage_reads_texture_key(const StageKey &e)
+{
+    uint32_t args[6] = {e.c0, e.c1, e.c2, e.a0, e.a1, e.a2};
+    for (uint32_t a : args)
+        if ((a & 0xF) == 2) return true; // D3DTA_TEXTURE
+    D3DTEXTUREOP c = conv_texop(e.cop), al = conv_texop(e.aop);
+    return c == D3DTOP_BLENDTEXTUREALPHA || c == D3DTOP_BLENDTEXTUREALPHAPM || al == D3DTOP_BLENDTEXTUREALPHA || al == D3DTOP_BLENDTEXTUREALPHAPM;
+}
+
+std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, bool def_specular, int first)
 {
     std::string s =
         "float4 tfactor : register(c0);\n"
@@ -98,8 +107,13 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
     s += def_diffuse ? "  float4 v0 = 1;\n" : "  float4 v0 = I.v0;\n";  // no diffuse in the vertex: opaque white
     s += def_specular ? "  float4 v1 = 0;\n" : "  float4 v1 = I.v1;\n"; // no specular in the vertex: 0
     s += "  float4 cur = v0, temp = 0, prev;\n";
-    s += g_cfg.untex == 1 ? "  float4 t0 = v0, t1 = v0, t2 = v0, t3 = v0;\n" // cfg:untex:1 an unbound stage texture reads as the diffuse colour
-                          : "  float4 t0 = 1, t1 = 1, t2 = 1, t3 = 1;\n";    // an unbound stage texture reads as opaque white
+    // A stage that reads its texture with none bound (cfg:untex): 3 = the stage is skipped, the current colour passes on
+    // (below), 1 = the texture reads as the diffuse colour, 0 = opaque white. 3 matches xemu in four cases (docs/04
+    // §3.14 of the port project): the health bar and the SNES trilogy page (stage 0 MODULATE(texture, diffuse): 1 gives
+    // the diffuse colour squared), the Game Over overlay (stage 0 MODULATE(texture, tfactor), nearly transparent
+    // diffuse: 0 gives a yellow layer) and the nunchaku sweep (stage 1, must show).
+    if (g_cfg.untex == 1) s += "  float4 t0 = v0, t1 = v0, t2 = v0, t3 = v0;\n";
+    else s += "  float4 t0 = 1, t1 = 1, t2 = 1, t3 = 1;\n";
     char b[256];
     for (int i = 0; i < 4; i++) {
         if (k[i].tex == 2) snprintf(b, sizeof b, "  t%d = texCUBE(scu%d, tc[%d].xyz);\n", i, i, i);
@@ -109,9 +123,10 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
         else continue;
         s += b;
     }
-    for (int i = 0; i < 4; i++) {
+    for (int i = first; i < 4; i++) {
         D3DTEXTUREOP cop = conv_texop(k[i].cop), aop = conv_texop(k[i].aop);
         if (cop == D3DTOP_DISABLE) break; // the first disabled colour op ends the stages
+        if (g_cfg.untex == 3 && !k[i].tex && stage_reads_texture_key(k[i])) continue; // unbound texture: skip the stage
         s += "  prev = cur;\n";
         std::string c = op_expr(cop, arg(k[i].c0, i), arg(k[i].c1, i), arg(k[i].c2, i), i, "prev");
         std::string a = aop == D3DTOP_DISABLE ? std::string("prev") : op_expr(aop, arg(k[i].a0, i), arg(k[i].a1, i), arg(k[i].a2, i), i, "prev");
@@ -144,7 +159,13 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
         e.proj = (ts[21] & 0x100) ? (ts[21] & 0xFF) : 0;
     }
     bool specular = render_state()[XRS_SPECULARENABLE] != 0;
+    // Point sprites: the Xbox D3D library builds the combiner stages from stage 3 on (FUN_003d4340 of Ninja Gaiden
+    // Black x2.1 starts its stage loop at 3 when D3DRS_POINTSPRITEENABLE is set), the stage the NV2A gives the sprite
+    // coordinates; stages 0-2 take no part. Ninja Gaiden Black's particles keep a fire texture in stage 0 and the
+    // round dot (16x16) in stage 3: colour = diffuse, alpha = dot * diffuse.
+    int first = render_state()[XRS_POINTSPRITEENABLE] ? 3 : 0;
     std::string key((const char *)k, sizeof k);
+    key.push_back((char)first);
     key.push_back((char)((specular ? 1 : 0) | (def_diffuse ? 2 : 0) | (def_specular ? 4 : 0)));
     key.push_back((char)g_cfg.ffp_debug);
     key.push_back((char)g_cfg.untex);
@@ -156,7 +177,7 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
         last_key = key;
         return last_ps = it->second;
     }
-    std::string hlsl = build_hlsl(k, specular, def_diffuse, def_specular);
+    std::string hlsl = build_hlsl(k, specular, def_diffuse, def_specular, first);
     perf::Scope perf_scope(perf::kCompile);
     perf::add_compile();
     ID3DBlob *code = nullptr, *errors = nullptr;

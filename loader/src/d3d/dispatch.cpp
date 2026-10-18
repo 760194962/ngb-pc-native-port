@@ -44,6 +44,19 @@ const LibFunc kNgbDSound[] = {
 const LibFunc kNgbXpp[] = {
 #include "ngb/xpp_functions.inc"
 };
+struct AuxFuncs {
+    const char *xbe;
+    const LibFunc *funcs;
+    size_t count;
+};
+#include "auxtab/functions.inc"
+struct AuxLayout {
+    const char *xbe;
+    xd3d::DataLayout layout;
+};
+const AuxLayout kAuxLayouts[] = {
+#include "auxtab/layout.inc"
+};
 
 std::vector<LibFunc> g_funcs; // the build's D3D + DSOUND + XPP tables, sorted by address
 std::vector<bool> g_int3_hook;
@@ -203,8 +216,20 @@ namespace xd3d {
 bool install_d3d_hooks(const BuildProfile &profile)
 {
     g_layout = profile.black ? kLayoutBlack : kLayoutNgb;
+    if (profile.aux)
+        for (const AuxLayout &l : kAuxLayouts)
+            if (!strcmp(l.xbe, profile.aux)) g_layout = l.layout;
+    // Addresses a build does not fix (the bundled programs keep these in their device object): the loader's own memory.
+    static float s_vs_constants[192][4];
+    static uint32_t s_push_segment;
+    if (!g_layout.vs_constants) g_layout.vs_constants = (uint32_t)(uintptr_t)s_vs_constants;
+    if (!g_layout.push_segment) g_layout.push_segment = (uint32_t)(uintptr_t)&s_push_segment;
     g_st.vs_constants = (float (*)[4])(uintptr_t)g_layout.vs_constants;
-    if (profile.black) {
+    if (profile.aux) {
+        g_funcs.clear();
+        for (const AuxFuncs &a : kAuxFuncs)
+            if (!strcmp(a.xbe, profile.aux)) g_funcs.assign(a.funcs, a.funcs + a.count);
+    } else if (profile.black) {
         g_funcs.assign(std::begin(kD3D), std::end(kD3D));
         g_funcs.insert(g_funcs.end(), std::begin(kDSound), std::end(kDSound));
         g_funcs.insert(g_funcs.end(), std::begin(kXpp), std::end(kXpp));
@@ -219,7 +244,15 @@ bool install_d3d_hooks(const BuildProfile &profile)
     // The HLE tables hold BLACK's addresses; for another build nothing matches and every library function stops on
     // its first call, which is the state the port is brought up from (one function at a time, from the log).
     std::vector<Hle> all;
-    if (profile.black) {
+    if (profile.aux) {
+        for (auto table : {hle_device_table_aux, hle_resource_table_aux, hle_draw_table_aux, hle_dsound_table_aux, hle_input_table_aux,
+                           hle_ngb_extra_table_aux}) {
+            size_t n = 0;
+            const Hle *t = table(profile.aux, &n);
+            all.insert(all.end(), t, t + n);
+        }
+        logf("hooks: %s: %zu HLE entries; every other function in the hooked sections stops on first call", profile.name, all.size());
+    } else if (profile.black) {
         for (auto table : {hle_device_table, hle_resource_table, hle_draw_table, hle_dsound_table, hle_input_table}) {
             size_t n = 0;
             const Hle *t = table(&n);

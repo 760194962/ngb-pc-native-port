@@ -912,6 +912,82 @@ void dump_render_targets(uint32_t frame)
 }
 
 bool is_backbuffer(const Surface *s) { return s == g_backbuffer; }
+
+// Back buffers drawn by the CPU: the SNES programs bundled with Ninja Gaiden Black lock the back buffer
+// (GetBackBuffer2 + D3DSurface_LockRect) and write the picture into its memory, with no draw call. The memory is
+// guest RAM, the picture shown is the host render target, so a locked back buffer is uploaded before the Swap.
+std::atomic<bool> g_bb_cpu_written;
+IDirect3DTexture9 *g_bb_cpu_sys, *g_bb_cpu_def;
+uint32_t g_bb_cpu_w, g_bb_cpu_h;
+void backbuffer_cpu_lock()
+{
+    static bool noted;
+    if (!noted) {
+        noted = true;
+        logf("[d3d] the back buffer is locked by the title: drawn by the CPU, uploaded at each Swap");
+    }
+    g_bb_cpu_written = true;
+}
+
+void release_cpu_backbuffer()
+{
+    if (g_bb_cpu_def) g_bb_cpu_def->Release();
+    g_bb_cpu_def = nullptr;
+}
+
+void upload_cpu_backbuffer()
+{
+    if (!g_backbuffer || !g_bb_cpu_written.exchange(false)) return;
+    IDirect3DDevice9 *d = host3d::dev();
+    uint32_t w, h;
+    surface_size(g_backbuffer, &w, &h);
+    uint32_t pitch = (((g_backbuffer->Size >> SIZE_PITCH_SHIFT) & 0xFF) + 1) * 64;
+    uint32_t fmt = (g_backbuffer->Format >> FMT_FORMAT_SHIFT) & 0xFF;
+    if (w != g_bb_cpu_w || h != g_bb_cpu_h) {
+        if (g_bb_cpu_sys) g_bb_cpu_sys->Release();
+        g_bb_cpu_sys = nullptr;
+        release_cpu_backbuffer();
+        g_bb_cpu_w = w;
+        g_bb_cpu_h = h;
+    }
+    if (!g_bb_cpu_sys && FAILED(d->CreateTexture(w, h, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &g_bb_cpu_sys, nullptr))) return;
+    if (!g_bb_cpu_def && FAILED(d->CreateTexture(w, h, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &g_bb_cpu_def, nullptr))) return;
+    D3DLOCKED_RECT lr;
+    if (FAILED(g_bb_cpu_sys->LockRect(0, &lr, nullptr, 0))) return;
+    const uint8_t *src = (const uint8_t *)phys_to_virt(g_backbuffer->Data);
+    bool bits16 = fmt == XFMT_R5G6B5 || fmt == XFMT_LIN_R5G6B5 || fmt == XFMT_X1R5G5B5 || fmt == XFMT_LIN_X1R5G5B5 ||
+                  fmt == XFMT_A1R5G5B5 || fmt == XFMT_LIN_A1R5G5B5;
+    bool r565 = fmt == XFMT_R5G6B5 || fmt == XFMT_LIN_R5G6B5;
+    for (uint32_t y = 0; y < h; y++) {
+        uint32_t *o = (uint32_t *)((uint8_t *)lr.pBits + y * lr.Pitch);
+        const uint8_t *row = src + y * pitch;
+        if (!bits16) {
+            memcpy(o, row, w * 4);
+            continue;
+        }
+        const uint16_t *p = (const uint16_t *)row;
+        for (uint32_t x = 0; x < w; x++) {
+            uint32_t v = p[x], r, g, b;
+            if (r565) {
+                r = (v >> 11) & 31, g = (v >> 5) & 63, b = v & 31;
+                o[x] = 0xFF000000u | ((r << 3 | r >> 2) << 16) | ((g << 2 | g >> 4) << 8) | (b << 3 | b >> 2);
+            } else {
+                r = (v >> 10) & 31, g = (v >> 5) & 31, b = v & 31;
+                o[x] = 0xFF000000u | ((r << 3 | r >> 2) << 16) | ((g << 3 | g >> 2) << 8) | (b << 3 | b >> 2);
+            }
+        }
+    }
+    g_bb_cpu_sys->UnlockRect(0);
+    if (FAILED(d->UpdateTexture(g_bb_cpu_sys, g_bb_cpu_def))) return;
+    IDirect3DSurface9 *from = nullptr, *to = nullptr;
+    HostRT &bb = host_rt(g_backbuffer);
+    if (SUCCEEDED(g_bb_cpu_def->GetSurfaceLevel(0, &from)) && bb.tex && SUCCEEDED(bb.tex->GetSurfaceLevel(0, &to))) {
+        host3d::end_scene();
+        d->StretchRect(from, nullptr, to, nullptr, D3DTEXF_POINT);
+    }
+    if (from) from->Release();
+    if (to) to->Release();
+}
 uint32_t backbuffer_data() { return g_backbuffer ? g_backbuffer->Data : 0; }
 uint32_t depthbuffer_data() { return g_depthbuffer ? g_depthbuffer->Data : 0; }
 
@@ -966,6 +1042,10 @@ HRESULT __stdcall Direct3D_CreateDevice(uint32_t Adapter, uint32_t DeviceType, u
 
     // The library's device object is static (g_Device, DEVICE_SIZE below D3D_g_pDevice; g_layout); game code reads
     // some of its fields by absolute address, so use that storage.
+    // The bundled programs' layouts leave it 0 (their g_Device is not located): the loader's own storage, reached by
+    // the game through D3D_g_pDevice like any other device pointer.
+    alignas(16) static uint8_t s_device[DEVICE_SIZE];
+    if (!g_layout.device_object) g_layout.device_object = (uint32_t)(uintptr_t)s_device;
     g_dev = (uint8_t *)(uintptr_t)g_layout.device_object;
     memset(g_dev, 0, DEVICE_SIZE);
     g_push_base = (uint32_t *)VirtualAlloc(nullptr, PUSH_BYTES, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -1221,6 +1301,7 @@ namespace {
 
 void release_host_targets()
 {
+    release_cpu_backbuffer();
     host3d::end_scene();
     IDirect3DDevice9 *d = host3d::dev();
     d->SetRenderTarget(0, g_host_backbuffer);
@@ -1402,6 +1483,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     pb_flush();
     perf::swap_begin();
     pace_swap();
+    upload_cpu_backbuffer();
     present_backbuffer();
     copy_to_frontbuffer();
     capture_frame();
@@ -1481,6 +1563,16 @@ HRESULT __stdcall D3DDevice_SetRenderTarget(Surface *pRenderTarget, Surface *pNe
     }
     fit_viewport();
     return D3D_OK;
+}
+
+// GetBackBuffer2(-1) is the front buffer (the last presented frame), 0 the back buffer; called by the bundled
+// programs (BLACK and Ninja Gaiden Black read the device fields inline).
+Surface *__stdcall D3DDevice_GetBackBuffer2(int32_t index)
+{
+    DTRACE("%d", index);
+    Surface *s = index < 0 ? g_frontbuffer : g_backbuffer;
+    if (s) s->Common++;
+    return s;
 }
 
 Surface *__stdcall D3DDevice_GetRenderTarget2()
@@ -2303,6 +2395,19 @@ void __stdcall D3D_BlockOnTime(uint32_t Time, BOOL MakeSpace) { DTRACE("%u, %d",
 #define H(addr, fn, params, ret) {addr, #fn, (void *)&fn, params, ret}
 #define NATIVE(addr, name) {addr, name, nullptr, "", false}
 
+// The vblank / swap callbacks: BLACK and Ninja Gaiden Black write the device fields inline (LTCG); the bundled
+// programs (plain D3D8) call the setters. The vblank thread and Swap call what the fields hold.
+void __stdcall D3DDevice_SetVerticalBlankCallback(void *cb)
+{
+    DTRACE("%p", cb);
+    dev_field<void *>(DEV_VBLANKCALLBACK) = cb;
+}
+void __stdcall D3DDevice_SetSwapCallback(void *cb)
+{
+    DTRACE("%p", cb);
+    dev_field<void *>(DEV_SWAPCALLBACK) = cb;
+}
+
 static const Hle kTable[] = {
     H(0x00277580, Direct3D_GetAdapterModeCount, "s", true),
     H(0x00277640, Direct3D_EnumAdapterModes, "s s s", true),
@@ -2316,6 +2421,9 @@ static const Hle kTable[] = {
     H(0x0026a1f0, D3DDevice_End, "", false),
     H(0x00268880, D3DDevice_Clear, "s s s s s s", true),
     H(0x002773a0, D3DDevice_Swap, "s", true),
+    H(0x00000000, D3DDevice_SetVerticalBlankCallback, "s", false), // not called by BLACK (bundled programs)
+    H(0x00000000, D3DDevice_SetSwapCallback, "s", false),         // not called by BLACK (bundled programs)
+    H(0x00000000, D3DDevice_GetBackBuffer2, "s", true),          // not called by BLACK (bundled programs)
     H(0x0026a420, D3DDevice_SetRenderTarget, "s s", true),
     H(0x0026aa60, D3DDevice_GetRenderTarget2, "", true),
     H(0x0026aaa0, D3DDevice_GetDepthStencilSurface2, "", true),
@@ -2374,6 +2482,8 @@ const Hle *hle_device_table_ngb(size_t *count)
     *count = sizeof kNgbTable / sizeof kNgbTable[0];
     return kNgbTable;
 }
+
+#include "auxtab/device_tables.inc"
 
 void request_device_reset() { g_reset_requested = true; }
 

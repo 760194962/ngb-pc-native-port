@@ -170,6 +170,8 @@ void init_default_states()
     rs[XRS_SPECULARMATERIALSOURCE] = 2;
     rs[XRS_DIFFUSEMATERIALSOURCE] = 1;
     rs[XRS_POINTSIZE] = f2u(1.0f);
+    rs[XRS_POINTSIZE_MAX] = f2u(64.0f); // D3D8 defaults
+    rs[XRS_POINTSCALE_A] = f2u(1.0f);
     rs[XRS_FILLMODE] = rs[XRS_BACKFILLMODE] = 0x1B02;
     rs[XRS_ZENABLE] = 1;
     rs[XRS_FRONTFACE] = 0x900;
@@ -309,7 +311,22 @@ void apply_render_states(IDirect3DDevice9 *d)
     on_change(XRS_AMBIENT, [&](uint32_t v) { set(D3DRS_AMBIENT, v); });
     on_change(XRS_NORMALIZENORMALS, [&](uint32_t v) { set(D3DRS_NORMALIZENORMALS, v != 0); });
     on_change(XRS_TEXTUREFACTOR, [&](uint32_t v) { set(D3DRS_TEXTUREFACTOR, v); });
-    on_change(XRS_POINTSIZE, [&](uint32_t v) { set(D3DRS_POINTSIZE, v); });
+    // Point sprites: Ninja Gaiden Black draws its particles (torch smoke, sparks: FUN_002b9d20) as POINTLIST with
+    // POINTSPRITEENABLE. Only POINTSIZE reached the host before, so each particle was one pixel. Sizes are pixels of
+    // the Xbox target; POINTSCALEENABLE sizes scale with the viewport height (already the host's), so the host
+    // target scale applies to the fixed size and to the min / max clamps. Set every draw: the target can change.
+    {
+        const uint32_t *rs = render_state();
+        float k = target_scale_y();
+        set(D3DRS_POINTSPRITEENABLE, rs[XRS_POINTSPRITEENABLE] != 0);
+        set(D3DRS_POINTSCALEENABLE, rs[XRS_POINTSCALEENABLE] != 0);
+        set(D3DRS_POINTSIZE, f2u(as_float(rs[XRS_POINTSIZE]) * (rs[XRS_POINTSCALEENABLE] ? 1.0f : k)));
+        set(D3DRS_POINTSIZE_MIN, f2u(as_float(rs[XRS_POINTSIZE_MIN]) * k));
+        set(D3DRS_POINTSIZE_MAX, f2u(as_float(rs[XRS_POINTSIZE_MAX]) * k));
+        set(D3DRS_POINTSCALE_A, rs[XRS_POINTSCALE_A]);
+        set(D3DRS_POINTSCALE_B, rs[XRS_POINTSCALE_B]);
+        set(D3DRS_POINTSCALE_C, rs[XRS_POINTSCALE_C]);
+    }
 }
 
 template <typename F> void ts_on_change(int s, int t, F apply)
@@ -981,6 +998,9 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
              rs[XRS_FOGENABLE], rs[XRS_FOGTABLEMODE], fs, fe, fd, rs[XRS_FOGCOLOR], rs[XRS_RANGEFOGENABLE],
              rs[XRS_LIGHTING], rs[XRS_AMBIENT], rs[XRS_SPECULARENABLE], rs[XRS_COLORVERTEX], rs[XRS_DIFFUSEMATERIALSOURCE],
              rs[XRS_AMBIENTMATERIALSOURCE], rs[XRS_SPECULARMATERIALSOURCE], rs[XRS_EMISSIVEMATERIALSOURCE], rs[XRS_VERTEXBLEND]);
+        logf("[draw]   point size %g min %g max %g sprite %u scale %u (%g %g %g)", as_float(rs[XRS_POINTSIZE]),
+             as_float(rs[XRS_POINTSIZE_MIN]), as_float(rs[XRS_POINTSIZE_MAX]), rs[XRS_POINTSPRITEENABLE], rs[XRS_POINTSCALEENABLE],
+             as_float(rs[XRS_POINTSCALE_A]), as_float(rs[XRS_POINTSCALE_B]), as_float(rs[XRS_POINTSCALE_C]));
         if (rs[XRS_LIGHTING]) {
             D3DMATERIAL9 mat = {};
             host3d::dev()->GetMaterial(&mat);
@@ -1023,7 +1043,7 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
             logf("[draw]   psh stage %u: rgb in 0x%08x out 0x%08x | alpha in 0x%08x out 0x%08x", i, rs[34 + i], rs[45 + i], rs[i], rs[26 + i]);
     }
     if (!g_st.pixel_shader)
-        for (int s = 0; s < 2; s++) {
+        for (int s = 0; s < 4; s++) {
             const uint32_t *ts = texture_state(s);
             logf("[draw]   stage %d: color op %u args 0x%x 0x%x | alpha op %u args 0x%x 0x%x | tfactor 0x%08x | xform flags %u addr %u/%u tci 0x%x", s, ts[12], ts[14], ts[15],
                  ts[16], ts[18], ts[19], rs[XRS_TEXTUREFACTOR], ts[21], ts[0], ts[1], ts[28]);
@@ -1159,6 +1179,17 @@ bool begin_draw(DrawCtx &ctx)
             set_vs(d, nullptr);
             set_fvf(d, h);
             apply_fvf_texture_scale(d, (h & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
+            if (render_state()[XRS_POINTSPRITEENABLE] && !((h >> 8) & 0xF)) {
+                // Point sprites whose vertices carry no texture coordinates (Ninja Gaiden Black's particles: FVF
+                // XYZ|DIFFUSE). The host replaces only the coordinates the vertex pipeline outputs; a generated
+                // coordinate gives the stage (stage 3, the sprite stage on the Xbox: d3d/ffp_ps.cpp) an output for
+                // the sprite coordinates to replace.
+                for (int s = 0; s < 4; s++) {
+                    if (!g_st.textures[s]) continue;
+                    d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEPOSITION | s);
+                    g_ts_valid[s][28] = false; // the game's index is sent again on the next draw
+                }
+            }
             ctx.path = Path::Fvf;
             ctx.fvf = h;
         }
@@ -1793,5 +1824,7 @@ void release_draw_buffers()
     g_ring_ib = nullptr;
     g_ring_vpos = g_ring_ipos = 0;
 }
+
+#include "auxtab/draw_tables.inc"
 
 } // namespace xd3d

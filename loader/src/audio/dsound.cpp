@@ -126,7 +126,26 @@ struct Buffer : Voice {
     uint32_t cur = 0; // next source frame to fetch
     uint32_t loop_start = 0, loop_len = 0, play_start = 0, play_len = 0; // bytes
     bool playing = false, looping = false;
+    // SetNotificationPositions: {byte offset, event}; offset 0xFFFFFFFF (DSBPN_OFFSETSTOP) = when the buffer stops
+    std::vector<std::pair<uint32_t, HANDLE>> notes;
 };
+
+// Events whose offset the play position passed while mixing [from, to) (bytes; to < from = wrapped round a loop).
+void notify_passed(Buffer &b, uint32_t from, uint32_t to)
+{
+    if (from == to) return;
+    for (const auto &n : b.notes) {
+        if (n.first == 0xFFFFFFFFu) continue;
+        bool hit = from < to ? (n.first >= from && n.first < to) : (n.first >= from || n.first < to);
+        if (hit) SetEvent(n.second);
+    }
+}
+
+void notify_stop(Buffer &b)
+{
+    for (const auto &n : b.notes)
+        if (n.first == 0xFFFFFFFFu) SetEvent(n.second);
+}
 
 struct Stream : Voice {
     StreamDesc desc = {};
@@ -421,7 +440,12 @@ void mix_block(float *out, std::vector<Completion> &done)
     std::lock_guard<std::recursive_mutex> g(g_mutex);
     for (Buffer *b : g_buffers) {
         if (!b->playing || !b->data || !b->bytes || !b->fmt.nBlockAlign) continue;
+        uint32_t from = frames_to_bytes(b->fmt, b->cur);
         if (!mix_voice(*b, out, [&](float *f) { return buffer_fetch(*b, f); })) b->playing = false;
+        if (!b->notes.empty()) {
+            notify_passed(*b, from, frames_to_bytes(b->fmt, b->cur));
+            if (!b->playing) notify_stop(*b);
+        }
     }
     for (Stream *s : g_streams) {
         if (s->paused || s->queue.empty() || !s->fmt.nBlockAlign) continue;
@@ -1016,6 +1040,7 @@ HRESULT __stdcall IDirectSoundStream_FlushEx(void *p, uint32_t tsLo, uint32_t ts
 #define H(addr, fn, params, ret) {addr, #fn, (void *)&fn, params, ret}
 #define HN(addr, name, fn, params, ret) {addr, name, (void *)&fn, params, ret}
 
+HRESULT __stdcall IDirectSoundBuffer_SetNotificationPositions(void *p, uint32_t count, const uint32_t *notifies);
 static const xd3d::Hle kTable[] = {
     H(0x0021b4f6, DirectSoundCreate, "s s s", true),
     H(0x0021b53d, DirectSoundCreateStream, "s s", true),
@@ -1050,6 +1075,7 @@ static const xd3d::Hle kTable[] = {
     H(0x002197d3, IDirectSoundBuffer_SetLoopRegion, "s s s", true),
     H(0x002197f3, IDirectSoundBuffer_GetStatus, "s s", true),
     H(0x0021980f, IDirectSoundBuffer_GetCurrentPosition, "s s s", true),
+    H(0x00000000, IDirectSoundBuffer_SetNotificationPositions, "s s s", true), // not used by BLACK (bundled programs)
     H(0x0021982f, IDirectSoundBuffer_SetCurrentPosition, "s s", true),
     H(0x0021a137, IDirectSoundBuffer_SetFrequency, "s s", true),
     HN(0x0021a153, "IDirectSoundBuffer_SetOutputBuffer", IDirectSoundBuffer_Set1, "s s", true),
@@ -1099,6 +1125,24 @@ HRESULT __stdcall IDirectSoundBuffer_Unlock(void *p, void *pv1, uint32_t b1, voi
 }
 
 HRESULT __stdcall IDirectSoundBuffer_Stop(void *p) { return IDirectSoundBuffer_StopEx(p, 0, 0, 0); }
+
+// DSBPOSITIONNOTIFY[] {dwOffset, hEventNotify}: the events are the kernel's (host) handles. Ninja Gaiden Black's
+// bundled NES / SNES programs stream their sound through a looping buffer refilled on these events.
+HRESULT __stdcall IDirectSoundBuffer_SetNotificationPositions(void *p, uint32_t count, const uint32_t *notifies)
+{
+    STRACE("%p, %u, %p", p, count, notifies);
+    Buffer *b = as_buffer(p);
+    if (!b) return E_INVALIDARG;
+    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    b->notes.clear();
+    for (uint32_t i = 0; i < count && notifies; i++) b->notes.push_back({notifies[2 * i], (HANDLE)(uintptr_t)notifies[2 * i + 1]});
+    static bool noted;
+    if (!noted) {
+        noted = true;
+        logf("[dsound] SetNotificationPositions: %u positions on buffer %p (first at byte %u)", count, p, count ? notifies[0] : 0);
+    }
+    return S_OK;
+}
 
 // Per-voice 3D parameters set one at a time (BLACK used SetAllParameters only).
 #define DS3D_SETTER(fn, field)                                             \
@@ -1154,9 +1198,12 @@ static const xd3d::Hle kNgbTable[] = {
     H(0x0037a942, IDirectSound_Stub3, "s s s", true),
 };
 
+using Hle = xd3d::Hle;
+#include "auxtab/dsound_tables.inc"
 } // namespace xdsound
 
 namespace xd3d {
+const Hle *hle_dsound_table_aux(const char *xbe, size_t *count) { return xdsound::hle_dsound_table_aux(xbe, count); }
 const Hle *hle_dsound_table(size_t *count)
 {
     *count = sizeof xdsound::kTable / sizeof xdsound::kTable[0];

@@ -258,6 +258,7 @@ HRESULT __stdcall D3DSurface_LockRect(Surface *pThis, D3DLOCKED_RECT *pLockedRec
     DTRACE("%p, %p, %p, 0x%x", pThis, pLockedRect, pRect, Flags);
     lock_rect(pThis, 0, 0, pLockedRect, pRect);
     if (pThis->Parent) texture_mark_dirty(pThis->Parent);
+    if (is_backbuffer(pThis)) backbuffer_cpu_lock();
     return D3D_OK;
 }
 
@@ -343,5 +344,7 @@ const Hle *hle_resource_table_ngb(size_t *count)
     *count = sizeof kNgbTable / sizeof kNgbTable[0];
     return kNgbTable;
 }
+
+#include "auxtab/resources_tables.inc"
 
 } // namespace xd3d

@@ -137,9 +137,107 @@ void __stdcall HalRegisterShutdownNotification(void *ShutdownRegistration, BOOLE
     KTRACE("%p, %u", ShutdownRegistration, Register);
 }
 
+// --- XLaunchNewImage: Ninja Gaiden Black starts its bundled programs (NinjaTomoe / NinjaTrilogy / NinjaFCJ / NinjaFCU)
+// and they start it again. XAPI fills the launch data page (type, title, szLaunchPath at +8 = "<directory>;<file>" with
+// the directory a device path, flags at +0x210, the title's data at +0x400) and asks for a quick reboot. Here the
+// loader starts itself again on the target XBE with the page (--launch-data) and this process ends.
+
+void load_launch_data(const std::wstring &file)
+{
+    static XLAUNCH_DATA_PAGE page;
+    FILE *f = _wfopen(file.c_str(), L"rb");
+    size_t n = f ? fread(&page, 1, sizeof page, f) : 0;
+    if (f) fclose(f);
+    if (n != sizeof page) {
+        logf("[k] launch data %s: could not read 4096 bytes (got %zu); starting without it", narrow(file).c_str(), n);
+        return;
+    }
+    LaunchDataPage = &page;
+    const uint32_t *ld = (const uint32_t *)&page;
+    logf("[k] launch data from %s: type %u, title %08X, path '%.64s', flags 0x%x", narrow(file).c_str(), ld[0], ld[1],
+         (const char *)page.Header + 8, ld[0x210 / 4]);
+}
+
+// The launch path as a host file: "\\Device\\CdRom0\\dir;file.xbe" or "D:\\dir;file.xbe" -> game folder\\dir\\file.xbe.
+static std::wstring launch_target(const char *path)
+{
+    std::string p(path, strnlen(path, 520));
+    if (p.empty()) return L"";
+    for (char &c : p)
+        if (c == ';') c = '\\';
+    std::string lower = p;
+    for (char &c : lower) c = (char)tolower((unsigned char)c);
+    std::string rest;
+    if (lower.rfind("\\device\\cdrom0", 0) == 0) rest = p.substr(14);
+    else if (lower.rfind("d:", 0) == 0) rest = p.substr(2);
+    else return L"";
+    while (!rest.empty() && rest[0] == '\\') rest.erase(0, 1);
+    return g_cfg.game_dir + L"\\" + widen(rest);
+}
+
+static bool relaunch(const std::wstring &xbe)
+{
+    // the page beside the log, the log renamed after the target ("black.log" -> "black.NinjaFCJ.log")
+    std::wstring log = g_cfg.log_path, dir = L".", stem = log;
+    size_t slash = log.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) {
+        dir = log.substr(0, slash);
+        stem = log.substr(slash + 1);
+    }
+    if (stem.size() > 4 && _wcsicmp(stem.c_str() + stem.size() - 4, L".log") == 0) stem.resize(stem.size() - 4);
+    std::wstring cur = g_cfg.xbe_path.substr(g_cfg.xbe_path.find_last_of(L"\\/") + 1);
+    cur = cur.substr(0, cur.find_last_of(L'.'));
+    if (stem.size() > cur.size() + 1 && stem.compare(stem.size() - cur.size() - 1, std::wstring::npos, L"." + cur) == 0)
+        stem.resize(stem.size() - cur.size() - 1);
+    std::wstring target = xbe.substr(xbe.find_last_of(L"\\/") + 1);
+    target = target.substr(0, target.find_last_of(L'.'));
+    std::wstring page_file = dir + L"\\" + stem + L"." + target + L".launchdata";
+    FILE *f = _wfopen(page_file.c_str(), L"wb");
+    if (!f) return false;
+    fwrite(LaunchDataPage, 1, sizeof(XLAUNCH_DATA_PAGE), f);
+    fclose(f);
+    std::wstring new_log = dir + L"\\" + stem + (target == L"default" ? L"" : L"." + target) + L".log";
+
+    std::vector<std::wstring> args = g_cfg.args;
+    for (size_t i = 0; i < args.size(); i++) {
+        // the scripted presses belong to the program they were written for
+        if ((args[i] == L"--log" || args[i] == L"--launch-data" || args[i] == L"--press") && i + 1 < args.size()) {
+            args.erase(args.begin() + i, args.begin() + i + 2);
+            if ((int)i < g_cfg.xbe_arg) g_cfg.xbe_arg -= 2;
+            i--;
+        }
+    }
+    if (g_cfg.xbe_arg >= 0 && g_cfg.xbe_arg < (int)args.size()) args[g_cfg.xbe_arg] = xbe;
+    else args.push_back(xbe);
+    args.insert(args.begin(), {L"--log", new_log, L"--launch-data", page_file});
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring cmd = L"\"" + std::wstring(exe) + L"\"";
+    for (const std::wstring &a : args) cmd += L" \"" + a + L"\"";
+    STARTUPINFOW si = {sizeof si};
+    PROCESS_INFORMATION pi = {};
+    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+        logf("[k] relaunch failed (error %lu): %s", GetLastError(), narrow(cmd).c_str());
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    logf("[k] relaunched as process %lu on %s (log %s)", pi.dwProcessId, narrow(xbe).c_str(), narrow(new_log).c_str());
+    return true;
+}
+
 void __stdcall HalReturnToFirmware(uint32_t Routine)
 {
     logf("[k] HalReturnToFirmware(%u): the game asked to leave (0 halt, 1 reboot, 2 quick reboot, 3 fatal error)", Routine);
+    if (LaunchDataPage && (Routine == 1 || Routine == 2)) {
+        const char *path = (const char *)LaunchDataPage->Header + 8;
+        std::wstring xbe = launch_target(path);
+        logf("    launch path '%.64s' -> %s", path, xbe.empty() ? "(no XBE)" : narrow(xbe).c_str());
+        if (!xbe.empty() && GetFileAttributesW(xbe.c_str()) != INVALID_FILE_ATTRIBUTES && relaunch(xbe)) {
+            request_exit(0, "XLaunchNewImage");
+            Sleep(INFINITE);
+        }
+    }
     if (LaunchDataPage) {
         const uint32_t *ld = (const uint32_t *)LaunchDataPage;
         logf("    launch data page %p: type %u, title %08X, flags 0x%x; data %08x %08x %08x", LaunchDataPage, ld[0], ld[1], ld[2],

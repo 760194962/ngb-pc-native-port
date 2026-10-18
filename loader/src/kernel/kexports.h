@@ -84,6 +84,8 @@ NTSTATUS __stdcall NtCreateSemaphore(HANDLE *SemaphoreHandle, XOBJECT_ATTRIBUTES
 NTSTATUS __stdcall NtReleaseSemaphore(HANDLE SemaphoreHandle, int32_t ReleaseCount, int32_t *PreviousCount);
 NTSTATUS __stdcall NtWaitForSingleObject(HANDLE Handle, BOOLEAN Alertable, LARGE_INTEGER *Timeout);
 NTSTATUS __stdcall NtWaitForSingleObjectEx(HANDLE Handle, uint8_t WaitMode, BOOLEAN Alertable, LARGE_INTEGER *Timeout);
+NTSTATUS __stdcall NtWaitForMultipleObjectsEx(uint32_t Count, HANDLE *Handles, uint32_t WaitType, uint8_t WaitMode, BOOLEAN Alertable,
+                                             LARGE_INTEGER *Timeout);
 int32_t __stdcall KeSetEvent(XKEVENT *Event, int32_t Increment, BOOLEAN Wait);
 NTSTATUS __stdcall KeWaitForSingleObject(void *Object, uint32_t WaitReason, uint8_t WaitMode, BOOLEAN Alertable,
                                          LARGE_INTEGER *Timeout);
@@ -153,6 +155,7 @@ extern uint8_t PsThreadObjectType[64];
 extern uint32_t HalDiskCachePartitionCount;
 extern uint32_t HalBootSMCVideoMode;
 extern XLAUNCH_DATA_PAGE *LaunchDataPage;
+void load_launch_data(const std::wstring &file); // --launch-data (kernel/k_misc.cpp)
 extern XXBOX_HARDWARE_INFO XboxHardwareInfo;
 extern uint8_t XboxHDKey[16];
 extern XXBOX_KRNL_VERSION XboxKrnlVersion;

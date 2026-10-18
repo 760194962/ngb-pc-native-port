@@ -194,6 +194,10 @@ void read_press_file(uint32_t now_ms)
                     logf("[input] trace requested: frame %u%s", g_cfg.debug_frame, n > 1 ? " (range)" : "");
                     continue;
                 }
+                if (line.rfind("probe:", 0) == 0) {
+                    probe_add((uint32_t)strtoul(line.c_str() + 6, nullptr, 16));
+                    continue;
+                }
                 if (line.rfind("logvar:", 0) == 0) {
                     xd3d::logvar_add((uint32_t)strtoul(line.c_str() + 7, nullptr, 16));
                     continue;
@@ -462,6 +466,14 @@ void __stdcall XInputClose(Device *h)
     if (h && h->magic == DEV_MAGIC) h->magic = 0;
 }
 
+// XInputPoll: titles that turn auto-polling off ask for a fresh state with it (the SNES programs bundled with Ninja
+// Gaiden Black); XInputGetState here always reads the pad as it is now, so there is nothing to do.
+uint32_t __stdcall XInputPoll(Device *h)
+{
+    if (!h || h->magic != DEV_MAGIC) return ERROR_DEVICE_NOT_CONNECTED;
+    return ERROR_SUCCESS;
+}
+
 uint32_t __stdcall XInputGetState(Device *h, XState *pState)
 {
     if (!h || h->magic != DEV_MAGIC) return ERROR_DEVICE_NOT_CONNECTED;
@@ -522,6 +534,7 @@ static const xd3d::Hle kTable[] = {
     H(0x0027ddec, XInputClose, "s", false),
     H(0x0027ddf8, XInputGetState, "s s", true),
     H(0x0027de6b, XInputSetState, "s s", true),
+    H(0x00000000, XInputPoll, "s", true), // not called by BLACK (bundled programs)
 };
 
 // NINJA GAIDEN BLACK x2.1: the entry points its code calls (docs/02 §2; 0x3DA5D4 is XAPI's `jmp XInitDevices`
@@ -538,9 +551,12 @@ static const xd3d::Hle kNgbTable[] = {
     H(0x003dbbde, XInputSetState, "s s", true),
 };
 
+using Hle = xd3d::Hle;
+#include "auxtab/input_tables.inc"
 } // namespace xinput
 
 namespace xd3d {
+const Hle *hle_input_table_aux(const char *xbe, size_t *count) { return xinput::hle_input_table_aux(xbe, count); }
 const Hle *hle_input_table(size_t *count)
 {
     *count = sizeof xinput::kTable / sizeof xinput::kTable[0];

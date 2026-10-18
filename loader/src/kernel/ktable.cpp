@@ -148,6 +148,7 @@ const KExport kExports[] = {
     F(231, NtSuspendThread, 2),
     F(233, NtWaitForSingleObject, 3),
     F(234, NtWaitForSingleObjectEx, 4),
+    F(235, NtWaitForMultipleObjectsEx, 6),
     F(236, NtWriteFile, 8),
     F(238, NtYieldExecution, 0),
     F(246, ObReferenceObjectByHandle, 3),
