@@ -96,6 +96,7 @@ struct Config {
     bool reverb = true;        // mix the I3DL2 reverb send (--no-reverb to compare)
     float reverb_gain = 1.0f;  // --reverb-gain: overall reverb level
     bool background = false;   // --background (tests): window minimised without focus, audio muted
+    bool trace_fog_ps = false; // --trace-fog-ps (diagnosis): trace the frame after the first fogged pixel-shader draw
     bool api_count = false;    // --api-count (diagnosis): Direct3D 9 calls by kind per frame (d3d/apicount.cpp)
     std::wstring wav_path;     // --wav: record the mixer output (16-bit stereo 48 kHz)
     std::wstring rawvideo;     // --rawvideo: the shown picture as raw BGRX frames (from --shot-start, --clip-seconds)

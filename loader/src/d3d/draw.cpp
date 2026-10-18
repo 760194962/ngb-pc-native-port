@@ -233,6 +233,22 @@ void set_ttff(IDirect3DDevice9 *d, int s, DWORD v)
     d->SetTextureStageState(s, D3DTSS_TEXTURETRANSFORMFLAGS, v);
 }
 
+// Whether the bound pixel shader's combiners read the FOG register (register 3) in any used input.
+bool psh_reads_fog()
+{
+    const uint32_t *rs = render_state();
+    auto has = [](uint32_t inputs) {
+        for (int b = 0; b < 4; b++)
+            if (((inputs >> (8 * b)) & 0x0F) == 3) return true;
+        return false;
+    };
+    uint32_t stages = rs[53] & 0xFF; // PSCombinerCount
+    if (stages > 8) stages = 8;
+    for (uint32_t i = 0; i < stages; i++)
+        if (has(rs[34 + i]) || has(rs[i])) return true; // PSRGBInputs / PSAlphaInputs
+    return has(rs[8]) || has(rs[9] & 0xFFFFFF00u);         // final combiner ABCD, EFG (low byte = flags)
+}
+
 template <typename F> void on_change(uint32_t state, F apply)
 {
     uint32_t v = render_state()[state];
@@ -316,7 +332,19 @@ void apply_render_states(IDirect3DDevice9 *d)
     on_change(XRS_FILLMODE, [&](uint32_t v) {
         set(D3DRS_FILLMODE, v == 0x1B00 ? D3DFILL_POINT : v == 0x1B01 ? D3DFILL_WIREFRAME : D3DFILL_SOLID);
     });
-    on_change(XRS_FOGENABLE, [&](uint32_t v) { set(D3DRS_FOGENABLE, v != 0 && !g_cfg.no_fog); });
+    // Host fog: fixed-function draws only. On the NV2A fog reaches a pixel shader only through its FOG register,
+    // used by the combiners, and nothing fogs after it (xemu psh.c pFog); Direct3D 9 fogs after a ps_2_0 shader.
+    // Ninja Gaiden Black draws its shadow receivers (no FOG input) with fog on: they came out tinted with the fog
+    // colour (r215, docs/04 §3.21).
+    {
+        static DWORD fog_sent;
+        DWORD fog = render_state()[XRS_FOGENABLE] != 0 && !g_cfg.no_fog && !g_st.pixel_shader;
+        if (!g_rs_valid[XRS_FOGENABLE] || fog != fog_sent) {
+            set(D3DRS_FOGENABLE, fog);
+            fog_sent = fog;
+            g_rs_valid[XRS_FOGENABLE] = true;
+        }
+    }
     on_change(XRS_FOGSTART, [&](uint32_t v) { set(D3DRS_FOGSTART, v); });
     on_change(XRS_FOGEND, [&](uint32_t v) { set(D3DRS_FOGEND, v); });
     on_change(XRS_FOGDENSITY, [&](uint32_t v) { set(D3DRS_FOGDENSITY, v); });
@@ -1225,6 +1253,14 @@ bool begin_draw(DrawCtx &ctx)
                                  : ffp_pixel_shader(!fvf_vs || (vsh & D3DFVF_DIFFUSE) != 0, !fvf_vs || (vsh & D3DFVF_SPECULAR) != 0,
                                                     fvf_vs && (vsh & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
     set_ps(d, hps);
+    if (ps && render_state()[XRS_FOGENABLE] && psh_reads_fog()) {
+        // A pixel shader that reads its FOG register with fog on: the translator's FOG has the fog colour but alpha 1
+        // (the vertex fog factor is not passed to the host shader). None in the traced scenes; note one if it comes.
+        static int noted;
+        if (noted++ < 4) logf("[draw] frame %u: pixel shader 0x%x reads FOG with fog enabled (fog factor not emulated; docs/04 §3.21)",
+                              g_frame_count.load(), g_st.pixel_shader);
+        if (noted == 1 && g_cfg.trace_fog_ps && !g_cfg.debug_frame) g_cfg.debug_frame = g_frame_count + 1; // --trace-fog-ps
+    }
     if (ps && hps) upload_ps_constants(d);
     else if (ps) apply_pixel_shader_fallback(d);
     else if (hps) upload_ffp_constants(d);

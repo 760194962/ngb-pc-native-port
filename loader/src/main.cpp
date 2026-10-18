@@ -200,6 +200,7 @@ bool parse_args()
         }
         else if (a == L"--background") g_cfg.background = true;
         else if (a == L"--api-count") g_cfg.api_count = true;
+        else if (a == L"--trace-fog-ps") g_cfg.trace_fog_ps = true;
         else if (a == L"--wav") { if (!next(g_cfg.wav_path)) return false; }
         else if (a == L"--rawvideo") { if (!next(g_cfg.rawvideo)) return false; }
         else if (a == L"--clip-seconds") {
