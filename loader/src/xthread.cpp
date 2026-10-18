@@ -91,7 +91,7 @@ void xthread_bind(XThread *t)
     xthread_register(t);
     if (g_game_cpu) SetThreadAffinityMask(GetCurrentThread(), g_game_cpu);
     if (g_cfg.watch_count) {
-        // Hardware write breakpoints (DR0-3, 4-byte, write-only) for --watch.
+        // Hardware breakpoints (DR0-3, 4-byte; write-only, or read/write with an "r" suffix) for --watch.
         CONTEXT c = {};
         c.ContextFlags = CONTEXT_DEBUG_REGISTERS;
         GetThreadContext(GetCurrentThread(), &c);
@@ -99,7 +99,8 @@ void xthread_bind(XThread *t)
         c.Dr7 = 0;
         for (int i = 0; i < g_cfg.watch_count; i++) {
             *dr[i] = g_cfg.watch[i];
-            c.Dr7 |= (1u << (i * 2)) | (0x1u << (16 + i * 4)) | (0x3u << (18 + i * 4));
+            uint32_t rw = (g_cfg.watch_rw >> i) & 1 ? 0x3u : 0x1u; // read/write or write
+            c.Dr7 |= (1u << (i * 2)) | (rw << (16 + i * 4)) | (0x3u << (18 + i * 4));
         }
         if (!SetThreadContext(GetCurrentThread(), &c)) logf("watch: SetThreadContext failed (%lu)", GetLastError());
     }

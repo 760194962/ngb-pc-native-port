@@ -1096,6 +1096,11 @@ void pace_swap()
 {
     static uint32_t last_vb;
     uint32_t iv = render_state()[XRS_PRESENTATIONINTERVAL];
+    static uint32_t logged_iv = ~0u;
+    if (iv != logged_iv) {
+        logf("[d3d] frame %u: presentation interval 0x%x", g_frame_count.load(), iv);
+        logged_iv = iv;
+    }
     uint32_t n;
     switch (iv & 0xF) {
     case 0: n = (iv & 0x80000000) ? 0 : 1; break; // DEFAULT = ONE
@@ -1107,11 +1112,11 @@ void pace_swap()
     if (n) {
         uint32_t target = last_vb + n, now = g_vblank_count.load();
         // A plain interval (no _OR_IMMEDIATE bit) flips at the next vblank even when the frame is late: BLACK's loop is
-        // paced by that. Ninja Gaiden Black paces itself (it waits for its vblank callback each frame, interval ONE), so
-        // forcing another vblank here made every frame take two (genma-pc saw the same, docs/04): for it the flip is
-        // immediate once the interval has passed.
-        bool black = g_cfg.profile && g_cfg.profile->black;
-        if (now >= target && !(iv & 0x80000000) && black) target = now + 1;
+        // paced by that. Ninja Gaiden Black plays with ONE_OR_IMMEDIATE (0x80000001), which flips at once when late, but
+        // switches to plain ONE (0x1) for movies: as it also waits for its vblank callback each frame, every movie frame
+        // takes two vblanks on the Xbox (30 fps, as on the console and in xemu). Its movie subtitles live a fixed number of
+        // frames, so at 60 fps they expired while the cue was still on and were shown a second time (docs/05 §7).
+        if (now >= target && !(iv & 0x80000000)) target = now + 1;
         if (g_trace_d3d) logf("[d3d] pace_swap: interval 0x%x n %u last_vb %u now %u target %u", iv, n, last_vb, now, target);
         while (g_vblank_count.load() < target) WaitForSingleObject(g_vblank_wake, 4); // Sleep(1) polling woke 0-2 ms late
     }
@@ -1309,6 +1314,7 @@ void recover_device(bool force)
     }
     if (hr != D3DERR_DEVICENOTRESET) return; // still lost (D3DERR_DEVICELOST): ask again next frame
     release_host_targets();
+    release_draw_buffers();
     d->SetRenderTarget(0, g_host_backbuffer);
     d->SetDepthStencilSurface(g_host_depth);
     if (g_host_backbuffer) g_host_backbuffer->Release();
@@ -1417,6 +1423,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     }
     if (debug_frame_active() && g_cfg.debug_frame_end) log_frame_mean_color(frames);
     if (g_cfg.flash_watch) flash_check(frames);
+    logvar_check(frames);
     bool force = g_reset_requested.exchange(false);
     if (host3d::present() == D3DERR_DEVICELOST || g_device_lost || force) recover_device(force);
     check_render_size();
@@ -1536,6 +1543,33 @@ struct FlashStats { uint32_t frame, draws, bb_draws, prog, ps, rts, reads, read_
 uint32_t g_fl_probe_prev[4];
 uint32_t g_fl_var_addr[4]; // press-file "flashvar:ADDR": guest dwords sampled at every Swap and logged with the frame
 int g_fl_vars;
+// press-file "logvar:ADDR": a guest dword logged at every Swap where it changed (cheap, unlike the flash watcher).
+uint32_t g_lv_addr[8], g_lv_last[8];
+int g_lv_count;
+void logvar_add(uint32_t addr)
+{
+    if (g_lv_count < 8 && addr) {
+        g_lv_addr[g_lv_count] = addr;
+        g_lv_last[g_lv_count] = *(const volatile uint32_t *)(uintptr_t)addr;
+        logf("[var] frame %u: watching %08x = %08x", g_frame_count.load(), addr, g_lv_last[g_lv_count]);
+        g_lv_count++;
+    }
+}
+void logvar_check(uint32_t frame)
+{
+    for (int i = 0; i < g_lv_count; i++) {
+        uint32_t v = *(const volatile uint32_t *)(uintptr_t)g_lv_addr[i];
+        if (v == g_lv_last[i]) continue;
+        char txt[5] = {};
+        for (int k = 0; k < 4; k++) {
+            char ch = (char)(v >> (8 * k));
+            txt[k] = ch >= 0x20 && ch < 0x7F ? ch : '.';
+        }
+        logf("[var] frame %u: %08x %08x -> %08x '%s'", frame, g_lv_addr[i], g_lv_last[i], v, txt);
+        g_lv_last[i] = v;
+    }
+}
+
 void flash_add_var(uint32_t addr)
 {
     if (g_fl_vars < 4 && addr) g_fl_var_addr[g_fl_vars++] = addr;

@@ -194,6 +194,10 @@ void read_press_file(uint32_t now_ms)
                     logf("[input] trace requested: frame %u%s", g_cfg.debug_frame, n > 1 ? " (range)" : "");
                     continue;
                 }
+                if (line.rfind("logvar:", 0) == 0) {
+                    xd3d::logvar_add((uint32_t)strtoul(line.c_str() + 7, nullptr, 16));
+                    continue;
+                }
                 if (line.rfind("flashvar:", 0) == 0) {
                     xd3d::flash_add_var((uint32_t)strtoul(line.c_str() + 9, nullptr, 16));
                     continue;
@@ -228,6 +232,8 @@ void read_press_file(uint32_t now_ms)
                     else if (k == "ffpdebug") g_cfg.ffp_debug = (unsigned)atoi(line.c_str() + c + 1);
                     else if (k == "zmode") g_cfg.zmode = atoi(line.c_str() + c + 1);
                     else if (k == "texcheck") g_cfg.tex_every_frame = v;
+                    else if (k == "texperiodic") g_cfg.tex_periodic = v;
+                    else if (k == "ring") g_cfg.draw_ring = v;
                     else if (k == "visall") g_cfg.vis_all = v;
                     else if (k == "flashwatch") g_cfg.flash_watch = v;
                     else if (k == "untex") g_cfg.untex = atoi(line.c_str() + c + 1);
@@ -491,7 +497,16 @@ uint32_t __stdcall XInputSetState(Device *h, uint8_t *pFeedback)
 {
     if (!h || h->magic != DEV_MAGIC) return ERROR_DEVICE_NOT_CONNECTED;
     PcVibration v = {*(uint16_t *)(pFeedback + 68), *(uint16_t *)(pFeedback + 70)};
-    for (DWORD i = 0; g_pc_set && h->port == 0 && i < 4; i++) g_pc_set(i, &v); // port 0 = every PC pad
+    // The game sets the motors every frame; the host call costs ~0.4 ms per pad slot (11% of the frame time in
+    // chapter 1, r119 perf), so pass it on only when the speeds change (and again every 2 s for a pad plugged in later).
+    static PcVibration last = {0xFFFF, 0xFFFF};
+    static ULONGLONG last_ms;
+    ULONGLONG now = GetTickCount64();
+    if (h->port == 0 && (v.wLeftMotorSpeed != last.wLeftMotorSpeed || v.wRightMotorSpeed != last.wRightMotorSpeed || now - last_ms > 2000)) {
+        for (DWORD i = 0; g_pc_set && i < 4; i++) g_pc_set(i, &v); // port 0 = every PC pad
+        last = v;
+        last_ms = now;
+    }
     *(uint32_t *)pFeedback = ERROR_SUCCESS; // completed immediately
     if (HANDLE ev = *(HANDLE *)(pFeedback + 4)) SetEvent(ev);
     return ERROR_IO_PENDING;

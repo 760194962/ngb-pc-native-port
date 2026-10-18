@@ -290,9 +290,11 @@ LONG CALLBACK vectored_handler(EXCEPTION_POINTERS *ep)
             if (!(c->Dr6 & (1u << i)) || i >= g_cfg.watch_count) continue;
             uint32_t a = g_cfg.watch[i];
             XThread *t = xthread_current_or_null();
-            logf("watch: write to %08x = %08x by instruction before %08lx %s, thread '%s'", a, *(uint32_t *)(uintptr_t)a, c->Eip,
-                 where(c->Eip).c_str(), t ? t->name : "host");
-            log_stack_trace((const uint32_t *)(uintptr_t)c->Esp);
+            logf("watch: %s %08x = %08x by instruction before %08lx %s, thread '%s', frame %u",
+                 (g_cfg.watch_rw >> i) & 1 ? "access to" : "write to", a, *(uint32_t *)(uintptr_t)a, c->Eip, where(c->Eip).c_str(),
+                 t ? t->name : "host", g_frame_count.load());
+            static std::atomic<uint32_t> traced[4];
+            if (traced[i]++ < 20) log_stack_trace((const uint32_t *)(uintptr_t)c->Esp); // the first 20 hits per address
         }
         c->Dr6 = 0;
         return EXCEPTION_CONTINUE_EXECUTION;

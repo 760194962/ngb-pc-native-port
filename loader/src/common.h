@@ -105,6 +105,7 @@ struct Config {
     unsigned timeout_s = 0;    // exit after N seconds (0 = never)
     uint32_t watch[4] = {};    // --watch: hardware write breakpoints (Xbox addresses)
     int watch_count = 0;
+    uint32_t watch_rw = 0;     // bit i: --watch address i had an "r" suffix (break on reads too)
     uint32_t probe[16] = {};   // --probe: log each time execution reaches these addresses
     int probe_count = 0;
     unsigned debug_draws = 0;  // --debug-draws: describe the first N draws
@@ -116,6 +117,8 @@ struct Config {
     int untex = 1;             // press-file "cfg:untex:N": an unbound stage texture reads as 0 white, 1 the diffuse colour (1: game over overlay, docs/04 §3.13)
     bool flash_watch = false;  // press-file "cfg:flashwatch:1": detect single dark / flat frames, save them with draw statistics
     bool vis_all = false;      // press-file "cfg:visall:1": visibility tests report every pixel visible (diagnosis of culling)
+    bool draw_ring = true;        // press-file "cfg:ring:0": indexed draws through DrawIndexedPrimitiveUP again (d3d/draw.cpp)
+    bool tex_periodic = false;    // press-file "cfg:texperiodic:1": also re-hash stable textures every 16th frame (write-watch fallback)
     bool tex_every_frame = false; // press-file "cfg:texcheck:1": check every texture's contents every frame (diagnosis of stale images)
     int zmode = 3;             // press-file "cfg:zmode:N": fixed-function sampling of a depth-format header (0 depth, 1 bytes, 2 shadow func vs 0, 3 back buffer colour)
     bool no_rdtsc = false;     // --no-rdtsc: leave rdtsc to the host TSC (diagnosis)

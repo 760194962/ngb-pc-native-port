@@ -27,7 +27,7 @@ struct Entry {
     uint32_t hashed_frame = 0;    // the frame the contents were last hashed (write-watch comparisons)
 };
 
-// A texture whose contents did not change for this many checks is checked every 16th frame only (busy
+// A texture whose contents did not change for this many checks is no longer hashed every frame (busy
 // scenes bind hundreds of textures a frame; hashing each once a frame still cost ~3 ms). Textures that
 // change (video frames, render-to-memory) stay at one check a frame; a Lock marks a texture dirty at once.
 constexpr uint32_t kStableChecks = 30;
@@ -373,15 +373,34 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
     Entry &e = g_cache[r];
     uint32_t frame = g_frame_count.load(std::memory_order_relaxed);
     write_watch_update(frame);
+    // Texture data is always read through the write-watched contiguous block (phys_to_virt), so with the write watch
+    // working a stable texture is re-hashed only when its pages were written; the 16-frame periodic check was ~11% of
+    // the frame time in chapter 1 (r093 perf). cfg:texperiodic:1 brings the periodic check back.
+    bool periodic_due = (!g_ww_ok || g_cfg.tex_periodic) && ((frame + ((uintptr_t)r >> 6)) & 15) == 0;
+    static uint32_t n_skip, n_new, n_written, n_periodic, n_other, stat_frame;
+    if (frame != stat_frame && frame % 600 == 0) {
+        logf("[tex] last 600 frames: %u skipped, hashed %u young, %u written, %u periodic, %u other", n_skip, n_new, n_written,
+             n_periodic, n_other);
+        n_skip = n_new = n_written = n_periodic = n_other = 0;
+    }
+    stat_frame = frame;
     bool skip = e.checked_frame == frame ||
-                (!g_cfg.tex_every_frame && e.stable >= kStableChecks && ((frame + ((uintptr_t)r >> 6)) & 15) != 0 &&
+                (!g_cfg.tex_every_frame && e.stable >= kStableChecks && !periodic_due &&
                  !(e.tex && written_since(pc->Data, total_bytes(pc), e.hashed_frame)));
+    // The palette matters for P8 textures only (as in the staleness test below, which is also the only place that
+    // records it): comparing it for every format sent each non-P8 texture created under another palette through the
+    // full hash on every bind, ~350 hashes a frame in chapter 1 (r120).
     if (skip && e.tex && !e.dirty && e.data == pc->Data && e.format == pc->Format && e.size == pc->Size &&
-        e.palette == (pal ? phys_to_virt(pal->Data) : nullptr)) {
+        (fmt_of(pc) != XFMT_P8 || e.palette == (pal ? phys_to_virt(pal->Data) : nullptr))) {
         IDirect3DBaseTexture9 *t = e.tex;
+        n_skip++;
         LeaveCriticalSection(&g_cs);
         return t;
     }
+    if (skip) n_other++; // skipped by the rules but the shape / palette / dirty flag changed
+    else if (e.stable < kStableChecks) n_new++;
+    else if (periodic_due) n_periodic++;
+    else if (e.checked_frame != frame) n_written++;
     e.checked_frame = frame;
     e.hashed_frame = frame;
     uint32_t bytes = total_bytes(pc);

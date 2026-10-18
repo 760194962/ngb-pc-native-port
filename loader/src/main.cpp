@@ -59,7 +59,7 @@ void usage()
            "  --symbols <csv>   functions.csv for names in logs (default notes\\functions.csv if present)\n"
            "  --trace           log every kernel call, not only the first of each kind\n"
            "  --trace-d3d       log every D3D call\n"
-           "  --watch <hexaddr> log every write to a dword (hardware breakpoint, up to 4)\n"
+           "  --watch <hexaddr> log every write to a dword (hardware breakpoint, up to 4); <hexaddr>r: reads too\n"
            "  --probe <hexaddr> log registers/arguments each time code reaches an address (up to 16)\n"
            "  --debug-draws <n> describe the first n draws; --debug-frame <f> describe every draw of frame f\n"
            "  --press <f:btn,...> scripted controller presses at frame f (start a b x y back up down left right)\n"
@@ -123,6 +123,7 @@ bool parse_args()
         else if (a == L"--watch") {
             std::wstring v;
             if (!next(v) || g_cfg.watch_count >= 4) return false;
+            if (!v.empty() && (v.back() == L'r' || v.back() == L'R')) g_cfg.watch_rw |= 1u << g_cfg.watch_count;
             g_cfg.watch[g_cfg.watch_count++] = (uint32_t)wcstoul(v.c_str(), nullptr, 16);
         } else if (a == L"--debug-frame") {
             std::wstring v;

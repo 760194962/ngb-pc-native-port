@@ -460,6 +460,60 @@ Prim conv_prim(uint32_t xprim, uint32_t verts)
 std::vector<uint16_t> g_quad_indices;
 std::vector<uint16_t> g_tmp_indices;
 
+// Indexed draws through dynamic ring buffers instead of DrawIndexedPrimitiveUP: D3D9On12 (the Iris Xe here) makes
+// an allocation and a copy for every UP call, ~6 ms of a 13 ms chapter-1 frame in r121. The vertices and indices are
+// appended with D3DLOCK_NOOVERWRITE and the buffers start over with D3DLOCK_DISCARD when full.
+constexpr uint32_t kRingVB = 16u << 20, kRingIB = 4u << 20;
+IDirect3DVertexBuffer9 *g_ring_vb;
+IDirect3DIndexBuffer9 *g_ring_ib;
+uint32_t g_ring_vpos, g_ring_ipos;
+bool g_ring_failed;
+
+bool ring_draw(D3DPRIMITIVETYPE type, uint32_t nverts, uint32_t prims, const uint16_t *idx, uint32_t nidx, const void *src,
+               uint32_t stride)
+{
+    IDirect3DDevice9 *d = host3d::dev();
+    if (!g_ring_vb) {
+        if (g_ring_failed) return false;
+        if (FAILED(d->CreateVertexBuffer(kRingVB, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &g_ring_vb, nullptr)) ||
+            FAILED(d->CreateIndexBuffer(kRingIB, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &g_ring_ib,
+                                        nullptr))) {
+            logf("[draw] dynamic ring buffers not available: indexed draws stay on DrawIndexedPrimitiveUP");
+            g_ring_failed = true;
+            release_draw_buffers();
+            return false;
+        }
+        g_ring_vpos = g_ring_ipos = 0;
+        logf("[draw] indexed draws through dynamic ring buffers (%u KB vertices, %u KB indices)", kRingVB >> 10, kRingIB >> 10);
+    }
+    uint32_t vbytes = nverts * stride, ibytes = nidx * 2;
+    if (!stride || vbytes > kRingVB || ibytes > kRingIB) return false;
+    uint32_t voff = (g_ring_vpos + stride - 1) / stride * stride;
+    DWORD vflag = D3DLOCK_NOOVERWRITE;
+    if (voff + vbytes > kRingVB) {
+        voff = 0;
+        vflag = D3DLOCK_DISCARD;
+    }
+    uint32_t ioff = g_ring_ipos;
+    DWORD iflag = D3DLOCK_NOOVERWRITE;
+    if (ioff + ibytes > kRingIB) {
+        ioff = 0;
+        iflag = D3DLOCK_DISCARD;
+    }
+    void *p = nullptr;
+    if (FAILED(g_ring_vb->Lock(voff, vbytes, &p, vflag))) return false;
+    memcpy(p, src, vbytes);
+    g_ring_vb->Unlock();
+    if (FAILED(g_ring_ib->Lock(ioff, ibytes, &p, iflag))) return false;
+    memcpy(p, idx, ibytes);
+    g_ring_ib->Unlock();
+    g_ring_vpos = voff + vbytes;
+    g_ring_ipos = ioff + ibytes;
+    d->SetStreamSource(0, g_ring_vb, 0, stride);
+    d->SetIndices(g_ring_ib);
+    return SUCCEEDED(d->DrawIndexedPrimitive(type, (INT)(voff / stride), 0, nverts, ioff / 2, prims));
+}
+
 const uint16_t *quad_indices(uint32_t quads)
 {
     if (g_quad_indices.size() < quads * 6) {
@@ -1244,6 +1298,8 @@ void draw_indexed_up(uint32_t xprim, uint32_t nidx, const uint16_t *idx, const v
         for (uint32_t i = 0; i < nidx; i++) g_tmp_indices[i] = idx[i] - mnw;
         idx = g_tmp_indices.data();
     }
+    uint32_t host_nidx = p.quads ? p.count * 3 : nidx;
+    if (g_cfg.draw_ring && ring_draw(p.type, mx - mn + 1, p.count, idx, host_nidx, src, stride)) return;
     host3d::dev()->DrawIndexedPrimitiveUP(p.type, 0, mx - mn + 1, p.count, idx, D3DFMT_INDEX16, src, stride);
 }
 
@@ -1727,6 +1783,15 @@ const Hle *hle_draw_table_ngb(size_t *count)
 void invalidate_render_state(uint32_t state)
 {
     if (state < XRS_MAX) g_rs_valid[state] = false;
+}
+
+void release_draw_buffers()
+{
+    if (g_ring_vb) g_ring_vb->Release();
+    if (g_ring_ib) g_ring_ib->Release();
+    g_ring_vb = nullptr;
+    g_ring_ib = nullptr;
+    g_ring_vpos = g_ring_ipos = 0;
 }
 
 } // namespace xd3d

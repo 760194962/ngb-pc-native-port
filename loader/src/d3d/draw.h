@@ -31,6 +31,8 @@ void forget_sent_shaders();
 // After a device Reset: Direct3D is back at its defaults, so every state, texture and shader the draws remember
 // having sent is unknown again.
 void forget_sent_state();
+// Before a device Reset: the dynamic vertex / index ring buffers of the indexed draws (D3DPOOL_DEFAULT) go away.
+void release_draw_buffers();
 
 // Save the host back buffer as a PNG (used by --screenshot).
 bool save_screenshot(const wchar_t *path);
