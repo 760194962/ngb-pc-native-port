@@ -1,3 +1,4 @@
+#include "d3d/apicount.h"
 #include "d3d/host.h"
 
 #include "settings.h"
@@ -404,6 +405,7 @@ bool create_device()
             return false;
         }
     }
+    if (g_cfg.api_count) apicount::install(g_dev);
     D3DADAPTER_IDENTIFIER9 id = {};
     g_d3d->GetAdapterIdentifier(D3DADAPTER_DEFAULT, 0, &id);
     g_intz = SUCCEEDED(g_d3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DUSAGE_DEPTHSTENCIL,

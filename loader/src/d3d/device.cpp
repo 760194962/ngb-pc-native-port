@@ -1,6 +1,7 @@
 // HLE replacements for the Xbox D3D8 device API the game calls. Each function keeps the Xbox-side data
 // the game reads directly (device object fields, render/texture state arrays) up to date and drives the
 // host Direct3D 9 device.
+#include "d3d/apicount.h"
 #include "d3d/device.h"
 #include "build_profile.h"
 #include "hooks.h"
@@ -1519,6 +1520,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     if (host3d::present() == D3DERR_DEVICELOST || g_device_lost || force) recover_device(force);
     check_render_size();
     perf::frame_end(host_w(g_width), host_h(g_height));
+    apicount::frame(frames);
     dev_field<uint32_t>(DEV_SWAPCOUNT)++;
     g_swap_count++;
     if (frames % 60 == 0 || frames < 4)
@@ -1612,6 +1614,7 @@ int sync_transforms_from_device()
         if (memcmp(m, &g_st.transforms[i], sizeof(D3DMATRIX)) == 0) continue;
         g_st.transforms[i] = *m;
         host3d::dev()->SetTransform(kTransforms[i], m);
+        host_texture_transform_changed(i - 2); // TEXTURE0..3 are entries 2..5
         changed |= 1 << i;
     }
     return changed;
@@ -1993,6 +1996,7 @@ void __stdcall D3DDevice_SetTransform(uint32_t State, const D3DMATRIX *pMatrix)
     g_st.transforms[State] = *pMatrix;
     memcpy(g_dev + DEV_TRANSFORMS + State * 0x40, pMatrix, 0x40);
     host3d::dev()->SetTransform(kTransforms[State], pMatrix);
+    host_texture_transform_changed((int)State - 2);
 }
 
 void __stdcall D3DDevice_SetViewport(const Viewport *pViewport)

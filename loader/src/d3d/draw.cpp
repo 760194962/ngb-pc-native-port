@@ -205,6 +205,34 @@ uint32_t g_ts_sent[4][32];
 bool g_ts_valid[4][32];
 IDirect3DBaseTexture9 *g_tex_sent[4];
 
+// What the host holds for states the port sets at every draw (point sprites, the stage texture scale): sent again
+// only when the value changes. Every draw sent 8 point states, 4 texture transforms and 4 transform flags before,
+// ~7,000 of the ~11,000 Direct3D calls of a chapter-1 frame (r192, --api-count), each one a D3D9On12 translation
+// on integrated GPUs. Cleared by forget_sent_state (device reset, fullscreen passes) and when another path sets a
+// texture transform (host_texture_transform_changed).
+DWORD g_point_sent[8];
+bool g_point_valid;
+D3DMATRIX g_texm_sent[4];
+bool g_texm_valid[4];
+DWORD g_ttff_sent[4];
+bool g_ttff_valid[4];
+
+void set_tex_transform(IDirect3DDevice9 *d, int s, const D3DMATRIX &m)
+{
+    if (g_texm_valid[s] && !memcmp(&g_texm_sent[s], &m, sizeof m)) return;
+    g_texm_sent[s] = m;
+    g_texm_valid[s] = true;
+    d->SetTransform((D3DTRANSFORMSTATETYPE)(D3DTS_TEXTURE0 + s), &m);
+}
+
+void set_ttff(IDirect3DDevice9 *d, int s, DWORD v)
+{
+    if (g_ttff_valid[s] && g_ttff_sent[s] == v) return;
+    g_ttff_sent[s] = v;
+    g_ttff_valid[s] = true;
+    d->SetTextureStageState(s, D3DTSS_TEXTURETRANSFORMFLAGS, v);
+}
+
 template <typename F> void on_change(uint32_t state, F apply)
 {
     uint32_t v = render_state()[state];
@@ -322,14 +350,16 @@ void apply_render_states(IDirect3DDevice9 *d)
     {
         const uint32_t *rs = render_state();
         float k = target_scale_y();
-        set(D3DRS_POINTSPRITEENABLE, rs[XRS_POINTSPRITEENABLE] != 0);
-        set(D3DRS_POINTSCALEENABLE, rs[XRS_POINTSCALEENABLE] != 0);
-        set(D3DRS_POINTSIZE, f2u(as_float(rs[XRS_POINTSIZE]) * (rs[XRS_POINTSCALEENABLE] ? 1.0f : k)));
-        set(D3DRS_POINTSIZE_MIN, f2u(as_float(rs[XRS_POINTSIZE_MIN]) * k));
-        set(D3DRS_POINTSIZE_MAX, f2u(as_float(rs[XRS_POINTSIZE_MAX]) * k));
-        set(D3DRS_POINTSCALE_A, rs[XRS_POINTSCALE_A]);
-        set(D3DRS_POINTSCALE_B, rs[XRS_POINTSCALE_B]);
-        set(D3DRS_POINTSCALE_C, rs[XRS_POINTSCALE_C]);
+        static const D3DRENDERSTATETYPE kPoint[8] = {D3DRS_POINTSPRITEENABLE, D3DRS_POINTSCALEENABLE, D3DRS_POINTSIZE,
+                                                     D3DRS_POINTSIZE_MIN, D3DRS_POINTSIZE_MAX, D3DRS_POINTSCALE_A,
+                                                     D3DRS_POINTSCALE_B, D3DRS_POINTSCALE_C};
+        const DWORD v[8] = {rs[XRS_POINTSPRITEENABLE] != 0, rs[XRS_POINTSCALEENABLE] != 0,
+                            f2u(as_float(rs[XRS_POINTSIZE]) * (rs[XRS_POINTSCALEENABLE] ? 1.0f : k)),
+                            f2u(as_float(rs[XRS_POINTSIZE_MIN]) * k), f2u(as_float(rs[XRS_POINTSIZE_MAX]) * k),
+                            rs[XRS_POINTSCALE_A], rs[XRS_POINTSCALE_B], rs[XRS_POINTSCALE_C]};
+        for (int i = 0; i < 8; i++)
+            if (!g_point_valid || g_point_sent[i] != v[i]) set(kPoint[i], g_point_sent[i] = v[i]);
+        g_point_valid = true;
     }
 }
 
@@ -406,7 +436,7 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
         ts_on_change(s, 29, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_BORDERCOLOR, v); });
         // Texture coordinate source and transform belong to the vertex pipeline: they apply to pixel-shader draws with
         // fixed-function vertices too (the glow / blur chain), not only to fixed-function pixels.
-        ts_on_change(s, 21, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_TEXTURETRANSFORMFLAGS, v); });
+        ts_on_change(s, 21, [&](uint32_t v) { set_ttff(d, s, v); });
         ts_on_change(s, 28, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, v); });
         if (!fixed_function_pixels) continue;
         ts_on_change(s, 12, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_COLOROP, conv_texop(v)); });
@@ -805,7 +835,7 @@ void apply_fvf_texture_scale(IDirect3DDevice9 *d, bool rhw)
 {
     for (int s = 0; s < 4; s++) {
         if (rhw) {
-            d->SetTextureStageState(s, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+            set_ttff(d, s, D3DTTFF_DISABLE);
             g_ts_valid[s][21] = false; // the game's flags are sent again on the next draw that uses them
             continue;
         }
@@ -825,15 +855,15 @@ void apply_fvf_texture_scale(IDirect3DDevice9 *d, bool rhw)
                 m.m[r][0] *= sx;
                 m.m[r][1] *= sy;
             }
-            d->SetTransform((D3DTRANSFORMSTATETYPE)(D3DTS_TEXTURE0 + s), &m);
+            set_tex_transform(d, s, m);
             continue;
         }
         D3DMATRIX m = {};
         m._11 = sx;
         m._22 = sy;
         m._33 = m._44 = 1.0f;
-        d->SetTransform((D3DTRANSFORMSTATETYPE)(D3DTS_TEXTURE0 + s), &m);
-        d->SetTextureStageState(s, D3DTSS_TEXTURETRANSFORMFLAGS, scaled ? D3DTTFF_COUNT2 : D3DTTFF_DISABLE);
+        set_tex_transform(d, s, m);
+        set_ttff(d, s, scaled ? D3DTTFF_COUNT2 : D3DTTFF_DISABLE);
     }
 }
 
@@ -1150,9 +1180,17 @@ void forget_sent_shaders()
     g_fvf_sent = ~0u;
 }
 
+void host_texture_transform_changed(int stage)
+{
+    if (stage >= 0 && stage < 4) g_texm_valid[stage] = false;
+}
+
 void forget_sent_state()
 {
     forget_sent_shaders();
+    g_point_valid = false;
+    memset(g_texm_valid, 0, sizeof g_texm_valid);
+    memset(g_ttff_valid, 0, sizeof g_ttff_valid);
     memset(g_rs_valid, 0, sizeof g_rs_valid);
     memset(g_ts_valid, 0, sizeof g_ts_valid);
     for (IDirect3DBaseTexture9 *&t : g_tex_sent) t = nullptr; // Reset unbinds every texture

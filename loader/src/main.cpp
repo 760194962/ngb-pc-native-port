@@ -197,6 +197,7 @@ bool parse_args()
             if (g_cfg.reverb_gain < 0.0f || g_cfg.reverb_gain > 8.0f) g_cfg.reverb_gain = 1.0f;
         }
         else if (a == L"--background") g_cfg.background = true;
+        else if (a == L"--api-count") g_cfg.api_count = true;
         else if (a == L"--wav") { if (!next(g_cfg.wav_path)) return false; }
         else if (a == L"--rawvideo") { if (!next(g_cfg.rawvideo)) return false; }
         else if (a == L"--clip-seconds") {

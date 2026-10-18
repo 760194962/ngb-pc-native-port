@@ -54,6 +54,7 @@ add_library(blackrt SHARED
   src/d3d/dispatch.cpp
   src/d3d/device.cpp
   src/d3d/host.cpp
+  src/d3d/apicount.cpp
   src/d3d/pushbuf.cpp
   src/d3d/draw.cpp
   src/d3d/formats.cpp
