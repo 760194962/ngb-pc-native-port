@@ -77,13 +77,16 @@ IDirect3DPixelShader9 *ps_host_shader()
     uint32_t cube = cube_mask();
     uint32_t depth = depth_mask();
     uint32_t shadow = depth ? (uint32_t)shadow_func_code() : 0;
+    uint32_t kill = 0; // D3DTSS_ALPHAKILL per stage (texture_state 11)
+    for (int s = 0; s < 4; s++)
+        if (texture_state(s)[11]) kill |= 1u << s;
     // key: everything except the constant values (10-25, 43, 44)
     uint32_t key[48];
     uint32_t n = 0;
     for (uint32_t i = 0; i < 57; i++)
         if (!(i >= 10 && i <= 25) && i != 43 && i != 44) key[n++] = rs[i];
     key[n++] = def.PSTextureModes;
-    key[n++] = cube | depth << 8 | shadow << 16;
+    key[n++] = cube | depth << 8 | shadow << 16 | kill << 24;
     static uint32_t last_key[48], last_n;
     static IDirect3DPixelShader9 *last_ps;
     if (n == last_n && !memcmp(key, last_key, n * 4)) return last_ps; // most draws keep the previous shader
@@ -95,7 +98,7 @@ IDirect3DPixelShader9 *ps_host_shader()
         return last_ps = it->second;
     }
 
-    std::string hlsl = psh_to_hlsl(def, cube, depth, shadow);
+    std::string hlsl = psh_to_hlsl(def, cube, depth, shadow, kill);
     perf::Scope perf_scope(perf::kCompile);
     perf::add_compile();
     ID3DBlob *code = nullptr, *errors = nullptr;

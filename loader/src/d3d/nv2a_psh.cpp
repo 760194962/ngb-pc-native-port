@@ -82,7 +82,7 @@ std::string final_input(uint32_t b, bool rgb)
 
 } // namespace
 
-std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex_depth, uint32_t shadow_func)
+std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex_depth, uint32_t shadow_func, uint32_t tex_kill)
 {
     std::string s;
     char b[512];
@@ -204,6 +204,12 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
             break;
         }
     }
+    // alpha kill on the stages that fetched a texture (xemu psh.c does it after the fetch)
+    for (int i = 0; i < 4; i++)
+        if ((tex_kill >> i) & 1 && ((d.PSTextureModes >> (5 * i)) & 0x1F) != 0) {
+            snprintf(b, sizeof b, "  clip(t%d.a > 0 ? 1 : -1);\n", i);
+            s += b;
+        }
     // r0.a starts as t0.a on the NV2A
     s += "  float4 r0 = float4(0, 0, 0, t0.a), r1 = 0;\n";
     // ---- general combiners ----

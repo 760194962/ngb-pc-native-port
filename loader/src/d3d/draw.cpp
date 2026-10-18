@@ -389,10 +389,21 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
         ts_on_change(s, 3, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MAGFILTER, v > 3 ? D3DTEXF_LINEAR : v); });
         ts_on_change(s, 4, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MINFILTER, v > 3 ? D3DTEXF_LINEAR : v); });
         ts_on_change(s, 5, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MIPFILTER, v > 2 ? D3DTEXF_LINEAR : v); });
-        ts_on_change(s, 6, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MIPMAPLODBIAS, v); });
+        // LOD bias: Ninja Gaiden Black writes 0xFFFFFFFF (a NaN) into stage 0's (0x12A4CD). The NV2A field is a
+        // signed 5.8 fixed-point value converted with an x86 float-to-int, which turns a NaN into 0x80000000 and so
+        // a bias of 0; the host driver's treatment of a NaN is undefined. Non-finite -> 0, finite clamped to the field.
+        ts_on_change(s, 6, [&](uint32_t v) {
+            float b = as_float(v);
+            b = std::isfinite(b) ? std::min(std::max(b, -16.0f), 15.99f) : 0.0f;
+            d->SetSamplerState(s, D3DSAMP_MIPMAPLODBIAS, f2u(b));
+        });
         ts_on_change(s, 7, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MAXMIPLEVEL, v); });
         ts_on_change(s, 8, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MAXANISOTROPY, v ? v : 1); });
         ts_on_change(s, 29, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_BORDERCOLOR, v); });
+        // Texture coordinate source and transform belong to the vertex pipeline: they apply to pixel-shader draws with
+        // fixed-function vertices too (the glow / blur chain), not only to fixed-function pixels.
+        ts_on_change(s, 21, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_TEXTURETRANSFORMFLAGS, v); });
+        ts_on_change(s, 28, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, v); });
         if (!fixed_function_pixels) continue;
         ts_on_change(s, 12, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_COLOROP, conv_texop(v)); });
         ts_on_change(s, 13, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_COLORARG0, v); });
@@ -403,8 +414,6 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
         ts_on_change(s, 18, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_ALPHAARG1, v); });
         ts_on_change(s, 19, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_ALPHAARG2, v); });
         ts_on_change(s, 20, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_RESULTARG, v); });
-        ts_on_change(s, 21, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_TEXTURETRANSFORMFLAGS, v); });
-        ts_on_change(s, 28, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, v); });
     }
 }
 
@@ -1047,6 +1056,10 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
             const uint32_t *ts = texture_state(s);
             logf("[draw]   stage %d: color op %u args 0x%x 0x%x | alpha op %u args 0x%x 0x%x | tfactor 0x%08x | xform flags %u addr %u/%u tci 0x%x", s, ts[12], ts[14], ts[15],
                  ts[16], ts[18], ts[19], rs[XRS_TEXTUREFACTOR], ts[21], ts[0], ts[1], ts[28]);
+            if (ts[6] || ts[9] || ts[10] || ts[11] || ts[22] || ts[23] || ts[24] || ts[25] || ts[26] || ts[27])
+                logf("[draw]     stage %d: lodbias 0x%08x colorkeyop %u colorsign 0x%08x alphakill %u | bumpenv %g %g %g %g scale %g offset %g", s,
+                     ts[6], ts[9], ts[10], ts[11], as_float(ts[22]), as_float(ts[23]), as_float(ts[24]), as_float(ts[25]),
+                     as_float(ts[26]), as_float(ts[27]));
             if (this_frame) { // what the host device holds for the stage (cached state application check)
                 DWORD hc = 0, ha = 0, h1 = 0, h2 = 0, ha1 = 0, ha2 = 0, hci = 0, htf = 0;
                 IDirect3DDevice9 *hd = host3d::dev();

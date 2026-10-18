@@ -32,6 +32,7 @@ std::unordered_map<std::string, IDirect3DPixelShader9 *> g_ffp_cache;
 struct StageKey {
     uint32_t cop, c0, c1, c2, aop, a0, a1, a2, result;
     uint32_t tex;  // 0 none, 1 2D, 2 cube
+    uint32_t kill; // D3DTSS_ALPHAKILL set (texture_state 11)
     uint32_t proj; // D3DTTFF_PROJECTED: 3 = divide by z, 4 = divide by w, 0 = none
 };
 
@@ -129,6 +130,10 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
         else if (k[i].tex == 1) snprintf(b, sizeof b, "  t%d = tex2D(s2d%d, tc[%d].xy);\n", i, i, i);
         else continue;
         s += b;
+        if (k[i].kill) { // see the note at StageKey's use in ffp_pixel_shader
+            snprintf(b, sizeof b, "  clip(t%d.a > 0 ? 1 : -1);\n", i);
+            s += b;
+        }
     }
     for (int i = first; i < 4; i++) {
         D3DTEXTUREOP cop = conv_texop(k[i].cop), aop = conv_texop(k[i].aop);
@@ -169,6 +174,11 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
         Resource *r = g_st.textures[i];
         e.tex = !r ? 0 : (resource_type(r) == RTYPE_TEXTURE && (((PixelContainer *)r)->Format & FMT_CUBEMAP)) ? 2 : 1;
         e.proj = (ts[21] & 0x100) ? (ts[21] & 0xFF) : 0;
+        // D3DTSS_ALPHAKILL (Xbox texture stage state 11, D3DTALPHAKILL_ENABLE = 4) sets the NV2A ALPHAKILLEN of the
+        // stage: a fetched texel with alpha exactly 0 discards the pixel (xemu psh.c: "if (tN.a == 0.0) discard"),
+        // whatever the combiners do. Ninja Gaiden Black enables it on stage 1 of a projected-texture pass
+        // (FUN_00236010 at 0x2370D8).
+        e.kill = e.tex && ts[11] != 0;
     }
     bool specular = render_state()[XRS_SPECULARENABLE] != 0;
     // Point sprites: the Xbox D3D library builds the combiner stages from stage 3 on (FUN_003d4340 of Ninja Gaiden

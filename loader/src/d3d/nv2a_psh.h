@@ -34,6 +34,8 @@ static_assert(sizeof(PixelShaderDef) == 0xF0, "");
 // tex_cube: bit n set when stage n samples a cube map.
 // tex_depth: stages sampling a depth-format texture (shadow maps: the sample is the SHADOWFUNC comparison, 0 or 1);
 // shadow_func: D3DRS_SHADOWFUNC as 0..7 (NEVER .. ALWAYS).
-std::string psh_to_hlsl(const PixelShaderDef &def, uint32_t tex_cube, uint32_t tex_depth = 0, uint32_t shadow_func = 0);
+// tex_kill: stages with D3DTSS_ALPHAKILL: a fetched texel with alpha 0 discards the pixel.
+std::string psh_to_hlsl(const PixelShaderDef &def, uint32_t tex_cube, uint32_t tex_depth = 0, uint32_t shadow_func = 0,
+                        uint32_t tex_kill = 0);
 
 } // namespace xd3d
