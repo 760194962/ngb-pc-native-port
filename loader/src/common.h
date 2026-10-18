@@ -112,6 +112,9 @@ struct Config {
     bool no_fog = false;       // --no-fog: never enable host fog (diagnosis of dark scenes)
     bool no_specular = false;  // press-file "spec:0": never enable host specular lighting (diagnosis of light patches)
     unsigned tsc_divisor = 4;  // --tsc-divisor N: the engine's frame timer (rdtsc) runs N times slower than the Xbox TSC
+    std::wstring coverage;     // --coverage FILE: one-shot probes at the hex addresses listed (first word of each line)
+    int zmode = 3;             // press-file "cfg:zmode:N": fixed-function sampling of a depth-format header (0 depth, 1 bytes, 2 shadow func vs 0, 3 back buffer colour)
+    bool no_rdtsc = false;     // --no-rdtsc: leave rdtsc to the host TSC (diagnosis)
     bool host_ffp = false;     // --host-ffp: fixed-function draws use the host's pixel pipeline, not the generated stage shader
     unsigned ffp_debug = 0;    // press-file "cfg:ffpdebug:N": the stage shader shows stage 1's texture colour (1) or alpha (2)
     std::wstring press_script; // --press: "frame:button,frame:button" scripted controller input

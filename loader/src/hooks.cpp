@@ -193,9 +193,37 @@ uint64_t xbox_tsc()
     return (d / f) * 733333333ull + ((d % f) * 733333333ull) / f;
 }
 
+// --coverage: which of a list of code addresses run (gate 4b: the HANZI entries of x2.1). Each address gets an int3
+// once; the first hit logs the frame and thread, restores the byte and continues, so hot paths cost one exception.
+struct CoverageSite {
+    uint32_t addr;
+    uint8_t orig;
+    std::atomic<uint32_t> hit_frame; // 0 = not yet
+};
+CoverageSite g_cov[64];
+int g_cov_count;
+
 LONG CALLBACK vectored_handler(EXCEPTION_POINTERS *ep)
 {
     DWORD code = ep->ExceptionRecord->ExceptionCode;
+    if (code == EXCEPTION_BREAKPOINT && g_cov_count) {
+        uint32_t a = (uint32_t)(uintptr_t)ep->ExceptionRecord->ExceptionAddress;
+        for (int i = 0; i < g_cov_count; i++) {
+            if (g_cov[i].addr != a) continue;
+            DWORD old;
+            VirtualProtect((void *)(uintptr_t)a, 1, PAGE_EXECUTE_READWRITE, &old);
+            *(uint8_t *)(uintptr_t)a = g_cov[i].orig;
+            VirtualProtect((void *)(uintptr_t)a, 1, old, &old);
+            uint32_t f = g_frame_count.load() + 1;
+            g_cov[i].hit_frame = f;
+            XThread *t = xthread_current_or_null();
+            const uint32_t *s = (const uint32_t *)(uintptr_t)ep->ContextRecord->Esp;
+            logf("coverage: %08x %s first hit at frame %u, thread '%s', return %08x %s", a, where(a).c_str(), f, t ? t->name : "host", s[0],
+                 where(s[0]).c_str());
+            ep->ContextRecord->Eip = a;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+    }
     if (code == EXCEPTION_ILLEGAL_INSTRUCTION && g_rdtsc_site_count && rdtsc_site((uint32_t)ep->ContextRecord->Eip)) {
         CONTEXT *c = ep->ContextRecord;
         uint64_t v = xbox_tsc();
@@ -333,6 +361,44 @@ void dump_threads()
         }
         ResumeThread(t->host_handle);
     }
+}
+
+void install_coverage()
+{
+    if (g_cfg.coverage.empty()) return;
+    FILE *f = _wfopen(g_cfg.coverage.c_str(), L"r");
+    if (!f) {
+        logf("coverage: cannot open %s", narrow(g_cfg.coverage).c_str());
+        return;
+    }
+    char line[256];
+    while (fgets(line, sizeof line, f) && g_cov_count < 64) {
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+        uint32_t a = (uint32_t)strtoul(line, nullptr, 16);
+        if (!a || !in_image(a)) continue;
+        CoverageSite &c = g_cov[g_cov_count++];
+        c.addr = a;
+        DWORD old;
+        VirtualProtect((void *)(uintptr_t)a, 1, PAGE_EXECUTE_READWRITE, &old);
+        c.orig = *(uint8_t *)(uintptr_t)a;
+        *(uint8_t *)(uintptr_t)a = 0xCC;
+        VirtualProtect((void *)(uintptr_t)a, 1, old, &old);
+    }
+    fclose(f);
+    logf("coverage: %d one-shot probes armed from %s", g_cov_count, narrow(g_cfg.coverage).c_str());
+}
+
+void log_coverage_summary()
+{
+    std::string hit, miss;
+    int nh = 0;
+    char b[16];
+    for (int i = 0; i < g_cov_count; i++) {
+        snprintf(b, sizeof b, " %08x", g_cov[i].addr);
+        (g_cov[i].hit_frame ? hit : miss) += b;
+        nh += g_cov[i].hit_frame != 0;
+    }
+    logf("coverage summary: %d of %d hit;%s | not hit:%s", nh, g_cov_count, hit.c_str(), miss.c_str());
 }
 
 void install_probes()

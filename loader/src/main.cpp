@@ -169,6 +169,10 @@ bool parse_args()
         else if (a == L"--no-reverb") { g_cfg.reverb = false; settings_mark_cli("reverb"); }
         else if (a == L"--no-fog") g_cfg.no_fog = true;
         else if (a == L"--host-ffp") g_cfg.host_ffp = true;
+        else if (a == L"--no-rdtsc") g_cfg.no_rdtsc = true;
+        else if (a == L"--coverage") {
+            if (!next(g_cfg.coverage)) return false;
+        }
         else if (a == L"--tsc-divisor") {
             std::wstring v;
             if (!next(v)) return false;
@@ -454,9 +458,10 @@ int run(void *reserve, unsigned reserve_size)
     if (!kfile_init()) return 1;
     install_crash_handlers();
     install_probes();
+    install_coverage();
     if (profile && !xd3d::install_d3d_hooks(*profile)) return 1;
     if (profile && !install_fiber_switch(*profile)) return 1;
-    if (profile && !install_rdtsc_emulation(*profile)) return 1;
+    if (profile && !g_cfg.no_rdtsc && !install_rdtsc_emulation(*profile)) return 1;
     bool black = profile && profile->black; // BLACK's own game patches and front-end work; nothing of it applies elsewhere
     if (black) install_timing_patches();
     if (black) install_mouselook_patches();

@@ -6,6 +6,7 @@
 #include "build_profile.h"
 #include "d3d/dispatch.h"
 #include "d3d/xd3d.h"
+#include "hooks.h"
 #include "d3d/draw.h"
 #include "d3d/host.h"
 #include "input/bindings.h"
@@ -191,6 +192,10 @@ void read_press_file(uint32_t now_ms)
                     logf("[input] trace requested: frame %u%s", g_cfg.debug_frame, n > 1 ? " (range)" : "");
                     continue;
                 }
+                if (line == "coverage") {
+                    log_coverage_summary();
+                    continue;
+                }
                 if (line.rfind("spec:", 0) == 0) {
                     // "spec:0" / "spec:1": host specular lighting off / as the game sets it (diagnosis)
                     g_cfg.no_specular = line[5] == '0';
@@ -207,6 +212,7 @@ void read_press_file(uint32_t now_ms)
                     else if (k == "seamfill") g_cfg.seam_fill = v;
                     else if (k == "hostffp") g_cfg.host_ffp = !v ? false : true;
                     else if (k == "ffpdebug") g_cfg.ffp_debug = (unsigned)atoi(line.c_str() + c + 1);
+                    else if (k == "zmode") g_cfg.zmode = atoi(line.c_str() + c + 1);
                     else if (k == "fog") {
                         g_cfg.no_fog = !v;
                         xd3d::invalidate_render_state(xd3d::XRS_FOGENABLE);

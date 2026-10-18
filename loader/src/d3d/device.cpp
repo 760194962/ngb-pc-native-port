@@ -818,6 +818,20 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
         bool depth_format = fmt >= 0x2A && fmt <= 0x31; // D24S8 .. LIN_F16
         // a combiner program compares the raw depth itself (nv2a_psh.cpp); the fixed function gets the 2D result
         int mode = !depth_format ? kDepthViewBytes : kDepthViewRaw; // see kZDepthPS: 2D sampling returns the depth itself
+        // Fixed-function sampling of a depth-format header (cfg:zmode, default 3). Ninja Gaiden Black copies its depth
+        // surface through one (LIN_D24S8, FUN_00321e40 takes the depth surface's Data) into the 256x256 target its
+        // sword trails and heavy-attack bursts sample. xemu shows the trail as a translucent smear of the scene behind
+        // (run/xemu_ref/xemu_swing_*.png); the user compared the four readings live (r065): 0 depth = opaque white
+        // band, 1 byte split = green/orange stripes, 2 shadow compare = the trail vanishes, 3 the back buffer's colour
+        // = "very like" the original. Taken empirically: why the hardware returns colour here is not established
+        // (docs/04 §3.11). Combiner programs (the shadow receivers) keep the raw depth.
+        bool ffp = !g_st.pixel_shader;
+        if (depth_format && ffp && g_cfg.zmode == 1) mode = kDepthViewBytes;
+        if (depth_format && ffp && g_cfg.zmode == 2) mode = shadow_func_code();
+        if (depth_format && ffp && g_cfg.zmode == 3) {
+            HostRT &bb = host_rt(g_backbuffer);
+            return bb.tex == g_cur_rt ? snapshot_of(bb.tex) : bb.tex;
+        }
         static uint32_t view_serial = ~0u;
         static uint64_t view_key;
         static int view_mode;
