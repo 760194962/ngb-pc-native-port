@@ -97,8 +97,9 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
         "  float4 tc[4] = { I.tc0, I.tc1, I.tc2, I.tc3 };\n";
     s += def_diffuse ? "  float4 v0 = 1;\n" : "  float4 v0 = I.v0;\n";  // no diffuse in the vertex: opaque white
     s += def_specular ? "  float4 v1 = 0;\n" : "  float4 v1 = I.v1;\n"; // no specular in the vertex: 0
-    s += "  float4 cur = v0, temp = 0, prev;\n"
-         "  float4 t0 = 1, t1 = 1, t2 = 1, t3 = 1;\n"; // an unbound stage's texture reads as opaque white
+    s += "  float4 cur = v0, temp = 0, prev;\n";
+    s += g_cfg.untex == 1 ? "  float4 t0 = v0, t1 = v0, t2 = v0, t3 = v0;\n" // cfg:untex:1 an unbound stage texture reads as the diffuse colour
+                          : "  float4 t0 = 1, t1 = 1, t2 = 1, t3 = 1;\n";    // an unbound stage texture reads as opaque white
     char b[256];
     for (int i = 0; i < 4; i++) {
         if (k[i].tex == 2) snprintf(b, sizeof b, "  t%d = texCUBE(scu%d, tc[%d].xyz);\n", i, i, i);
@@ -146,6 +147,7 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
     std::string key((const char *)k, sizeof k);
     key.push_back((char)((specular ? 1 : 0) | (def_diffuse ? 2 : 0) | (def_specular ? 4 : 0)));
     key.push_back((char)g_cfg.ffp_debug);
+    key.push_back((char)g_cfg.untex);
     static std::string last_key;
     static IDirect3DPixelShader9 *last_ps;
     if (key == last_key) return last_ps;

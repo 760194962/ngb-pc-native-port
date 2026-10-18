@@ -113,6 +113,10 @@ struct Config {
     bool no_specular = false;  // press-file "spec:0": never enable host specular lighting (diagnosis of light patches)
     unsigned tsc_divisor = 4;  // --tsc-divisor N: the engine's frame timer (rdtsc) runs N times slower than the Xbox TSC
     std::wstring coverage;     // --coverage FILE: one-shot probes at the hex addresses listed (first word of each line)
+    int untex = 1;             // press-file "cfg:untex:N": an unbound stage texture reads as 0 white, 1 the diffuse colour (1: game over overlay, docs/04 §3.13)
+    bool flash_watch = false;  // press-file "cfg:flashwatch:1": detect single dark / flat frames, save them with draw statistics
+    bool vis_all = false;      // press-file "cfg:visall:1": visibility tests report every pixel visible (diagnosis of culling)
+    bool tex_every_frame = false; // press-file "cfg:texcheck:1": check every texture's contents every frame (diagnosis of stale images)
     int zmode = 3;             // press-file "cfg:zmode:N": fixed-function sampling of a depth-format header (0 depth, 1 bytes, 2 shadow func vs 0, 3 back buffer colour)
     bool no_rdtsc = false;     // --no-rdtsc: leave rdtsc to the host TSC (diagnosis)
     bool host_ffp = false;     // --host-ffp: fixed-function draws use the host's pixel pipeline, not the generated stage shader

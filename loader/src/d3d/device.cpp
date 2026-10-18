@@ -76,6 +76,9 @@ IDirect3DPixelShader9 *g_zview_ps, *g_zfill_ps;
 enum class Owner : uint8_t { None, Color, Depth };
 std::unordered_map<uint64_t, Owner> g_owner;
 IDirect3DTexture9 *g_cur_rt; // host texture currently bound as render target
+uint64_t g_cur_zkey;         // key of the depth surface currently bound (0: none)
+uint32_t g_zbind_count;      // depth-surface binds so far: a depth view made after the last bind of its surface stays valid
+std::unordered_map<uint64_t, uint32_t> g_zbind_at; // depth key -> g_zbind_count at its last bind
 std::unordered_map<uint64_t, IDirect3DTexture9 *> g_snapshots; // copies for draws that sample their own target
 
 template <typename T> T &dev_field(uint32_t off) { return *(T *)(g_dev + off); }
@@ -607,14 +610,18 @@ IDirect3DTexture9 *scratch_rt(uint32_t w, uint32_t h)
 void bind_render_target(Surface *rt, Surface *z)
 {
     IDirect3DDevice9 *d = host3d::dev();
+    flash_count_rt();
     HostRT &h = host_rt(rt);
     uint32_t rw, rh;
     surface_size(rt, &rw, &rh);
     IDirect3DSurface9 *zs = nullptr;
+    g_cur_zkey = 0; // set below when a depth surface is bound
     if (z) {
         if (rt == g_backbuffer) g_main_z = z;
         uint64_t zkey;
         HostZ &hz = host_z(z, h.xw, h.xh, &zkey);
+        g_cur_zkey = zkey;
+        g_zbind_at[zkey] = ++g_zbind_count;
         uint32_t zw, zh;
         surface_size(z, &zw, &zh);
         if (native_size(std::max(zw, h.xw), std::max(zh, h.xh)) != native_size(h.xw, h.xh))
@@ -835,12 +842,19 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
         static uint32_t view_serial = ~0u;
         static uint64_t view_key;
         static int view_mode;
+        static uint32_t view_made_at; // g_zbind_count when the view was made
         static IDirect3DTexture9 *view;
-        if (view_serial != draw_serial || view_key != key || view_mode != mode) {
+        // A depth surface only changes while it is bound: a view made after its last bind stays valid while another
+        // surface is bound. Ninja Gaiden Black's ~200 shadow-receiver draws a frame sample the 128x128 shadow map,
+        // which was rebuilt for each of them (a full-screen pass per draw, ~10% of the frame in r069).
+        bool stale = view_key != key || view_mode != mode || (g_zbind_at[key] > view_made_at) ||
+                     (key == g_cur_zkey && view_serial != draw_serial);
+        if (stale) {
             view = depth_view(key, zi->second, w, h, mode);
             view_serial = draw_serial;
             view_key = key;
             view_mode = mode;
+            view_made_at = g_zbind_count;
         }
         return view;
     }
@@ -1385,6 +1399,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
         screenshot_now(tag);
     }
     if (debug_frame_active() && g_cfg.debug_frame_end) log_frame_mean_color(frames);
+    if (g_cfg.flash_watch) flash_check(frames);
     bool force = g_reset_requested.exchange(false);
     if (host3d::present() == D3DERR_DEVICELOST || g_device_lost || force) recover_device(force);
     check_render_size();
@@ -1499,6 +1514,169 @@ int shadow_func_code()
     return f >= 0x200 && f <= 0x207 ? (int)(f - 0x200) : 0;
 }
 
+// ---- flash watch ----
+struct FlashStats { uint32_t frame, draws, bb_draws, prog, ps, rts; float dark, mean, rgb[3]; };
+constexpr uint32_t kFlRing = 4096; // ~68 s of frames
+FlashStats g_fl_ring[kFlRing], g_fl_cur;
+uint32_t g_fl_n;
+int g_fl_pending = -1; // frames after a flash still to log
+
+void flash_count_draw(bool to_backbuffer, bool program, bool pixel_shader)
+{
+    if (!g_cfg.flash_watch) return;
+    g_fl_cur.draws++;
+    g_fl_cur.bb_draws += to_backbuffer;
+    g_fl_cur.prog += program;
+    g_fl_cur.ps += pixel_shader;
+}
+void flash_count_rt() { if (g_cfg.flash_watch) g_fl_cur.rts++; }
+
+// Per-draw records of the last three frames (caller, texture 0, vertex shader), dumped around a flash so the draws
+// present in the frames around it but missing from it can be listed.
+struct DrawRec { uint32_t caller, tex0, vs; };
+std::vector<DrawRec> g_fl_draws[kFlRing];
+uint32_t g_fl_slot;
+void flash_record_draw(uint32_t caller, uint32_t tex0, uint32_t vs)
+{
+    std::vector<DrawRec> &v = g_fl_draws[g_fl_slot % kFlRing];
+    if (v.size() < 4096) v.push_back({caller, tex0, vs});
+}
+
+static void flash_dump_draws(const std::vector<DrawRec> &v, uint32_t frame)
+{
+    // grouped by caller: count, and the distinct textures of the group (first few)
+    std::map<uint32_t, std::vector<const DrawRec *>> by;
+    for (const DrawRec &d : v) by[d.caller].push_back(&d);
+    logf("[flash] draws of frame %u: %zu draws from %zu call sites", frame, v.size(), by.size());
+    { // the order: runs of the same call site
+        std::string seq;
+        char b[48];
+        for (size_t i = 0; i < v.size();) {
+            size_t j = i;
+            while (j < v.size() && v[j].caller == v[i].caller) j++;
+            snprintf(b, sizeof b, " %06x*%zu", v[i].caller, j - i);
+            seq += b;
+            i = j;
+            if (seq.size() > 900) { seq += " ..."; break; }
+        }
+        logf("[flash]   order:%s", seq.c_str());
+    }
+    for (auto &kv : by) {
+        char tex[160] = "";
+        size_t n = 0;
+        std::vector<uint32_t> seen;
+        for (const DrawRec *d : kv.second)
+            if (std::find(seen.begin(), seen.end(), d->tex0) == seen.end() && seen.size() < 6) {
+                seen.push_back(d->tex0);
+                n += snprintf(tex + n, sizeof tex - n, " %08x", d->tex0);
+            }
+        logf("[flash]   %08x %s: %zu draws, vs %08x, tex%s", kv.first, sym_name(kv.first).c_str(), kv.second.size(), kv.second[0]->vs, tex);
+    }
+}
+
+static void flash_log(const FlashStats &s, const char *tag)
+{
+    logf("[flash] %s frame %u: draws %u (back buffer %u, vertex programs %u, pixel shaders %u), render target binds %u, dark %.0f%%, mean %.0f (%.0f %.0f %.0f)",
+         tag, s.frame, s.draws, s.bb_draws, s.prog, s.ps, s.rts, s.dark * 100, s.mean, s.rgb[0], s.rgb[1], s.rgb[2]);
+}
+
+// press-file "flashdump": the frame of the ring with the biggest darkening against its predecessor, with the
+// statistics and draw lists of it and its neighbours (for flashes the threshold above missed).
+void flash_dump_worst()
+{
+    uint32_t n = g_fl_n < kFlRing ? g_fl_n : kFlRing, best = 0;
+    float best_d = -1;
+    for (uint32_t i = 1; i < n; i++) {
+        uint32_t k = g_fl_n - n + i;
+        const FlashStats &c = g_fl_ring[k % kFlRing];
+        float d = c.dark - g_fl_ring[(k - 1) % kFlRing].dark;
+        if (c.draws < 100) continue; // in-game frames only (menus and loading screens draw a handful)
+        if (d > 0.15f || d > best_d) { best_d = d; best = k; } // the latest clear darkening, else the biggest
+    }
+    if (!best) return;
+    logf("[flash] on request: biggest darkening %+.0f%% at frame %u", best_d * 100, g_fl_ring[best % kFlRing].frame);
+    for (uint32_t k = best - 3; k <= best + 3 && k < g_fl_n; k++) flash_log(g_fl_ring[k % kFlRing], k == best ? "WORST" : "near");
+    uint32_t back = g_fl_n - best; // frames ago (the draw slots advance with g_fl_n)
+    for (int o = -1; o <= 1; o++) {
+        uint32_t ago = back - o;
+        if (ago == 0 || ago > kFlRing - 1) continue;
+        flash_dump_draws(g_fl_draws[(g_fl_slot + kFlRing - ago) % kFlRing], g_fl_ring[(best + o) % kFlRing].frame);
+    }
+}
+
+void flash_check(uint32_t frame)
+{
+    IDirect3DDevice9 *d = host3d::dev();
+    static IDirect3DSurface9 *fl_small, *sys;
+    const UINT W = 64, H = 36;
+    if (!fl_small) {
+        d->CreateRenderTarget(W, H, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &fl_small, nullptr);
+        d->CreateOffscreenPlainSurface(W, H, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr);
+    }
+    FlashStats s = g_fl_cur;
+    s.frame = frame;
+    g_fl_cur = {};
+    IDirect3DSurface9 *bb = nullptr;
+    if (fl_small && sys && SUCCEEDED(d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) {
+        d->StretchRect(bb, nullptr, fl_small, nullptr, D3DTEXF_POINT);
+        bb->Release();
+        D3DLOCKED_RECT lr;
+        if (SUCCEEDED(d->GetRenderTargetData(fl_small, sys)) && SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+            uint32_t dark = 0;
+            double sum = 0, c[3] = {};
+            for (UINT y = 0; y < H; y++)
+                for (UINT x = 0; x < W; x++) {
+                    uint32_t p = ((const uint32_t *)((const uint8_t *)lr.pBits + y * lr.Pitch))[x];
+                    int r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
+                    dark += (r + g + b) < 24;
+                    sum += (r + g + b) / 3.0;
+                    c[0] += r; c[1] += g; c[2] += b;
+                }
+            sys->UnlockRect();
+            s.dark = dark / float(W * H);
+            s.mean = float(sum / (W * H));
+            for (int i = 0; i < 3; i++) s.rgb[i] = float(c[i] / (W * H));
+        }
+    }
+    const FlashStats &prev = g_fl_ring[(g_fl_n + kFlRing - 1) % kFlRing];
+    bool flash = g_fl_n > 0 && ((s.dark > prev.dark + 0.15f) || (s.mean > 20 && fabsf(s.rgb[0] - prev.rgb[0]) + fabsf(s.rgb[1] - prev.rgb[1]) + fabsf(s.rgb[2] - prev.rgb[2]) > 90));
+    g_fl_ring[g_fl_n % kFlRing] = s;
+    g_fl_n++;
+    static int dump_next = 0;
+    if (dump_next) {
+        flash_dump_draws(g_fl_draws[g_fl_slot % kFlRing], frame);
+        dump_next = 0;
+    }
+    if (g_fl_pending > 0) {
+        flash_log(s, "after");
+        g_fl_pending--;
+    }
+    if (flash) {
+        static int saved;
+        logf("[flash] sudden change at frame %u; the frames before it:", frame);
+        for (uint32_t k = g_fl_n >= 9 ? g_fl_n - 9 : 0; k + 1 < g_fl_n; k++) flash_log(g_fl_ring[k % kFlRing], "before");
+        flash_log(s, "FLASH");
+        g_fl_pending = 4;
+        flash_dump_draws(g_fl_draws[(g_fl_slot + kFlRing - 1) % kFlRing], frame - 1);
+        flash_dump_draws(g_fl_draws[g_fl_slot % kFlRing], frame);
+        dump_next = 1;
+        static uint32_t last_trace;
+        if (frame > last_trace + 20) { // one full single-frame trace (draws, render-target dumps) of the frame after next
+            last_trace = frame;
+            g_cfg.debug_frame = frame + 2;
+            g_cfg.debug_frame_end = 0;
+            logf("[flash] tracing frame %u", frame + 2);
+        }
+        if (saved++ < 20) {
+            char tag[48];
+            snprintf(tag, sizeof tag, "flash_%u", frame);
+            screenshot_now(tag);
+        }
+    }
+    g_fl_slot++;
+    g_fl_draws[g_fl_slot % kFlRing].clear();
+}
+
 // --debug-frame N-M: the mean colour of every presented frame in the range, to find single-frame flashes (a whole
 // frame of one flat colour) in the log next to the 2D draw trace of that frame. ~8 MB read back per frame.
 void log_frame_mean_color(uint32_t frame)
@@ -1599,6 +1777,14 @@ HRESULT vis_end(uint32_t Index)
         }
         float scale = target_scale_x() * target_scale_y();
         if (scale > 0) pixels = (DWORD)(pixels / scale + 0.5f);
+    }
+    if (g_cfg.vis_all) pixels = 720 * 480; // cfg:visall:1, diagnosis of culling
+    static uint32_t zero_count, total_count;
+    total_count++;
+    if (!pixels) zero_count++;
+    if ((total_count & 4095) == 0) {
+        logf("[d3d] visibility tests: %u of the last 4096 reported 0 pixels", zero_count);
+        zero_count = 0;
     }
     uint32_t t = dev_field<uint32_t>(DEV_GPUTIME);
     r[0] = t;

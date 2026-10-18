@@ -24,6 +24,7 @@ struct Entry {
     bool dirty = false;
     uint32_t checked_frame = ~0u; // the frame the contents were last checked (hashing on every bind cost ~8 ms a frame)
     uint32_t stable = 0;          // consecutive checks without a change
+    uint32_t hashed_frame = 0;    // the frame the contents were last hashed (write-watch comparisons)
 };
 
 // A texture whose contents did not change for this many checks is checked every 16th frame only (busy
@@ -32,6 +33,54 @@ struct Entry {
 constexpr uint32_t kStableChecks = 30;
 
 std::unordered_map<const Resource *, Entry> g_cache;
+
+// Pages of the 64 MB contiguous block written since the last frame (GetWriteWatch over MEM_WRITE_WATCH memory,
+// kernel/k_memory.cpp). A stable texture skips its content hash for up to 16 frames; Ninja Gaiden Black rewrites its
+// save thumbnails in place, so the old picture stayed for a while ("ghosting" on the load page, r072/r073). Now a
+// texture whose pages were written since its last hash is checked at once; the 16-frame check stays as a fallback.
+constexpr uint32_t kContigBase = 0x80000000u, kContigSize = 64u << 20, kPage = 4096;
+uint32_t g_page_written[kContigSize / kPage]; // frame + 1 when the page was last reported written
+uint32_t g_ww_frame = ~0u;
+bool g_ww_ok = true;
+void *g_ww_addrs[kContigSize / kPage];
+
+void write_watch_update(uint32_t frame)
+{
+    if (!g_ww_ok || frame == g_ww_frame) return;
+    g_ww_frame = frame;
+    ULONG_PTR count = kContigSize / kPage;
+    DWORD gran = 0;
+    if (GetWriteWatch(WRITE_WATCH_FLAG_RESET, (void *)(uintptr_t)kContigBase, kContigSize, g_ww_addrs, &count, &gran) != 0) {
+        g_ww_ok = false;
+        logf("[tex] write watch not available (error %lu): textures fall back to periodic checks", GetLastError());
+        return;
+    }
+    for (ULONG_PTR i = 0; i < count; i++) g_page_written[((uintptr_t)g_ww_addrs[i] - kContigBase) / kPage] = frame + 1;
+}
+
+} // namespace
+
+// Writes the write watch does not see: file reads land in guest memory from the host kernel (NtReadFile), possibly
+// after the call returns (overlapped). The pages count as written for the next 30 frames.
+void texture_note_write(const void *p, uint32_t len)
+{
+    uintptr_t a = (uintptr_t)p;
+    if (a < kContigBase || a >= kContigBase + kContigSize || !len) return;
+    uint32_t until = g_frame_count.load(std::memory_order_relaxed) + 31;
+    uintptr_t end = a + len - 1 < kContigBase + kContigSize ? a + len - 1 : kContigBase + kContigSize - 1;
+    for (uintptr_t q = (a - kContigBase) / kPage; q <= (end - kContigBase) / kPage; q++) g_page_written[q] = until;
+}
+
+namespace {
+
+bool written_since(uint32_t data_phys, uint32_t bytes, uint32_t since_frame)
+{
+    if (!g_ww_ok) return false;
+    uint32_t lo = (data_phys & 0x03FFFFFF) / kPage, hi = ((data_phys & 0x03FFFFFF) + (bytes ? bytes - 1 : 0)) / kPage;
+    for (uint32_t p = lo; p <= hi && p < kContigSize / kPage; p++)
+        if (g_page_written[p] > since_frame) return true;
+    return false;
+}
 CRITICAL_SECTION g_cs;
 struct Init {
     Init() { InitializeCriticalSection(&g_cs); }
@@ -323,7 +372,10 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
     EnterCriticalSection(&g_cs);
     Entry &e = g_cache[r];
     uint32_t frame = g_frame_count.load(std::memory_order_relaxed);
-    bool skip = e.checked_frame == frame || (e.stable >= kStableChecks && ((frame + ((uintptr_t)r >> 6)) & 15) != 0);
+    write_watch_update(frame);
+    bool skip = e.checked_frame == frame ||
+                (!g_cfg.tex_every_frame && e.stable >= kStableChecks && ((frame + ((uintptr_t)r >> 6)) & 15) != 0 &&
+                 !(e.tex && written_since(pc->Data, total_bytes(pc), e.hashed_frame)));
     if (skip && e.tex && !e.dirty && e.data == pc->Data && e.format == pc->Format && e.size == pc->Size &&
         e.palette == (pal ? phys_to_virt(pal->Data) : nullptr)) {
         IDirect3DBaseTexture9 *t = e.tex;
@@ -331,6 +383,7 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
         return t;
     }
     e.checked_frame = frame;
+    e.hashed_frame = frame;
     uint32_t bytes = total_bytes(pc);
     uint32_t hash = sample_hash((const uint8_t *)phys_to_virt(pc->Data), bytes);
     const void *palptr = pal ? phys_to_virt(pal->Data) : nullptr;

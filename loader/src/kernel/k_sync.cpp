@@ -8,7 +8,11 @@
 #include "kernel/nt.h"
 #include "xthread.h"
 
+#include <algorithm>
+#include <intrin.h>
+#include <mutex>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -206,12 +210,55 @@ int32_t __stdcall KeSetEvent(XKEVENT *Event, int32_t Increment, BOOLEAN Wait)
     return prev;
 }
 
+// Diagnosis (press-file "waits"): total blocked time per (object, game call site) of KeWaitForSingleObject, to find
+// what a slow frame waits for. The call site is the first three .text return addresses above the kernel thunk.
+namespace {
+struct WaitStat { void *obj; uint32_t type, site[3]; double ms; uint32_t n; };
+std::mutex g_wait_mu;
+std::vector<WaitStat> g_wait_stats;
+}
+
+void ksync_dump_waits()
+{
+    std::lock_guard<std::mutex> lk(g_wait_mu);
+    std::vector<WaitStat> v = g_wait_stats;
+    std::sort(v.begin(), v.end(), [](const WaitStat &a, const WaitStat &b) { return a.ms > b.ms; });
+    logf("[k] waits (blocked time since last dump, top %zu of %zu):", v.size() < 12 ? v.size() : (size_t)12, v.size());
+    for (size_t i = 0; i < v.size() && i < 12; i++)
+        logf("[k]   %8.1f ms %6u waits  object %p type %u  from %08x < %08x < %08x", v[i].ms, v[i].n, v[i].obj, v[i].type, v[i].site[0],
+             v[i].site[1], v[i].site[2]);
+    g_wait_stats.clear();
+}
+
 NTSTATUS __stdcall KeWaitForSingleObject(void *Object, uint32_t WaitReason, uint8_t WaitMode, BOOLEAN Alertable,
                                          LARGE_INTEGER *Timeout)
 {
     KTRACE("%p (type %u), %u, %u, %u, %lld", Object, Object ? ((XDISPATCHER_HEADER *)Object)->Type : 0, WaitReason, WaitMode,
            Alertable, Timeout ? Timeout->QuadPart : -1LL);
-    return ksync_wait_object(Object, Alertable != 0, Timeout);
+    LARGE_INTEGER t0, t1, f;
+    QueryPerformanceCounter(&t0);
+    NTSTATUS st = ksync_wait_object(Object, Alertable != 0, Timeout);
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&f);
+    double ms = (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+    if (ms > 0.5) {
+        uint32_t site[3] = {};
+        const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress();
+        for (int i = 0, k = 0; i < 256 && k < 3; i++) {
+            uint32_t v = sp[i];
+            if (v >= 0x00011000 && v < 0x0037A480) site[k++] = v;
+        }
+        std::lock_guard<std::mutex> lk(g_wait_mu);
+        WaitStat *w = nullptr;
+        for (WaitStat &s : g_wait_stats)
+            if (s.obj == Object && s.site[0] == site[0] && s.site[1] == site[1]) { w = &s; break; }
+        if (!w && g_wait_stats.size() < 512) {
+            g_wait_stats.push_back({Object, Object ? ((XDISPATCHER_HEADER *)Object)->Type : 0u, {site[0], site[1], site[2]}, 0, 0});
+            w = &g_wait_stats.back();
+        }
+        if (w) { w->ms += ms; w->n++; }
+    }
+    return st;
 }
 
 // Critical sections use the Xbox layout (28 bytes): LockCount starts at -1, OwningThread is a KTHREAD*.

@@ -7,6 +7,8 @@
 #include "d3d/dispatch.h"
 #include "d3d/xd3d.h"
 #include "hooks.h"
+#include "kernel/kexports.h"
+#include "d3d/device.h"
 #include "d3d/draw.h"
 #include "d3d/host.h"
 #include "input/bindings.h"
@@ -192,6 +194,14 @@ void read_press_file(uint32_t now_ms)
                     logf("[input] trace requested: frame %u%s", g_cfg.debug_frame, n > 1 ? " (range)" : "");
                     continue;
                 }
+                if (line == "flashdump") {
+                    xd3d::flash_dump_worst();
+                    continue;
+                }
+                if (line == "waits") {
+                    xk::ksync_dump_waits();
+                    continue;
+                }
                 if (line == "coverage") {
                     log_coverage_summary();
                     continue;
@@ -213,6 +223,11 @@ void read_press_file(uint32_t now_ms)
                     else if (k == "hostffp") g_cfg.host_ffp = !v ? false : true;
                     else if (k == "ffpdebug") g_cfg.ffp_debug = (unsigned)atoi(line.c_str() + c + 1);
                     else if (k == "zmode") g_cfg.zmode = atoi(line.c_str() + c + 1);
+                    else if (k == "texcheck") g_cfg.tex_every_frame = v;
+                    else if (k == "visall") g_cfg.vis_all = v;
+                    else if (k == "flashwatch") g_cfg.flash_watch = v;
+                    else if (k == "untex") g_cfg.untex = atoi(line.c_str() + c + 1);
+                    else if (k == "tscdiv") g_cfg.tsc_divisor = std::max(1, atoi(line.c_str() + c + 1));
                     else if (k == "fog") {
                         g_cfg.no_fog = !v;
                         xd3d::invalidate_render_state(xd3d::XRS_FOGENABLE);

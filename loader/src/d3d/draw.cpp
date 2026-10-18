@@ -1075,6 +1075,14 @@ bool begin_draw(DrawCtx &ctx)
     IDirect3DDevice9 *d = host3d::dev();
     if (!d) return false;
     g_draw_serial++;
+    if (g_cfg.flash_watch) {
+        uint32_t caller = 0; // the first game .text return address above us: which game routine submitted the draw
+        const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress();
+        for (int i = 0; i < 160 && !caller; i++)
+            if (sp[i] >= 0x00011000 && sp[i] < 0x0037A480) caller = sp[i];
+        flash_record_draw(caller, (uint32_t)(uintptr_t)g_st.textures[0], g_st.vertex_shader);
+    }
+    flash_count_draw(g_st.render_target == nullptr || is_backbuffer(g_st.render_target), g_st.vertex_shader & 1, g_st.pixel_shader != 0);
     apply_render_states(d);
     bool ps = g_st.pixel_shader != 0;
     apply_texture_stages(d, !ps); // may copy a render target (outside the scene) first
@@ -1149,11 +1157,31 @@ void draw_up(uint32_t xprim, uint32_t verts, const void *data, uint32_t stride)
 // past the stream bound at run time, which the NV2A reads as garbage) would fault inside d3d9.dll.
 bool pages_readable(const void *p, size_t n)
 {
+    // VirtualQuery for every draw cost ~15% of a busy frame (r069): remember the committed regions found readable
+    // this frame and answer from them; the cache starts over every frame.
+    struct Region { const uint8_t *lo, *hi; };
+    static Region cache[16];
+    static int cached;
+    static uint32_t cache_frame = ~0u;
+    uint32_t frame = g_frame_count.load(std::memory_order_relaxed);
+    if (frame != cache_frame) {
+        cache_frame = frame;
+        cached = 0;
+    }
     const uint8_t *a = (const uint8_t *)p, *end = a + n;
+    for (int i = 0; i < cached; i++)
+        if (a >= cache[i].lo && end <= cache[i].hi) return true;
+    const uint8_t *start = a;
+    const uint8_t *region_lo = nullptr;
     while (a < end) {
         MEMORY_BASIC_INFORMATION mbi;
         if (!VirtualQuery(a, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) return false;
+        if (!region_lo) region_lo = (const uint8_t *)mbi.BaseAddress;
         a = (const uint8_t *)mbi.BaseAddress + mbi.RegionSize;
+    }
+    if (region_lo && start >= region_lo) {
+        cache[cached % 16] = {region_lo, a};
+        if (cached < 16) cached++;
     }
     return true;
 }

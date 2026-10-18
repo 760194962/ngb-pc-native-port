@@ -180,4 +180,5 @@ extern XANSI_STRING HalDiskModelNumber;
 extern XANSI_STRING HalDiskSerialNumber;
 void ktick_update(); // called by the DPC thread each time it wakes
 
+void ksync_dump_waits(); // k_sync.cpp: press-file "waits"
 } // namespace xk

@@ -18,6 +18,14 @@ void log_frame_mean_color(uint32_t frame); // --debug-frame N-M: mean colour of 
 constexpr int kDepthViewBytes = -2; // depth memory read through a colour header: Z bytes split into A/R/G, stencil in B
 constexpr int kDepthViewRaw = -1;   // depth-format header, combiner program: the depth in all four channels
 int shadow_func_code();            // D3DRS_SHADOWFUNC as 0..7 (NEVER .. ALWAYS)
+// --flash watch (cfg:flashwatch): per-frame draw statistics, and at Swap a tiny copy of the frame checked for a sudden
+// dark or flat frame; such a frame is saved as a PNG with the statistics of the frames around it.
+void flash_count_draw(bool to_backbuffer, bool program, bool pixel_shader);
+void flash_count_rt();
+void flash_record_draw(uint32_t caller, uint32_t tex0, uint32_t vs);
+void flash_check(uint32_t frame);
+void flash_dump_worst();
+bool is_backbuffer(const Surface *s);
 void vis_begin();                  // NV097_SET_ZPASS_PIXEL_COUNT_ENABLE = 1: start counting (host occlusion query)
 HRESULT vis_end(uint32_t Index);   // D3DDevice_EndVisibilityTest: finish the query, write the report slot
 void wait_next_vblank(); // block until the next emulated vblank (D3DDevice_BlockUntilVerticalBlank)

@@ -34,7 +34,9 @@ uint32_t strip_cache_bits(uint32_t protect) { return protect & ~(0x200u | 0x400u
 bool kmem_init()
 {
     g_pool_heap = HeapCreate(0, 0, 0);
-    g_contig_base = (uint8_t *)VirtualAlloc((void *)(uintptr_t)CONTIGUOUS_BASE, CONTIGUOUS_SIZE, MEM_RESERVE | MEM_COMMIT,
+    // MEM_WRITE_WATCH: the texture cache asks Windows which pages the game wrote each frame (d3d/texture.cpp), so a
+    // texture the game rewrites in place (save thumbnails, docs/04 §3.13) is re-uploaded the same frame.
+    g_contig_base = (uint8_t *)VirtualAlloc((void *)(uintptr_t)CONTIGUOUS_BASE, CONTIGUOUS_SIZE, MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH,
                                             PAGE_EXECUTE_READWRITE);
     if (!g_contig_base) {
         logf("memory: could not reserve contiguous memory at 0x%08x (error %lu); using any address", CONTIGUOUS_BASE,

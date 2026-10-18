@@ -7,6 +7,7 @@
 // File handles are real Windows handles opened through ntdll, so read/write/APC/event semantics carry over.
 #include "kernel/kexports.h"
 #include "kernel/nt.h"
+namespace xd3d { void texture_note_write(const void *p, uint32_t len); } // d3d/texture.cpp
 
 #include <cctype>
 #include <map>
@@ -360,6 +361,7 @@ NTSTATUS __stdcall NtReadFile(HANDLE FileHandle, HANDLE Event, void *ApcRoutine,
     if (handle_info(FileHandle, hi) && hi.raw_volume && hi.mount->partition >= 0) {
         // Raw disk: unwritten sectors read as zeros, the full length is always returned.
         memset(Buffer, 0, Length);
+        xd3d::texture_note_write(Buffer, Length);
         host::IO_STATUS_BLOCK hio{};
         NTSTATUS s = host::NtReadFile(FileHandle, nullptr, nullptr, nullptr, &hio, Buffer, Length, ByteOffset, nullptr);
         if (s == XSTATUS_PENDING) {
@@ -383,6 +385,7 @@ NTSTATUS __stdcall NtReadFile(HANDLE FileHandle, HANDLE Event, void *ApcRoutine,
                      ByteOffset ? ByteOffset->QuadPart : -1LL, Event, ApcRoutine, Buffer);
         }
     }
+    xd3d::texture_note_write(Buffer, Length); // the texture cache re-checks textures in this memory (d3d/texture.cpp)
     NTSTATUS s = host::NtReadFile(FileHandle, Event, ApcRoutine, ApcContext, (host::IO_STATUS_BLOCK *)IoStatusBlock, Buffer, Length,
                                   ByteOffset, nullptr);
     KTRACE("%p '%s', ev %p, apc %p, %p, len 0x%x, off %lld) -> 0x%08x (", FileHandle, handle_desc(FileHandle).c_str(), Event,
