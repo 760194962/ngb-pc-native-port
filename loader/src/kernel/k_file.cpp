@@ -373,6 +373,16 @@ NTSTATUS __stdcall NtReadFile(HANDLE FileHandle, HANDLE Event, void *ApcRoutine,
         complete(IoStatusBlock, s, NT_OK(s) ? Length : 0, Event);
         return s;
     }
+    // How the CRI Sofdec player reads its movies (docs/04: groundwork for --skip-videos): the first reads of each .sfd
+    if (g_cfg.skip_videos && handle_info(FileHandle, hi) && hi.xbox_path.size() > 4) {
+        std::string lp = lower(hi.xbox_path);
+        if (lp.compare(lp.size() - 4, 4, ".sfd") == 0) {
+            static std::atomic<int> noted{0};
+            if (noted++ < 12)
+                logf("[k] NtReadFile('%s', len 0x%x, off %lld, event %p, apc %p, buffer %p)", hi.xbox_path.c_str(), Length,
+                     ByteOffset ? ByteOffset->QuadPart : -1LL, Event, ApcRoutine, Buffer);
+        }
+    }
     NTSTATUS s = host::NtReadFile(FileHandle, Event, ApcRoutine, ApcContext, (host::IO_STATUS_BLOCK *)IoStatusBlock, Buffer, Length,
                                   ByteOffset, nullptr);
     KTRACE("%p '%s', ev %p, apc %p, %p, len 0x%x, off %lld) -> 0x%08x (", FileHandle, handle_desc(FileHandle).c_str(), Event,

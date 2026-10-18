@@ -14,6 +14,12 @@ extern int g_width, g_height; // back buffer size
 void hle_flush(); // interpret pending inline push-buffer commands
 int sync_transforms_from_device(); // take matrices game code wrote into the device object (bit mask of the ones that changed)
 bool sync_material_from_device();  // same for the material at device+0xF00 (true when it changed)
+void log_frame_mean_color(uint32_t frame); // --debug-frame N-M: mean colour of each presented frame (flash detector)
+constexpr int kDepthViewBytes = -2; // depth memory read through a colour header: Z bytes split into A/R/G, stencil in B
+constexpr int kDepthViewRaw = -1;   // depth-format header, combiner program: the depth in all four channels
+int shadow_func_code();            // D3DRS_SHADOWFUNC as 0..7 (NEVER .. ALWAYS)
+void vis_begin();                  // NV097_SET_ZPASS_PIXEL_COUNT_ENABLE = 1: start counting (host occlusion query)
+HRESULT vis_end(uint32_t Index);   // D3DDevice_EndVisibilityTest: finish the query, write the report slot
 void wait_next_vblank(); // block until the next emulated vblank (D3DDevice_BlockUntilVerticalBlank)
 
 // Render resolution: host render targets are scale_x() x scale_y() times the Xbox size (--scale; in widescreen

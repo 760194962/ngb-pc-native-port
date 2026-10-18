@@ -5,6 +5,7 @@
 
 #include "d3d/device.h"
 #include "d3d/dispatch.h"
+#include "d3d/ffp_ps.h"
 #include "d3d/host.h"
 #include "d3d/pshader.h"
 #include "d3d/pushbuf.h"
@@ -18,6 +19,8 @@
 #include <wincodec.h>
 #include <intrin.h> // _AddressOfReturnAddress: MSVC 14.16 (VS2017) does not declare it via <windows.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
@@ -57,6 +60,9 @@ D3DBLEND conv_blend(uint32_t v)
     case 0x306: return D3DBLEND_DESTCOLOR;
     case 0x307: return D3DBLEND_INVDESTCOLOR;
     case 0x308: return D3DBLEND_SRCALPHASAT;
+    // The Xbox values are the NV2A/GL ones: 0x8001 CONSTANTCOLOR, 0x8002 INVCONSTANTCOLOR, 0x8003 CONSTANTALPHA,
+    // 0x8004 INVCONSTANTALPHA. D3D9 only has BLENDFACTOR; for the alpha modes the factor is the blend colour's
+    // alpha replicated (see blend_factor in apply_render_states).
     case 0x8001: case 0x8003: return D3DBLEND_BLENDFACTOR;
     case 0x8002: case 0x8004: return D3DBLEND_INVBLENDFACTOR;
     default: return D3DBLEND_ONE;
@@ -210,16 +216,57 @@ void apply_render_states(IDirect3DDevice9 *d)
 {
     auto set = [&](D3DRENDERSTATETYPE s, DWORD v) { d->SetRenderState(s, v); };
     on_change(XRS_ZENABLE, [&](uint32_t v) { set(D3DRS_ZENABLE, v); });
+    // Depth bias. D3DRS_ZBIAS (0..16, D3D8 style) and the NV2A polygon offset (D3DRS_POLYGONOFFSETZOFFSET in depth
+    // units, D3DRS_POLYGONOFFSETZSLOPESCALE, enabled by D3DRS_SOLIDOFFSETENABLE) both end up in the host's
+    // DEPTHBIAS / SLOPESCALEDEPTHBIAS. D3D9's DEPTHBIAS is added to the 0..1 depth directly: a ZBIAS step is
+    // -0.000005 (as d3d8to9 maps it), a polygon offset unit is 1/2^24 of a 24-bit depth buffer. Ninja Gaiden
+    // Black draws its lightmap/decal layers coplanar over the rocks with a bias; without it they z-fought and the
+    // light patches flickered with every step (docs/04 §3.8).
+    auto depth_bias = [&]() {
+        const uint32_t *rs = render_state();
+        float bias = -(float)rs[XRS_ZBIAS] * 0.000005f, slope = 0.0f;
+        if (rs[XRS_SOLIDOFFSETENABLE]) {
+            float off;
+            memcpy(&off, &rs[XRS_POLYGONOFFSETZOFFSET], 4);
+            memcpy(&slope, &rs[XRS_POLYGONOFFSETZSLOPESCALE], 4);
+            bias += off / 16777216.0f;
+        }
+        DWORD b, s;
+        memcpy(&b, &bias, 4);
+        memcpy(&s, &slope, 4);
+        set(D3DRS_DEPTHBIAS, b);
+        set(D3DRS_SLOPESCALEDEPTHBIAS, s);
+    };
+    on_change(XRS_ZBIAS, [&](uint32_t) { depth_bias(); });
+    on_change(XRS_SOLIDOFFSETENABLE, [&](uint32_t) { depth_bias(); });
+    on_change(XRS_POLYGONOFFSETZOFFSET, [&](uint32_t) { depth_bias(); });
+    on_change(XRS_POLYGONOFFSETZSLOPESCALE, [&](uint32_t) { depth_bias(); });
     on_change(XRS_ZFUNC, [&](uint32_t v) { set(D3DRS_ZFUNC, conv_cmp(v)); });
     on_change(XRS_ZWRITEENABLE, [&](uint32_t v) { set(D3DRS_ZWRITEENABLE, v != 0); });
     on_change(XRS_ALPHATESTENABLE, [&](uint32_t v) { set(D3DRS_ALPHATESTENABLE, v != 0); });
     on_change(XRS_ALPHAFUNC, [&](uint32_t v) { set(D3DRS_ALPHAFUNC, conv_cmp(v)); });
     on_change(XRS_ALPHAREF, [&](uint32_t v) { set(D3DRS_ALPHAREF, v & 0xFF); });
     on_change(XRS_ALPHABLENDENABLE, [&](uint32_t v) { set(D3DRS_ALPHABLENDENABLE, v != 0); });
-    on_change(XRS_SRCBLEND, [&](uint32_t v) { set(D3DRS_SRCBLEND, conv_blend(v)); });
-    on_change(XRS_DESTBLEND, [&](uint32_t v) { set(D3DRS_DESTBLEND, conv_blend(v)); });
+    // D3DBLEND_CONSTANTALPHA / INVCONSTANTALPHA (0x8003 / 0x8004) take the blend colour's alpha, replicated into
+    // the host's BLENDFACTOR. Ninja Gaiden Black copies the back buffer with them (BLENDCOLOR 0xffffffff: a full
+    // copy) and draws a fade overlay over the pickup dialog with 0x00ffffff (alpha 0: nothing); read as the colour
+    // modes, that overlay replaced the dialog with the snapshot (docs/04 §3.8).
+    auto blend_factor = [&]() {
+        const uint32_t *rs = render_state();
+        uint32_t sb = rs[XRS_SRCBLEND], db = rs[XRS_DESTBLEND], bc = rs[XRS_BLENDCOLOR];
+        bool alpha = sb == 0x8003 || sb == 0x8004 || db == 0x8003 || db == 0x8004;
+        return alpha ? (bc >> 24) * 0x01010101u : bc;
+    };
+    on_change(XRS_SRCBLEND, [&](uint32_t v) {
+        set(D3DRS_SRCBLEND, conv_blend(v));
+        g_rs_valid[XRS_BLENDCOLOR] = false; // the factor depends on the mode
+    });
+    on_change(XRS_DESTBLEND, [&](uint32_t v) {
+        set(D3DRS_DESTBLEND, conv_blend(v));
+        g_rs_valid[XRS_BLENDCOLOR] = false;
+    });
     on_change(XRS_BLENDOP, [&](uint32_t v) { set(D3DRS_BLENDOP, conv_blendop(v)); });
-    on_change(XRS_BLENDCOLOR, [&](uint32_t v) { set(D3DRS_BLENDFACTOR, v); });
+    on_change(XRS_BLENDCOLOR, [&](uint32_t) { set(D3DRS_BLENDFACTOR, blend_factor()); });
     on_change(XRS_DITHERENABLE, [&](uint32_t v) { set(D3DRS_DITHERENABLE, v != 0); });
     on_change(XRS_SHADEMODE, [&](uint32_t v) { set(D3DRS_SHADEMODE, v == 0x1D00 ? D3DSHADE_FLAT : D3DSHADE_GOURAUD); });
     on_change(XRS_COLORWRITEENABLE, [&](uint32_t v) { set(D3DRS_COLORWRITEENABLE, conv_colorwrite(v)); });
@@ -242,7 +289,17 @@ void apply_render_states(IDirect3DDevice9 *d)
     on_change(XRS_FOGCOLOR, [&](uint32_t v) { set(D3DRS_FOGCOLOR, v); });
     on_change(XRS_RANGEFOGENABLE, [&](uint32_t v) { set(D3DRS_RANGEFOGENABLE, v != 0); });
     on_change(XRS_LIGHTING, [&](uint32_t v) { set(D3DRS_LIGHTING, v != 0); });
-    on_change(XRS_SPECULARENABLE, [&](uint32_t v) { set(D3DRS_SPECULARENABLE, v != 0); });
+    // Xbox D3DRS_VERTEXBLEND values are NV2A skin modes (SetRenderState_VertexBlend 0x3C5BE0 writes the value to
+    // NV097_SET_SKIN_MODE as is): 0 off, 1 = 2 matrices / 1 weight, 2 = 2 weights 2 matrices, 3 = 3 matrices / 2
+    // weights, 4 = 3 weights 3 matrices, 5 = 4 matrices / 3 weights, 6 = 4 weights 4 matrices. Direct3D 9 only has
+    // the "last weight computed" forms; the explicit-last-weight ones use the same matrix count. Ninja Gaiden
+    // Black's character joints are XYZB1 meshes (FVF 0x116) with mode 1; without this they were drawn with
+    // WORLD0 only and ended up off the body.
+    on_change(XRS_VERTEXBLEND, [&](uint32_t v) {
+        DWORD h = v == 0 ? D3DVBF_DISABLE : v <= 2 ? D3DVBF_1WEIGHTS : v <= 4 ? D3DVBF_2WEIGHTS : D3DVBF_3WEIGHTS;
+        set(D3DRS_VERTEXBLEND, h);
+    });
+    on_change(XRS_SPECULARENABLE, [&](uint32_t v) { set(D3DRS_SPECULARENABLE, v != 0 && !g_cfg.no_specular); });
     on_change(XRS_LOCALVIEWER, [&](uint32_t v) { set(D3DRS_LOCALVIEWER, v != 0); });
     on_change(XRS_COLORVERTEX, [&](uint32_t v) { set(D3DRS_COLORVERTEX, v != 0); });
     on_change(XRS_SPECULARMATERIALSOURCE, [&](uint32_t v) { set(D3DRS_SPECULARMATERIALSOURCE, v); });
@@ -264,10 +321,35 @@ template <typename F> void ts_on_change(int s, int t, F apply)
     apply(v);
 }
 
+// A 1x1 opaque white texture for fixed-function stages that use D3DTA_TEXTURE without a texture bound: that reads
+// as (1,1,1,1) on the Xbox (Ninja Gaiden Black's nunchaku sweep modulates its alpha by an unset stage 1 and is
+// drawn alpha-tested; D3D9 samples an unbound stage as (0,0,0,0) and the sweep vanished, docs/04 §3.9).
+IDirect3DTexture9 *white_texture()
+{
+    static IDirect3DTexture9 *t;
+    if (t) return t;
+    if (FAILED(host3d::dev()->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr))) return nullptr;
+    D3DLOCKED_RECT lr;
+    if (SUCCEEDED(t->LockRect(0, &lr, nullptr, 0))) {
+        *(uint32_t *)lr.pBits = 0xFFFFFFFFu;
+        t->UnlockRect(0);
+    }
+    return t;
+}
+
+bool stage_reads_texture(const uint32_t *ts)
+{
+    if (ts[12] == 1 && ts[16] == 1) return false; // both ops DISABLE
+    for (int a : {13, 14, 15, 17, 18, 19})
+        if ((ts[a] & 0xF) == 2) return true; // D3DTA_TEXTURE (with its modifier flags masked)
+    return false;
+}
+
 void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
 {
     for (int s = 0; s < 4; s++) {
         IDirect3DBaseTexture9 *t = nullptr;
+        if (!g_st.textures[s] && fixed_function_pixels && stage_reads_texture(texture_state(s))) t = white_texture();
         if (Resource *r = g_st.textures[s]) {
             const uint32_t *ts = texture_state(s); // MAGFILTER 3, MINFILTER 4: 2 = LINEAR and up
             t = rt_texture_for((const PixelContainer *)r, g_draw_serial, ts[3] >= 2 || ts[4] >= 2);
@@ -633,13 +715,35 @@ void upload_vs_constants(IDirect3DDevice9 *d)
 }
 
 // Fixed-function path: express the same scaling as a texture transform (when the game sets none).
-void apply_fvf_texture_scale(IDirect3DDevice9 *d)
+// Pre-transformed (XYZRHW) vertices skip the host's vertex pipeline, texture transforms included, so for them the
+// scale goes into the vertex data instead (scale_rhw) and the stage transform is off.
+void apply_fvf_texture_scale(IDirect3DDevice9 *d, bool rhw)
 {
     for (int s = 0; s < 4; s++) {
+        if (rhw) {
+            d->SetTextureStageState(s, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+            g_ts_valid[s][21] = false; // the game's flags are sent again on the next draw that uses them
+            continue;
+        }
         float sx, sy;
         linear_texture_scale(s, &sx, &sy);
         bool scaled = sx != 1.0f || sy != 1.0f;
-        if (texture_state(s)[21] != 0) continue; // game uses its own texture transform
+        uint32_t flags = texture_state(s)[21];
+        if (flags != 0) {
+            // The game's own texture transform is in effect. A linear texture is still addressed in texels on the
+            // NV2A, so the texel-to-0..1 scale has to follow the game's matrix: uv' = (uv * M) * S. Ninja Gaiden
+            // Black keeps an identity TEXTURE0 transform set while it copies the back buffer (720x480 linear) into
+            // its menu / dialog snapshot with texel coordinates 0..720 x 0..480; without the scale the whole quad
+            // sampled the clamped edge, one flat colour (docs/04 §3.7).
+            if (!scaled) continue;
+            D3DMATRIX m = g_st.transforms[2 + s];
+            for (int r = 0; r < 4; r++) {
+                m.m[r][0] *= sx;
+                m.m[r][1] *= sy;
+            }
+            d->SetTransform((D3DTRANSFORMSTATETYPE)(D3DTS_TEXTURE0 + s), &m);
+            continue;
+        }
         D3DMATRIX m = {};
         m._11 = sx;
         m._22 = sy;
@@ -688,29 +792,141 @@ std::string game_callers(const uint32_t *sp)
     return out;
 }
 
+static bool write_png_bgra(const wchar_t *path, uint32_t w, uint32_t h, const uint8_t *px)
+{
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    IWICImagingFactory *f = nullptr;
+    IWICStream *st = nullptr;
+    IWICBitmapEncoder *enc = nullptr;
+    IWICBitmapFrameEncode *fr = nullptr;
+    bool ok = false;
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f))) &&
+        SUCCEEDED(f->CreateStream(&st)) && SUCCEEDED(st->InitializeFromFilename(path, GENERIC_WRITE)) &&
+        SUCCEEDED(f->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) &&
+        SUCCEEDED(enc->Initialize(st, WICBitmapEncoderNoCache)) && SUCCEEDED(enc->CreateNewFrame(&fr, nullptr)) &&
+        SUCCEEDED(fr->Initialize(nullptr)) && SUCCEEDED(fr->SetSize(w, h))) {
+        WICPixelFormatGUID pf = GUID_WICPixelFormat32bppBGRA;
+        fr->SetPixelFormat(&pf);
+        ok = SUCCEEDED(fr->WritePixels(h, w * 4, w * h * 4, (BYTE *)px)) && SUCCEEDED(fr->Commit()) && SUCCEEDED(enc->Commit());
+    }
+    if (fr) fr->Release();
+    if (enc) enc->Release();
+    if (st) st->Release();
+    if (f) f->Release();
+    return ok;
+}
+
+// --debug-frame: the host copy of a bound (decoded, managed) texture as PNG, colour and alpha-as-grey, once per
+// resource, next to the render-target dumps: tex_<header>_<w>x<h>.png.
+static void dump_bound_texture(int s, const Resource *r)
+{
+    static std::vector<const Resource *> dumped;
+    if (g_cfg.screenshot_dir.empty() || !g_tex_sent[s] || g_tex_sent[s]->GetType() != D3DRTYPE_TEXTURE) return;
+    if (std::find(dumped.begin(), dumped.end(), r) != dumped.end()) return;
+    dumped.push_back(r);
+    auto *t = (IDirect3DTexture9 *)g_tex_sent[s];
+    D3DSURFACE_DESC desc;
+    t->GetLevelDesc(0, &desc);
+    if (desc.Pool == D3DPOOL_MANAGED && (desc.Format == D3DFMT_DXT1 || desc.Format == D3DFMT_DXT3 || desc.Format == D3DFMT_DXT5)) {
+        // compressed: the raw blocks of level 0 as the host holds them (tools/dxt_decode.py decodes them)
+        D3DLOCKED_RECT lr;
+        if (FAILED(t->LockRect(0, &lr, nullptr, D3DLOCK_READONLY))) return;
+        CreateDirectoryW(g_cfg.screenshot_dir.c_str(), nullptr);
+        wchar_t name[96];
+        swprintf(name, 96, L"\tex_%08x_%ux%u.dxt%d", (uint32_t)(uintptr_t)r, desc.Width, desc.Height, desc.Format == D3DFMT_DXT1 ? 1 : desc.Format == D3DFMT_DXT3 ? 3 : 5);
+        FILE *fp = _wfopen((g_cfg.screenshot_dir + name).c_str(), L"wb");
+        if (fp) {
+            uint32_t rows = (desc.Height + 3) / 4;
+            for (uint32_t y = 0; y < rows; y++) fwrite((const uint8_t *)lr.pBits + y * lr.Pitch, 1, lr.Pitch, fp);
+            fclose(fp);
+            logf("[draw]   tex%d %p dumped as %s (pitch %d)", s, r, narrow(g_cfg.screenshot_dir + name).c_str(), lr.Pitch);
+        }
+        t->UnlockRect(0);
+        return;
+    }
+    if (desc.Pool != D3DPOOL_MANAGED || (desc.Format != D3DFMT_A8R8G8B8 && desc.Format != D3DFMT_X8R8G8B8)) {
+        logf("[draw]   tex%d %p not dumped (pool %u format %u)", s, r, desc.Pool, desc.Format);
+        return;
+    }
+    D3DLOCKED_RECT lr;
+    if (FAILED(t->LockRect(0, &lr, nullptr, D3DLOCK_READONLY))) return;
+    std::vector<uint8_t> px((size_t)desc.Width * desc.Height * 4), al(px.size());
+    for (UINT y = 0; y < desc.Height; y++) {
+        const uint8_t *row = (const uint8_t *)lr.pBits + y * lr.Pitch;
+        for (UINT x = 0; x < desc.Width; x++) {
+            const uint8_t *p = row + x * 4;
+            uint8_t *c = &px[((size_t)y * desc.Width + x) * 4], *a = &al[((size_t)y * desc.Width + x) * 4];
+            c[0] = p[0];
+            c[1] = p[1];
+            c[2] = p[2];
+            c[3] = 0xFF;
+            a[0] = a[1] = a[2] = p[3];
+            a[3] = 0xFF;
+        }
+    }
+    t->UnlockRect(0);
+    CreateDirectoryW(g_cfg.screenshot_dir.c_str(), nullptr);
+    wchar_t name[96];
+    swprintf(name, 96, L"\\tex_%08x_%ux%u", (uint32_t)(uintptr_t)r, desc.Width, desc.Height);
+    std::wstring base = g_cfg.screenshot_dir + name;
+    write_png_bgra((base + L".png").c_str(), desc.Width, desc.Height, px.data());
+    write_png_bgra((base + L"_alpha.png").c_str(), desc.Width, desc.Height, al.data());
+    logf("[draw]   tex%d %p dumped as %s", s, r, narrow(base).c_str());
+}
+
 void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t count, const float *verts, uint32_t stride_floats)
 {
     if (g_debug_draws < 0) g_debug_draws = (int)g_cfg.debug_draws;
     bool this_frame = debug_frame_active();
     if (g_debug_draws <= 0 && !this_frame) return;
     if (!this_frame) g_debug_draws--;
-    // frame ranges trace the 2D/full-screen draws only (fades, post passes, HUD), not the world geometry
-    if (this_frame && g_cfg.debug_frame_end && !strcmp(what, "DrawIndexedVertices")) return;
-    if (this_frame && g_cfg.debug_frame_end) logf("[draw] --- frame %u", g_frame_count.load() + 1);
     const uint32_t *rs = render_state();
+    // frame ranges trace the 2D/full-screen draws in full (fades, post passes, HUD); the world geometry (vertex
+    // shader path) gets one line per draw with its textures and blend state, no stack walk (that costs seconds
+    // a frame and freezes the game under the player's hands).
+    if (this_frame && g_cfg.debug_frame_end && !strcmp(what, "DrawIndexedVertices")) {
+        char tex[256] = "";
+        size_t n = 0;
+        for (int s = 0; s < 4 && n < sizeof tex - 1; s++) {
+            Resource *r = g_st.textures[s];
+            if (!r) continue;
+            auto *pc = (PixelContainer *)r;
+            uint32_t w, h, dd, l;
+            pixel_container_dims(pc, &w, &h, &dd, &l);
+            n += snprintf(tex + n, sizeof tex - n, " t%d %p %ux%u %s @%08x", s, r, w, h,
+                          format_info((pc->Format >> FMT_FORMAT_SHIFT) & 0xFF).name, pc->Data);
+        }
+        logf("[draw] %s prim %u count %u, vs 0x%x, ps 0x%x | z %u w %u blend %u 0x%x/0x%x color 0x%08x |%s", what, prim, count,
+             g_st.vertex_shader, g_st.pixel_shader, rs[XRS_ZENABLE], rs[XRS_ZWRITEENABLE], rs[XRS_ALPHABLENDENABLE], rs[XRS_SRCBLEND],
+             rs[XRS_DESTBLEND], rs[XRS_BLENDCOLOR], tex);
+        return;
+    }
+    if (this_frame && g_cfg.debug_frame_end) logf("[draw] --- frame %u", g_frame_count.load() + 1);
     logf("[draw] %s prim %u count %u, %s 0x%x, ps 0x%x, tex0 %p", what, prim, count, ctx.path == Path::Prog ? "vs" : "fvf",
          g_st.vertex_shader, g_st.pixel_shader, g_st.textures[0]);
     if (this_frame) logf("[draw]   from %s", game_callers((const uint32_t *)_AddressOfReturnAddress()).c_str());
+    if (this_frame) {
+        for (int s = 0; s < 4; s++) {
+            Resource *r = g_st.textures[s];
+            if (!r) continue;
+            auto *pc = (PixelContainer *)r;
+            uint32_t w, h, dd, l;
+            pixel_container_dims(pc, &w, &h, &dd, &l);
+            logf("[draw]   tex%d %p: %ux%u L%u %s, data 0x%08x size 0x%08x format 0x%08x common 0x%08x", s, r, w, h, l,
+                 format_info((pc->Format >> FMT_FORMAT_SHIFT) & 0xFF).name, pc->Data, pc->Size, pc->Format, pc->Common);
+            dump_bound_texture(s, r);
+        }
+    }
     {
         float fs, fe, fd;
         memcpy(&fs, &rs[XRS_FOGSTART], 4);
         memcpy(&fe, &rs[XRS_FOGEND], 4);
         memcpy(&fd, &rs[XRS_FOGDENSITY], 4);
         logf("[draw]   fog %u table %u start %g end %g density %g color 0x%08x range %u | lighting %u ambient 0x%08x specular %u colorvertex %u "
-             "sources d%u a%u s%u e%u",
+             "sources d%u a%u s%u e%u | vertexblend %u",
              rs[XRS_FOGENABLE], rs[XRS_FOGTABLEMODE], fs, fe, fd, rs[XRS_FOGCOLOR], rs[XRS_RANGEFOGENABLE],
              rs[XRS_LIGHTING], rs[XRS_AMBIENT], rs[XRS_SPECULARENABLE], rs[XRS_COLORVERTEX], rs[XRS_DIFFUSEMATERIALSOURCE],
-             rs[XRS_AMBIENTMATERIALSOURCE], rs[XRS_SPECULARMATERIALSOURCE], rs[XRS_EMISSIVEMATERIALSOURCE]);
+             rs[XRS_AMBIENTMATERIALSOURCE], rs[XRS_SPECULARMATERIALSOURCE], rs[XRS_EMISSIVEMATERIALSOURCE], rs[XRS_VERTEXBLEND]);
         if (rs[XRS_LIGHTING]) {
             D3DMATERIAL9 mat = {};
             host3d::dev()->GetMaterial(&mat);
@@ -738,10 +954,13 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
              v[3], v[3] != 0 ? v[0] / v[3] : 0.f, v[3] != 0 ? v[1] / v[3] : 0.f, v[3] != 0 ? v[2] / v[3] : 0.f, m[0]->_41, m[0]->_42, m[0]->_43,
              m[1]->_41, m[1]->_42, m[1]->_43, m[2]->_11, m[2]->_22, m[2]->_33, m[2]->_34);
     }
-    logf("[draw]   z %u func 0x%x write %u | blend %u 0x%x/0x%x op 0x%x | atest %u func 0x%x ref %u | cull 0x%x | cwrite 0x%x | stencil %u",
-         rs[XRS_ZENABLE], rs[XRS_ZFUNC], rs[XRS_ZWRITEENABLE], rs[XRS_ALPHABLENDENABLE], rs[XRS_SRCBLEND], rs[XRS_DESTBLEND],
-         rs[XRS_BLENDOP], rs[XRS_ALPHATESTENABLE], rs[XRS_ALPHAFUNC], rs[XRS_ALPHAREF], rs[XRS_CULLMODE], rs[XRS_COLORWRITEENABLE],
-         rs[XRS_STENCILENABLE]);
+    float poff, pslope;
+    memcpy(&poff, &rs[XRS_POLYGONOFFSETZOFFSET], 4);
+    memcpy(&pslope, &rs[XRS_POLYGONOFFSETZSLOPESCALE], 4);
+    logf("[draw]   z %u func 0x%x write %u zbias %u polyoffset %u %g %g | blend %u 0x%x/0x%x op 0x%x color 0x%08x | atest %u func 0x%x ref %u | cull 0x%x | cwrite 0x%x | stencil %u",
+         rs[XRS_ZENABLE], rs[XRS_ZFUNC], rs[XRS_ZWRITEENABLE], rs[XRS_ZBIAS], rs[XRS_SOLIDOFFSETENABLE], poff, pslope,
+         rs[XRS_ALPHABLENDENABLE], rs[XRS_SRCBLEND], rs[XRS_DESTBLEND], rs[XRS_BLENDOP], rs[XRS_BLENDCOLOR], rs[XRS_ALPHATESTENABLE],
+         rs[XRS_ALPHAFUNC], rs[XRS_ALPHAREF], rs[XRS_CULLMODE], rs[XRS_COLORWRITEENABLE], rs[XRS_STENCILENABLE]);
     if (g_st.pixel_shader) { // the combiner program as it is in render states 0-56
         uint32_t n = rs[53] & 0xFF;
         logf("[draw]   psh: combiners 0x%x texmodes 0x%x final 0x%08x 0x%08x c0 0x%08x c1 0x%08x fc0 0x%08x fc1 0x%08x", rs[53],
@@ -752,8 +971,20 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
     if (!g_st.pixel_shader)
         for (int s = 0; s < 2; s++) {
             const uint32_t *ts = texture_state(s);
-            logf("[draw]   stage %d: color op %u args 0x%x 0x%x | alpha op %u args 0x%x 0x%x | tfactor 0x%08x", s, ts[12], ts[14], ts[15],
-                 ts[16], ts[18], ts[19], rs[XRS_TEXTUREFACTOR]);
+            logf("[draw]   stage %d: color op %u args 0x%x 0x%x | alpha op %u args 0x%x 0x%x | tfactor 0x%08x | xform flags %u addr %u/%u tci 0x%x", s, ts[12], ts[14], ts[15],
+                 ts[16], ts[18], ts[19], rs[XRS_TEXTUREFACTOR], ts[21], ts[0], ts[1], ts[28]);
+            if (this_frame) { // what the host device holds for the stage (cached state application check)
+                DWORD hc = 0, ha = 0, h1 = 0, h2 = 0, ha1 = 0, ha2 = 0, hci = 0, htf = 0;
+                IDirect3DDevice9 *hd = host3d::dev();
+                hd->GetTextureStageState(s, D3DTSS_COLOROP, &hc); hd->GetTextureStageState(s, D3DTSS_ALPHAOP, &ha);
+                hd->GetTextureStageState(s, D3DTSS_COLORARG1, &h1); hd->GetTextureStageState(s, D3DTSS_COLORARG2, &h2);
+                hd->GetTextureStageState(s, D3DTSS_ALPHAARG1, &ha1); hd->GetTextureStageState(s, D3DTSS_ALPHAARG2, &ha2);
+                hd->GetTextureStageState(s, D3DTSS_TEXCOORDINDEX, &hci); hd->GetTextureStageState(s, D3DTSS_TEXTURETRANSFORMFLAGS, &htf);
+                IDirect3DBaseTexture9 *ht = nullptr;
+                hd->GetTexture(s, &ht);
+                if (ht) ht->Release();
+                logf("[draw]   host stage %d: cop %lu (%lu,%lu) aop %lu (%lu,%lu) tci %lu ttff %lu tex %p (sent %p)", s, hc, h1, h2, ha, ha1, ha2, hci, htf, ht, g_tex_sent[s]);
+            }
         }
     float vp[8];
     viewport_transform(vp, vp + 4);
@@ -848,16 +1079,24 @@ bool begin_draw(DrawCtx &ctx)
     bool ps = g_st.pixel_shader != 0;
     apply_texture_stages(d, !ps); // may copy a render target (outside the scene) first
     host3d::begin_scene();
-    IDirect3DPixelShader9 *hps = ps ? ps_host_shader() : nullptr;
+    // Fixed-function draws get a generated stage shader too (d3d/ffp_ps.cpp); the host's own fixed-function pixel
+    // pipeline (D3D9On12) dropped alpha modulation on pass-through stages (docs/04 §3.9). --host-ffp keeps it.
+    uint32_t vsh = g_st.vertex_shader;
+    bool fvf_vs = vs_is_fvf(vsh);
+    IDirect3DPixelShader9 *hps = ps ? ps_host_shader()
+                                 : g_cfg.host_ffp ? nullptr
+                                 : ffp_pixel_shader(!fvf_vs || (vsh & D3DFVF_DIFFUSE) != 0, !fvf_vs || (vsh & D3DFVF_SPECULAR) != 0,
+                                                    fvf_vs && (vsh & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
     set_ps(d, hps);
-    if (hps) upload_ps_constants(d);
+    if (ps && hps) upload_ps_constants(d);
     else if (ps) apply_pixel_shader_fallback(d);
+    else if (hps) upload_ffp_constants(d);
     uint32_t h = g_st.vertex_shader;
     if (vs_is_fvf(h)) {
         if (h) {
             set_vs(d, nullptr);
             set_fvf(d, h);
-            apply_fvf_texture_scale(d);
+            apply_fvf_texture_scale(d, (h & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
             ctx.path = Path::Fvf;
             ctx.fvf = h;
         }
@@ -988,15 +1227,77 @@ const uint8_t *stream_data(uint32_t stream)
 
 } // namespace
 
+// Texture coordinates of pre-transformed (XYZRHW) vertices: D3D9 applies no texture transform to them (they skip
+// the vertex pipeline), so the texel -> 0..1 scale of a linear texture, composed with the game's own texture
+// matrix when one is enabled, is applied to the vertex data here. Ninja Gaiden Black copies the back buffer
+// (720x480 linear) into its 512x512 snapshot and the depth buffer into its 256x256 glow source with XYZRHW quads
+// addressed 0..720 x 0..480; through the stage transform both came out as one flat colour (docs/04 §3.8).
+struct RhwTexScale {
+    uint32_t off; // byte offset of the 2-float set in the vertex
+    float m[6];   // u' = u*m0 + v*m1 + m2, v' = u*m3 + v*m4 + m5
+};
+
+int rhw_tex_scales(uint32_t fvf, RhwTexScale *out)
+{
+    int n = 0;
+    uint32_t tc = (fvf >> 8) & 0xF;
+    uint32_t base = 16 + ((fvf & D3DFVF_NORMAL) ? 12 : 0) + ((fvf & D3DFVF_PSIZE) ? 4 : 0) + ((fvf & D3DFVF_DIFFUSE) ? 4 : 0) +
+                    ((fvf & D3DFVF_SPECULAR) ? 4 : 0);
+    for (int s = 0; s < 4; s++) {
+        if (!g_st.textures[s]) continue;
+        float sx, sy;
+        linear_texture_scale(s, &sx, &sy);
+        const D3DMATRIX &M = g_st.transforms[2 + s];
+        bool matrix = texture_state(s)[21] != 0 &&
+                      !(M._11 == 1 && M._12 == 0 && M._21 == 0 && M._22 == 1 && M._31 == 0 && M._32 == 0);
+        if (sx == 1.0f && sy == 1.0f && !matrix) continue;
+        uint32_t set = texture_state(s)[28] & 0xFFFF; // TEXCOORDINDEX, as sent to the host
+        if (set >= tc || ((fvf >> (16 + 2 * set)) & 3) != 0) continue; // only 2-float sets
+        uint32_t off = base;
+        for (uint32_t i = 0; i < set; i++) {
+            static const uint32_t sizes[4] = {8, 12, 16, 4};
+            off += sizes[(fvf >> (16 + 2 * i)) & 3];
+        }
+        bool dup = false;
+        for (int i = 0; i < n; i++) dup |= out[i].off == off; // two stages on one set: scale it once
+        if (dup) continue;
+        RhwTexScale &t = out[n++];
+        t.off = off;
+        if (matrix) {
+            t.m[0] = M._11 * sx; t.m[1] = M._21 * sx; t.m[2] = M._31 * sx;
+            t.m[3] = M._12 * sy; t.m[4] = M._22 * sy; t.m[5] = M._32 * sy;
+        } else {
+            t.m[0] = sx; t.m[1] = 0; t.m[2] = 0;
+            t.m[3] = 0; t.m[4] = sy; t.m[5] = 0;
+        }
+    }
+    return n;
+}
+
+void apply_rhw_tex_scales(uint8_t *verts, uint32_t count, uint32_t stride, const RhwTexScale *ts, int n)
+{
+    for (uint32_t v = 0; v < count; v++)
+        for (int i = 0; i < n; i++) {
+            float *uv = (float *)(verts + (size_t)v * stride + ts[i].off);
+            float u = uv[0], w = uv[1];
+            uv[0] = u * ts[i].m[0] + w * ts[i].m[1] + ts[i].m[2];
+            uv[1] = u * ts[i].m[3] + w * ts[i].m[4] + ts[i].m[5];
+        }
+}
+
 // Pre-transformed (XYZRHW) vertices carry Xbox screen pixels, but host render targets are scale_x/y() times
-// larger: copy vertices [first, first+count) with x/y scaled. Returns a pointer usable with the original
-// indices (the copy offset by -first vertices); other paths get `data` back unchanged.
+// larger: copy vertices [first, first+count) with x/y scaled (and texel coordinates normalized, see above).
+// Returns a pointer usable with the original indices (the copy offset by -first vertices); other paths get
+// `data` back unchanged.
 std::vector<uint8_t> g_rhw;
 const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, uint32_t count, uint32_t stride)
 {
     auto *src = (const uint8_t *)data;
     float sx = target_scale_x(), sy = target_scale_y();
-    if (ctx.path != Path::Fvf || (ctx.fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW || (sx == 1 && sy == 1) || !src) return src;
+    if (ctx.path != Path::Fvf || (ctx.fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW || !src) return src;
+    RhwTexScale ts[4];
+    int nts = rhw_tex_scales(ctx.fvf, ts);
+    if (sx == 1 && sy == 1 && !nts) return src;
     perf::Scope perf_scope(perf::kConvert);
     g_rhw.assign(src + (size_t)first * stride, src + (size_t)(first + count) * stride);
     for (uint32_t v = 0; v < count; v++) {
@@ -1004,7 +1305,84 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
         p[0] *= sx;
         p[1] *= sy;
     }
+    apply_rhw_tex_scales(g_rhw.data(), count, stride, ts, nts);
     return g_rhw.data() - (size_t)first * stride;
+}
+
+// Lines. The Xbox rasterizes its lines D3DRS_LINEWIDTH pixels wide at 720x480; a host line is one pixel at the
+// render scale, so Ninja Gaiden Black's sparks (2-vertex XYZ|DIFFUSE line strips, additive, FUN_00318410) came
+// out hair-thin (docs/04 §3.9). Untextured line primitives are projected on the CPU with the game's matrices and
+// drawn as screen-space quads LINEWIDTH x the render scale wide; anything else falls through to the host line.
+bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const void *data, uint32_t stride)
+{
+    if (ctx.path != Path::Fvf || (xprim != XPT_LINELIST && xprim != XPT_LINESTRIP && xprim != XPT_LINELOOP)) return false;
+    bool rhw = (ctx.fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW;
+    if (ctx.fvf != (D3DFVF_XYZ | D3DFVF_DIFFUSE) && ctx.fvf != (D3DFVF_XYZRHW | D3DFVF_DIFFUSE)) return false;
+    float sx = target_scale_x(), sy = target_scale_y();
+    float lw;
+    memcpy(&lw, &render_state()[XRS_LINEWIDTH], 4);
+    if (!(lw > 0.0f)) lw = 1.0f;
+    float half = lw * (sx + sy) * 0.25f; // half the width, in host pixels
+    if (half <= 0.55f || count < 2 || !data) return false;
+    IDirect3DDevice9 *d = host3d::dev();
+    // world x view x projection (row vectors), from the state the fixed-function draws were given
+    float m[16];
+    if (!rhw) {
+        const D3DMATRIX &W = g_st.transforms[6], &V = g_st.transforms[0], &P = g_st.transforms[1];
+        float wv[16];
+        for (int r = 0; r < 4; r++)
+            for (int c = 0; c < 4; c++) wv[r * 4 + c] = W.m[r][0] * V.m[0][c] + W.m[r][1] * V.m[1][c] + W.m[r][2] * V.m[2][c] + W.m[r][3] * V.m[3][c];
+        for (int r = 0; r < 4; r++)
+            for (int c = 0; c < 4; c++) m[r * 4 + c] = wv[r * 4 + 0] * P.m[0][c] + wv[r * 4 + 1] * P.m[1][c] + wv[r * 4 + 2] * P.m[2][c] + wv[r * 4 + 3] * P.m[3][c];
+    }
+    struct SV { float x, y, z, rhw; uint32_t c; bool ok; };
+    std::vector<SV> sv(count);
+    const Viewport &vp = g_st.viewport;
+    for (uint32_t i = 0; i < count; i++) {
+        const float *v = (const float *)((const uint8_t *)data + (size_t)i * stride);
+        SV &o = sv[i];
+        if (rhw) {
+            o = {v[0] * sx, v[1] * sy, v[2], v[3], *(const uint32_t *)(v + 4), true};
+            continue;
+        }
+        float cx = v[0] * m[0] + v[1] * m[4] + v[2] * m[8] + m[12];
+        float cy = v[0] * m[1] + v[1] * m[5] + v[2] * m[9] + m[13];
+        float cz = v[0] * m[2] + v[1] * m[6] + v[2] * m[10] + m[14];
+        float cw = v[0] * m[3] + v[1] * m[7] + v[2] * m[11] + m[15];
+        o.ok = cw > 1e-6f;
+        if (!o.ok) continue;
+        float nx = cx / cw, ny = cy / cw, nz = cz / cw;
+        o.x = ((nx * 0.5f + 0.5f) * vp.Width + vp.X) * sx;
+        o.y = ((0.5f - ny * 0.5f) * vp.Height + vp.Y) * sy;
+        o.z = vp.MinZ + nz * (vp.MaxZ - vp.MinZ);
+        o.rhw = 1.0f / cw;
+        o.c = *(const uint32_t *)(v + 3);
+    }
+    struct QV { float x, y, z, rhw; uint32_t c; };
+    std::vector<QV> q;
+    q.reserve(count * 6);
+    auto segment = [&](const SV &a, const SV &b) {
+        if (!a.ok || !b.ok) return;
+        float dx = b.x - a.x, dy = b.y - a.y, len = sqrtf(dx * dx + dy * dy);
+        float nx, ny;
+        if (len < 1e-3f) { nx = half; ny = 0; }
+        else { nx = -dy / len * half; ny = dx / len * half; }
+        QV a0 = {a.x + nx, a.y + ny, a.z, a.rhw, a.c}, a1 = {a.x - nx, a.y - ny, a.z, a.rhw, a.c};
+        QV b0 = {b.x + nx, b.y + ny, b.z, b.rhw, b.c}, b1 = {b.x - nx, b.y - ny, b.z, b.rhw, b.c};
+        q.push_back(a0); q.push_back(b0); q.push_back(a1);
+        q.push_back(a1); q.push_back(b0); q.push_back(b1);
+    };
+    if (xprim == XPT_LINELIST) {
+        for (uint32_t i = 0; i + 1 < count; i += 2) segment(sv[i], sv[i + 1]);
+    } else {
+        for (uint32_t i = 0; i + 1 < count; i++) segment(sv[i], sv[i + 1]);
+        if (xprim == XPT_LINELOOP) segment(sv[count - 1], sv[0]);
+    }
+    if (q.empty()) return true;
+    set_fvf(d, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)(q.size() / 3), q.data(), sizeof(QV));
+    set_fvf(d, ctx.fvf);
+    return true;
 }
 
 // ---- HLE draw functions ----
@@ -1025,6 +1403,7 @@ void __stdcall D3DDevice_DrawVerticesUP(uint32_t PrimitiveType, uint32_t VertexC
         return;
     }
     debug_draw("DrawVerticesUP", ctx, PrimitiveType, VertexCount, (const float *)pVertexStreamZeroData, VertexStreamZeroStride / 4);
+    if (draw_wide_lines(ctx, PrimitiveType, VertexCount, pVertexStreamZeroData, VertexStreamZeroStride)) return;
     draw_up(PrimitiveType, VertexCount, scale_rhw(ctx, pVertexStreamZeroData, 0, VertexCount, VertexStreamZeroStride),
             VertexStreamZeroStride);
 }
@@ -1184,6 +1563,10 @@ void draw_immediate(uint32_t prim, const float *verts, uint32_t count, uint32_t 
             for (uint32_t c = 0; c < k; c++) putf(a[9 + i][c]);
         }
     }
+    if ((fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW) {
+        RhwTexScale ts[4];
+        apply_rhw_tex_scales(buf.data(), count, stride, ts, rhw_tex_scales(fvf, ts));
+    }
     draw_up(prim, count, buf.data(), stride);
 }
 
@@ -1311,6 +1694,11 @@ const Hle *hle_draw_table_ngb(size_t *count)
 {
     *count = sizeof kNgbTable / sizeof kNgbTable[0];
     return kNgbTable;
+}
+
+void invalidate_render_state(uint32_t state)
+{
+    if (state < XRS_MAX) g_rs_valid[state] = false;
 }
 
 } // namespace xd3d

@@ -318,6 +318,14 @@ void __stdcall RunPushBuffer(const PushBufferHeader *pPushBuffer, const void *pF
     if (calls == 1 || calls == 1000 || calls == 10000) logf("[pb] RunPushBuffer: %u calls, %u draws so far", calls, draws);
 }
 
+// D3DDevice_EndVisibilityTest (0x3C7C50, eax = Index): see vis_end in d3d/device.cpp.
+HRESULT __stdcall EndVisibilityTest(uint32_t Index)
+{
+    DTRACE("%u", Index);
+    pb_flush(); // the inlined begin and the test's draws are in the inline push buffer
+    return vis_end(Index);
+}
+
 // DSOUND: DirectSoundUseFullHRTF selects the head-related transfer function of the 3D sound hardware; the software
 // mixer has distance and panning only (BLACK's DirectSoundUseLightHRTF is the same no-op).
 void __stdcall DirectSoundUseFullHRTF() { DTRACE(""); }
@@ -375,6 +383,7 @@ static const Hle kTable[] = {
     H(0x003c8120, PersistDisplay, "", false),
     H(0x0037a978, DirectSoundUseFullHRTF, "", false),
     H(0x003cafc0, RunPushBuffer, "s s", false),
+    H(0x003c7c50, EndVisibilityTest, "eax", true),
 };
 
 } // namespace ngb

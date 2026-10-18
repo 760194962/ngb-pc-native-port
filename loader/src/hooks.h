@@ -4,6 +4,8 @@
 
 // Vectored exception handler (first-chance log) and unhandled-exception filter (crash report).
 void install_crash_handlers();
+struct BuildProfile;
+bool install_rdtsc_emulation(const BuildProfile &profile); // rdtsc sites trap to a 733.33 MHz counter (Xbox TSC rate)
 
 // Log the XBE return addresses found on a stack (heuristic: image values preceded by a call).
 void log_stack_trace(const uint32_t *esp);

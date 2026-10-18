@@ -69,6 +69,7 @@ struct HostZ {
 };
 std::unordered_map<uint64_t, HostZ> g_zs;
 std::unordered_map<uint64_t, IDirect3DTexture9 *> g_zviews; // depth buffers as the game reads them as colour textures
+std::unordered_map<uint64_t, IDirect3DTexture9 *> g_zdepths; // depth buffers read through a depth-format header
 IDirect3DPixelShader9 *g_zview_ps, *g_zfill_ps;
 // Which interpretation last wrote a piece of memory. BLACK renders downsampled scene depth as colour into a
 // surface and then binds the same memory as the depth buffer of its low-resolution passes.
@@ -336,22 +337,50 @@ const char kZViewPS[] = "sampler2D z : register(s0);\n"
                         "  return float4(mid, lo, 0, hi) / 255.0;\n"
                         "}\n";
 
-IDirect3DTexture9 *depth_view(uint64_t key, const HostZ &z, uint32_t w, uint32_t h) // w, h: Xbox pixels
+// A depth buffer read through a depth-format texture header (Ninja Gaiden Black: LIN_D24S8, 0x2E, over the main
+// depth buffer and its 128x128 shadow map). The NV2A treats a depth-format texture as a shadow map: the sample
+// is the result of D3DRS_SHADOWFUNC comparing the texel's depth with the coordinate's r/q (PROJECT3D) or with 0
+// (2D modes), 0 or 1 in all four channels; NEVER gives 0 and ALWAYS 1 (xemu psh_append_shadowmap). For the
+// fixed-function pipeline and for 2D texture modes this view holds the depth itself in all four channels
+// (mode -1): xemu's model (compare against 0 for 2D modes) would make the game's 256x256 "depth copy" a flat 0
+// whenever the func is NEVER (its light bursts, sword trails and glow vanished, r047) and its 2D-mode shadow
+// receivers lit everywhere; the game compares the 8-bit depth itself in its combiners against the vertex
+// colour. Modes 0..7 (the func baked in) and the PROJECT3D compare in nv2a_psh.cpp stay available
+// (docs/04 §3.8, §3.9).
+const char kZDepthPS[] = "sampler2D z : register(s0);\n"
+                         "float4 k : register(c0);\n" // x: -1 raw depth, else the shadow func 0..7 (NEVER..ALWAYS)
+                         "float4 main(float2 uv : TEXCOORD0) : COLOR0 {\n"
+                         "  float d = saturate(tex2D(z, uv).r);\n"
+                         "  float m = k.x;\n"
+                         "  float r = 0;\n"                       // NEVER, LESS (d < 0)
+                         "  if (m == 2 || m == 3) r = d <= 0 ? 1 : 0;\n" // EQUAL, LEQUAL
+                         "  if (m == 4 || m == 5) r = d > 0 ? 1 : 0;\n"  // GREATER, NOTEQUAL
+                         "  if (m >= 6) r = 1;\n"                 // GEQUAL, ALWAYS
+                         "  if (m < 0) r = d;\n"
+                         "  return float4(r, r, r, r);\n"
+                         "}\n";
+IDirect3DPixelShader9 *g_zdepth_ps;
+
+IDirect3DTexture9 *depth_view(uint64_t key, const HostZ &z, uint32_t w, uint32_t h, int depth_mode) // w, h: Xbox pixels
 {
+    bool depth_format = depth_mode != kDepthViewBytes;
     if (!native_size(w, h)) { // the size of the depth surface
         w = host_w(w);
         h = host_h(h);
     }
-    if (!g_zview_ps) g_zview_ps = compile_ps(kZViewPS, "zview");
-    IDirect3DTexture9 *&view = g_zviews[key];
+    IDirect3DPixelShader9 *&ps = depth_format ? g_zdepth_ps : g_zview_ps;
+    if (!ps) ps = depth_format ? compile_ps(kZDepthPS, "zdepth") : compile_ps(kZViewPS, "zview");
+    IDirect3DTexture9 *&view = (depth_format ? g_zdepths : g_zviews)[key];
     if (!view) host3d::dev()->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &view, nullptr);
-    if (!g_zview_ps || !view) return nullptr;
+    if (!ps || !view) return nullptr;
     IDirect3DSurface9 *target = nullptr;
     view->GetSurfaceLevel(0, &target);
-    fullscreen_pass(g_zview_ps, z.tex, target, nullptr, w, h, false);
+    float k[4] = {(float)depth_mode, 0, 0, 0};
+    fullscreen_pass(ps, z.tex, target, nullptr, w, h, false, depth_format ? k : nullptr);
     target->Release();
     return view;
 }
+
 
 // Copy the game's back buffer to the window through the game's gamma ramp, which the Xbox applied in the
 // video DAC: BLACK's ramp builder (FUN_001762B0) computes ramp[i] = (i/255)^1.2 * (brightness + 1) * 2.2 *
@@ -784,14 +813,20 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
     auto it = g_rts.find(key);
     auto zi = g_zs.find(key);
     bool as_depth = zi != g_zs.end() && zi->second.tex && (it == g_rts.end() || g_owner[key] == Owner::Depth);
-    if (as_depth) { // a depth buffer read as a colour texture
+    if (as_depth) { // a depth buffer read as a texture: through a depth-format header, or a colour one
+        uint32_t fmt = (tex->Format >> FMT_FORMAT_SHIFT) & 0xFF;
+        bool depth_format = fmt >= 0x2A && fmt <= 0x31; // D24S8 .. LIN_F16
+        // a combiner program compares the raw depth itself (nv2a_psh.cpp); the fixed function gets the 2D result
+        int mode = !depth_format ? kDepthViewBytes : kDepthViewRaw; // see kZDepthPS: 2D sampling returns the depth itself
         static uint32_t view_serial = ~0u;
         static uint64_t view_key;
+        static int view_mode;
         static IDirect3DTexture9 *view;
-        if (view_serial != draw_serial || view_key != key) {
-            view = depth_view(key, zi->second, w, h);
+        if (view_serial != draw_serial || view_key != key || view_mode != mode) {
+            view = depth_view(key, zi->second, w, h, mode);
             view_serial = draw_serial;
             view_key = key;
+            view_mode = mode;
         }
         return view;
     }
@@ -829,6 +864,7 @@ void dump_render_targets(uint32_t frame)
     };
     for (auto &kv : g_rts) save("rt", kv.first, kv.second.tex);
     for (auto &kv : g_zviews) save("zview", kv.first, kv.second);
+    for (auto &kv : g_zdepths) save("zdepth", kv.first, kv.second);
     logf("[d3d] frame %u: %zu render targets and %zu depth views saved", frame, g_rts.size(), g_zviews.size());
 }
 
@@ -1150,6 +1186,9 @@ void release_host_targets()
     for (auto &kv : g_zviews)
         if (kv.second) kv.second->Release();
     g_zviews.clear();
+    for (auto &kv : g_zdepths)
+        if (kv.second) kv.second->Release();
+    g_zdepths.clear();
     for (auto &kv : g_snapshots)
         if (kv.second) kv.second->Release();
     g_snapshots.clear();
@@ -1331,6 +1370,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
         snprintf(tag, sizeof tag, "frame_%05u", frames);
         screenshot_now(tag);
     }
+    if (debug_frame_active() && g_cfg.debug_frame_end) log_frame_mean_color(frames);
     bool force = g_reset_requested.exchange(false);
     if (host3d::present() == D3DERR_DEVICELOST || g_device_lost || force) recover_device(force);
     check_render_size();
@@ -1436,6 +1476,127 @@ bool sync_material_from_device()
     g_material_set = true;
     host3d::dev()->SetMaterial(m);
     return true;
+}
+
+// D3DRS_SHADOWFUNC (GL compare values 0x200..0x207) as 0..7; anything else counts as NEVER.
+int shadow_func_code()
+{
+    uint32_t f = render_state()[XRS_SHADOWFUNC];
+    return f >= 0x200 && f <= 0x207 ? (int)(f - 0x200) : 0;
+}
+
+// --debug-frame N-M: the mean colour of every presented frame in the range, to find single-frame flashes (a whole
+// frame of one flat colour) in the log next to the 2D draw trace of that frame. ~8 MB read back per frame.
+void log_frame_mean_color(uint32_t frame)
+{
+    IDirect3DDevice9 *d = host3d::dev();
+    if (!d) return;
+    IDirect3DSurface9 *bb = nullptr;
+    if (FAILED(d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) return;
+    D3DSURFACE_DESC desc;
+    bb->GetDesc(&desc);
+    static IDirect3DSurface9 *sys;
+    static uint32_t sw, sh;
+    if (sys && (sw != desc.Width || sh != desc.Height)) {
+        sys->Release();
+        sys = nullptr;
+    }
+    if (!sys && SUCCEEDED(d->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr))) {
+        sw = desc.Width;
+        sh = desc.Height;
+    }
+    if (sys && SUCCEEDED(d->GetRenderTargetData(bb, sys))) {
+        D3DLOCKED_RECT lr;
+        if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+            uint64_t r = 0, g = 0, b = 0, n = 0, same = 0;
+            uint32_t first = 0;
+            for (uint32_t y = 0; y < sh; y += 24) {
+                const uint32_t *row = (const uint32_t *)((const uint8_t *)lr.pBits + y * lr.Pitch);
+                for (uint32_t x = 0; x < sw; x += 24) {
+                    uint32_t p = row[x] & 0xFFFFFF;
+                    if (!n) first = p;
+                    same += (p == first);
+                    r += (p >> 16) & 0xFF;
+                    g += (p >> 8) & 0xFF;
+                    b += p & 0xFF;
+                    n++;
+                }
+            }
+            sys->UnlockRect();
+            if (n)
+                logf("[rt] frame %u mean colour %llu %llu %llu (%llu%% of samples identical)", frame, r / n, g / n, b / n, same * 100 / n);
+        }
+    }
+    bb->Release();
+}
+
+// ---- visibility tests (NV2A zpass pixel counting) ----
+//
+// Ninja Gaiden Black inlines BeginVisibilityTest: game code pushes NV097_CLEAR_REPORT_VALUE (0x17C8) = 1 and
+// NV097_SET_ZPASS_PIXEL_COUNT_ENABLE (0x17CC) = 1, draws, calls D3DDevice_EndVisibilityTest(Index) (0x3C7C50: a
+// 16-byte report slot from the page table at device+0x7D4 [Index >> 8], slot Index & 0xFF; pushes 0x17CC = 0 and
+// NV097_GET_REPORT with Index | 0x1000000), then pushes a callback (0x1D8C = function, 0x1D90 = context) that reads
+// the report: {u64 GPU time, u32 pixel count, u32 status (0; 0xFFFFFFFF while pending)}.
+// The host runs a D3D9 occlusion query instead and finishes it synchronously in EndVisibilityTest, so the report is
+// complete by the time the callback runs; counts are scaled back to Xbox pixels.
+namespace {
+IDirect3DQuery9 *g_vis_query;
+bool g_vis_active;
+constexpr uint32_t DEV_VIS_PAGES = 0x7D4; // 16 page pointers (Index >> 8)
+alignas(16) uint8_t g_vis_pages[16][4096];
+} // namespace
+
+void vis_begin()
+{
+    IDirect3DDevice9 *d = host3d::dev();
+    if (!d) return;
+    if (!g_vis_query && FAILED(d->CreateQuery(D3DQUERYTYPE_OCCLUSION, &g_vis_query))) {
+        KNOTE_ONCE("occlusion queries are not available: visibility tests report 0 pixels");
+        return;
+    }
+    if (g_vis_active) g_vis_query->Issue(D3DISSUE_END);
+    g_vis_query->Issue(D3DISSUE_BEGIN);
+    g_vis_active = true;
+}
+
+uint32_t *vis_report(uint32_t Index)
+{
+    if (!g_dev) return nullptr;
+    uint32_t page = (Index >> 8) & 0xFF;
+    if (page >= 16) return nullptr;
+    uint8_t *&p = *(uint8_t **)(g_dev + DEV_VIS_PAGES + page * 4);
+    if (!p) p = g_vis_pages[page];
+    return (uint32_t *)(p + (Index & 0xFF) * 16);
+}
+
+HRESULT vis_end(uint32_t Index)
+{
+    uint32_t *r = vis_report(Index);
+    if (!r) return 0x8007000E; // E_OUTOFMEMORY, as the library returns without a report page
+    DWORD pixels = 0;
+    if (g_vis_query && g_vis_active) {
+        g_vis_query->Issue(D3DISSUE_END);
+        g_vis_active = false;
+        for (int i = 0; i < 100000; i++) { // the GPU may lag a frame or two behind
+            HRESULT hr = g_vis_query->GetData(&pixels, sizeof pixels, D3DGETDATA_FLUSH);
+            if (hr == S_OK) break;
+            if (hr != S_FALSE) { pixels = 0; break; }
+            Sleep(0);
+        }
+        float scale = target_scale_x() * target_scale_y();
+        if (scale > 0) pixels = (DWORD)(pixels / scale + 0.5f);
+    }
+    uint32_t t = dev_field<uint32_t>(DEV_GPUTIME);
+    r[0] = t;
+    r[1] = 0;
+    r[2] = pixels;
+    r[3] = 0;
+    static int noted;
+    if (noted < 8) {
+        noted++;
+        logf("[d3d] EndVisibilityTest(%u): %lu pixels (report %p)", Index, pixels, r);
+    }
+    return D3D_OK;
 }
 
 void __stdcall D3DDevice_SetTransform(uint32_t State, const D3DMATRIX *pMatrix)

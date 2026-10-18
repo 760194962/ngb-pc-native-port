@@ -1,5 +1,6 @@
 #include "d3d/pshader.h"
 
+#include "d3d/device.h"
 #include "d3d/host.h"
 #include "perf.h"
 #include "d3d/nv2a_psh.h"
@@ -22,6 +23,19 @@ uint32_t cube_mask()
     for (int s = 0; s < 4; s++) {
         Resource *r = g_st.textures[s];
         if (r && resource_type(r) == RTYPE_TEXTURE && (((PixelContainer *)r)->Format & FMT_CUBEMAP)) m |= 1u << s;
+    }
+    return m;
+}
+
+// Stages whose texture is a depth-format header (D24S8 .. LIN_F16): the NV2A samples those as shadow maps.
+uint32_t depth_mask()
+{
+    uint32_t m = 0;
+    for (int s = 0; s < 4; s++) {
+        Resource *r = g_st.textures[s];
+        if (!r || resource_type(r) != RTYPE_TEXTURE) continue;
+        uint32_t fmt = (((PixelContainer *)r)->Format >> FMT_FORMAT_SHIFT) & 0xFF;
+        if (fmt >= 0x2A && fmt <= 0x31) m |= 1u << s;
     }
     return m;
 }
@@ -61,13 +75,15 @@ IDirect3DPixelShader9 *ps_host_shader()
     memcpy(&def, rs, 57 * 4);
     def.PSTextureModes = rs[XRS_PSTEXTUREMODES];
     uint32_t cube = cube_mask();
+    uint32_t depth = depth_mask();
+    uint32_t shadow = depth ? (uint32_t)shadow_func_code() : 0;
     // key: everything except the constant values (10-25, 43, 44)
     uint32_t key[48];
     uint32_t n = 0;
     for (uint32_t i = 0; i < 57; i++)
         if (!(i >= 10 && i <= 25) && i != 43 && i != 44) key[n++] = rs[i];
     key[n++] = def.PSTextureModes;
-    key[n++] = cube;
+    key[n++] = cube | depth << 8 | shadow << 16;
     static uint32_t last_key[48], last_n;
     static IDirect3DPixelShader9 *last_ps;
     if (n == last_n && !memcmp(key, last_key, n * 4)) return last_ps; // most draws keep the previous shader
@@ -79,7 +95,7 @@ IDirect3DPixelShader9 *ps_host_shader()
         return last_ps = it->second;
     }
 
-    std::string hlsl = psh_to_hlsl(def, cube);
+    std::string hlsl = psh_to_hlsl(def, cube, depth, shadow);
     perf::Scope perf_scope(perf::kCompile);
     perf::add_compile();
     ID3DBlob *code = nullptr, *errors = nullptr;
@@ -101,7 +117,7 @@ IDirect3DPixelShader9 *ps_host_shader()
         logf("[psh] CreatePixelShader failed");
         ps = nullptr;
     } else if (logged++ < 40) {
-        logf("[psh] pixel shader #%zu translated (cube mask 0x%x)", g_cache.size() + 1, cube);
+        logf("[psh] pixel shader #%zu translated (cube mask 0x%x, depth mask 0x%x, shadow func %u)", g_cache.size() + 1, cube, depth, shadow);
         log_def(def);
     }
     if (code) code->Release();

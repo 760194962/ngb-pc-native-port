@@ -5,6 +5,7 @@
 #include "audio/output.h"
 #include "build_profile.h"
 #include "d3d/dispatch.h"
+#include "d3d/xd3d.h"
 #include "d3d/draw.h"
 #include "d3d/host.h"
 #include "input/bindings.h"
@@ -13,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -178,6 +180,47 @@ void read_press_file(uint32_t now_ms)
                 if (line.empty()) continue;
                 if (line.rfind("shot:", 0) == 0) {
                     xd3d::request_screenshot(line.substr(5).c_str());
+                    continue;
+                }
+                if (line == "trace" || line.rfind("trace:", 0) == 0) {
+                    // --debug-frame at run time: trace the frame after next (or N frames from it with "trace:N"),
+                    // with its render-target dumps, so a state the player reached by hand can be examined.
+                    uint32_t n = line.size() > 6 ? (uint32_t)atoi(line.c_str() + 6) : 1;
+                    g_cfg.debug_frame = g_frame_count + 2;
+                    g_cfg.debug_frame_end = n > 1 ? g_cfg.debug_frame + n - 1 : 0;
+                    logf("[input] trace requested: frame %u%s", g_cfg.debug_frame, n > 1 ? " (range)" : "");
+                    continue;
+                }
+                if (line.rfind("spec:", 0) == 0) {
+                    // "spec:0" / "spec:1": host specular lighting off / as the game sets it (diagnosis)
+                    g_cfg.no_specular = line[5] == '0';
+                    xd3d::invalidate_render_state(xd3d::XRS_SPECULARENABLE);
+                    logf("[input] specular %s", g_cfg.no_specular ? "forced off" : "as the game sets it");
+                    continue;
+                }
+                if (line.rfind("cfg:", 0) == 0) {
+                    // "cfg:aa:0" / "cfg:seamfill:0" / "cfg:fog:0" (and :1): post filters and host fog at run time (diagnosis)
+                    size_t c = line.rfind(':');
+                    std::string k = line.substr(4, c > 4 ? c - 4 : 0);
+                    bool v = c != std::string::npos && line[c + 1] == '1';
+                    if (k == "aa") g_cfg.aa = v;
+                    else if (k == "seamfill") g_cfg.seam_fill = v;
+                    else if (k == "hostffp") g_cfg.host_ffp = !v ? false : true;
+                    else if (k == "ffpdebug") g_cfg.ffp_debug = (unsigned)atoi(line.c_str() + c + 1);
+                    else if (k == "fog") {
+                        g_cfg.no_fog = !v;
+                        xd3d::invalidate_render_state(xd3d::XRS_FOGENABLE);
+                    }
+                    logf("[input] cfg %s = %d", k.c_str(), v);
+                    continue;
+                }
+                if (line.rfind("memdump:", 0) == 0) {
+                    // --memdump at run time: "memdump:ADDR:SIZE" (hex, virtual address), written at the frame after
+                    // next as mem_<frame>.bin in the screenshot directory.
+                    char spec[96];
+                    snprintf(spec, sizeof spec, "%s:%u", line.c_str() + 8, g_frame_count + 2);
+                    g_cfg.memdump = widen(spec);
+                    logf("[input] memdump requested: %s", spec);
                     continue;
                 }
                 if (line == "reset") {

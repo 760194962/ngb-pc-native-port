@@ -1,5 +1,6 @@
 #include "hooks.h"
 
+#include "build_profile.h"
 #include "d3d/draw.h"
 
 #include "image.h"
@@ -163,9 +164,49 @@ int probe_index(uint32_t addr)
     return -1;
 }
 
+// rdtsc in game code: the Xbox's time stamp counter runs at 733.33 MHz and the engine scales its deltas with that
+// in mind (FUN_0030E140: delta x 0.113 = its frame time, compared with 94 / 103.5 to fade the character shadow
+// out and to drop effect detail). A host TSC is 3-4x faster, so the game saw every frame as far too slow. The
+// sites are patched to ud2 (0F 0B, same length) and emulated here from QueryPerformanceCounter at 733.33 MHz.
+// The engine's timer measures its own frame work, which on the Xbox excludes the GPU; here every HLE draw runs
+// synchronously on the game thread, so the measured time sat at 78-99 against thresholds of 94 (shadow fade) and
+// 103.5 and the shadow flickered on and off (docs/04 §3.9). Until rendering is asynchronous, the engine's sites
+// see the counter divided by --tsc-divisor (4: the game's CPU share of a frame looks like the Xbox's).
+const uint32_t *g_rdtsc_sites;
+int g_rdtsc_site_count;
+uint32_t g_rdtsc_qpc_site;
+LARGE_INTEGER g_tsc_base, g_tsc_freq;
+std::atomic<uint32_t> g_rdtsc_hits{0};
+
+bool rdtsc_site(uint32_t eip)
+{
+    for (int i = 0; i < g_rdtsc_site_count; i++)
+        if (g_rdtsc_sites[i] == eip) return true;
+    return false;
+}
+
+uint64_t xbox_tsc()
+{
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    uint64_t d = (uint64_t)(t.QuadPart - g_tsc_base.QuadPart), f = (uint64_t)g_tsc_freq.QuadPart;
+    return (d / f) * 733333333ull + ((d % f) * 733333333ull) / f;
+}
+
 LONG CALLBACK vectored_handler(EXCEPTION_POINTERS *ep)
 {
     DWORD code = ep->ExceptionRecord->ExceptionCode;
+    if (code == EXCEPTION_ILLEGAL_INSTRUCTION && g_rdtsc_site_count && rdtsc_site((uint32_t)ep->ContextRecord->Eip)) {
+        CONTEXT *c = ep->ContextRecord;
+        uint64_t v = xbox_tsc();
+        if (c->Eip != g_rdtsc_qpc_site && g_cfg.tsc_divisor > 1) v /= g_cfg.tsc_divisor;
+        c->Eax = (uint32_t)v;
+        c->Edx = (uint32_t)(v >> 32);
+        c->Eip += 2;
+        uint32_t n = ++g_rdtsc_hits;
+        if (n <= 8) logf("rdtsc: at %08lx %s -> %llu (#%u)", c->Eip - 2, where(c->Eip - 2).c_str(), (unsigned long long)v, n);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
     if (code == EXCEPTION_BREAKPOINT && g_cfg.probe_count) {
         CONTEXT *c = ep->ContextRecord;
         int i = probe_index((uint32_t)(uintptr_t)ep->ExceptionRecord->ExceptionAddress);
@@ -302,6 +343,30 @@ void install_probes()
         *p = 0xCC;
         logf("probe armed at %08x %s", g_cfg.probe[i], where(g_cfg.probe[i]).c_str());
     }
+}
+
+bool install_rdtsc_emulation(const BuildProfile &profile)
+{
+    QueryPerformanceFrequency(&g_tsc_freq);
+    QueryPerformanceCounter(&g_tsc_base);
+    for (int i = 0; i < profile.rdtsc_site_count; i++) {
+        uint8_t *p = (uint8_t *)(uintptr_t)profile.rdtsc_sites[i];
+        if (p[0] != 0x0F || p[1] != 0x31) {
+            logf("rdtsc: no rdtsc at %08x (found %02x %02x)", profile.rdtsc_sites[i], p[0], p[1]);
+            return false;
+        }
+        DWORD old;
+        if (!VirtualProtect(p, 2, PAGE_EXECUTE_READWRITE, &old)) return false;
+        p[1] = 0x0B; // ud2
+        VirtualProtect(p, 2, old, &old);
+    }
+    g_rdtsc_sites = profile.rdtsc_sites;
+    g_rdtsc_site_count = profile.rdtsc_site_count;
+    g_rdtsc_qpc_site = profile.rdtsc_qpc_site;
+    if (g_rdtsc_site_count)
+        logf("rdtsc: %d sites trap to a 733.33 MHz counter (host QPC %lld Hz); the engine's frame timer runs /%u", g_rdtsc_site_count,
+             (long long)g_tsc_freq.QuadPart, g_cfg.tsc_divisor);
+    return true;
 }
 
 void install_crash_handlers()

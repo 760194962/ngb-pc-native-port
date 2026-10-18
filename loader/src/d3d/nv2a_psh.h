@@ -32,6 +32,8 @@ static_assert(sizeof(PixelShaderDef) == 0xF0, "");
 // HLSL source. Constants: c0-c7 stage C0, c8-c15 stage C1, c16/c17 final combiner C0/C1 (all RGBA 0..1).
 // Samplers s0-s3. Inputs: COLOR0/COLOR1 (v0/v1), TEXCOORD0-3, FOG.
 // tex_cube: bit n set when stage n samples a cube map.
-std::string psh_to_hlsl(const PixelShaderDef &def, uint32_t tex_cube);
+// tex_depth: stages sampling a depth-format texture (shadow maps: the sample is the SHADOWFUNC comparison, 0 or 1);
+// shadow_func: D3DRS_SHADOWFUNC as 0..7 (NEVER .. ALWAYS).
+std::string psh_to_hlsl(const PixelShaderDef &def, uint32_t tex_cube, uint32_t tex_depth = 0, uint32_t shadow_func = 0);
 
 } // namespace xd3d

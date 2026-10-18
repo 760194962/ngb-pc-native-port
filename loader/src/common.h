@@ -110,6 +110,10 @@ struct Config {
     unsigned debug_draws = 0;  // --debug-draws: describe the first N draws
     unsigned debug_frame = 0;  // --debug-frame: describe every draw of this frame
     bool no_fog = false;       // --no-fog: never enable host fog (diagnosis of dark scenes)
+    bool no_specular = false;  // press-file "spec:0": never enable host specular lighting (diagnosis of light patches)
+    unsigned tsc_divisor = 4;  // --tsc-divisor N: the engine's frame timer (rdtsc) runs N times slower than the Xbox TSC
+    bool host_ffp = false;     // --host-ffp: fixed-function draws use the host's pixel pipeline, not the generated stage shader
+    unsigned ffp_debug = 0;    // press-file "cfg:ffpdebug:N": the stage shader shows stage 1's texture colour (1) or alpha (2)
     std::wstring press_script; // --press: "frame:button,frame:button" scripted controller input
     std::wstring perf_at;      // --perf-at S:D: record performance for D seconds from S seconds after the first frame
     std::wstring memdump;      // --memdump [*]ADDR:SIZE:F1,F2,...: raw memory to the --screenshot dir at those frames

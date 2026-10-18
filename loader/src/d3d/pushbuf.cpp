@@ -12,6 +12,12 @@ namespace {
 
 // NV097 (Kelvin) methods seen in inline game code.
 constexpr uint32_t M_NO_OPERATION = 0x0100;
+constexpr uint32_t M_NO_OPERATION2 = 0x0110;          // NV097_NO_OPERATION (the one D3D uses as a marker)
+constexpr uint32_t M_CLEAR_REPORT_VALUE = 0x17C8;     // visibility test begin (inlined into Ninja Gaiden Black)
+constexpr uint32_t M_ZPASS_PIXEL_COUNT_ENABLE = 0x17CC;
+constexpr uint32_t M_CALLBACK_FUNCTION = 0x1D8C;      // D3DDevice_InsertCallback: function, then context
+constexpr uint32_t M_CALLBACK_CONTEXT = 0x1D90;
+uint32_t g_callback_fn;
 constexpr uint32_t M_BREAK_VERTEX_BUFFER_CACHE = 0x1710;
 constexpr uint32_t M_SET_BEGIN_END = 0x17FC;
 constexpr uint32_t M_INLINE_ARRAY = 0x1818;
@@ -92,7 +98,25 @@ void method(uint32_t m, uint32_t v)
         return;
     case M_BREAK_VERTEX_BUFFER_CACHE:
     case M_NO_OPERATION:
+    case M_NO_OPERATION2:
+    case M_CLEAR_REPORT_VALUE:
         return;
+    case M_ZPASS_PIXEL_COUNT_ENABLE:
+        if (v) vis_begin();
+        return;
+    case M_CALLBACK_FUNCTION:
+        g_callback_fn = v;
+        return;
+    case M_CALLBACK_CONTEXT: {
+        // The Xbox D3D calls the function when the GPU reaches this point; everything before it is already done here.
+        static int noted;
+        if (noted < 8) {
+            noted++;
+            logf("[pb] push-buffer callback %s(0x%08x)", sym_name(g_callback_fn).c_str(), v);
+        }
+        if (g_callback_fn) ((void(__cdecl *)(uint32_t))(uintptr_t)g_callback_fn)(v);
+        return;
+    }
     }
     if (g_unknown.insert(m).second) logf("[pb] unhandled NV2A method 0x%04x = 0x%08x (logged once)", m, v);
 }

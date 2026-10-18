@@ -24,6 +24,9 @@ struct BuildProfile {
     uint32_t xdevice_type_gamepad; // XAPI's g_DeviceType_Gamepad descriptor (XbSymbolDatabase), the XDEVICE_TYPE_GAMEPAD value
     uint32_t switch_to_fiber;      // XAPI SwitchToFiber, replaced so Windows knows the fiber stacks (fiber.cpp); 0 = no fibers
     uint32_t fiber_tls_index;      // the dword holding XAPI's fiber TLS index (read by SwitchToFiber's first instruction)
+    const uint32_t *rdtsc_sites;   // rdtsc instructions in game / XAPI code, trapped to a 733.33 MHz counter (hooks.cpp)
+    int rdtsc_site_count;
+    uint32_t rdtsc_qpc_site;       // the one inside XAPI's QueryPerformanceCounter: full rate; the engine's timer sites get --tsc-divisor
 };
 
 // BLACK (Criterion, NTSC-U): numbers from black-pc NOTES.md.
@@ -38,6 +41,9 @@ inline const BuildProfile kProfileBlack = {
     0x0027CF4C,
     0,
     0,
+    nullptr,
+    0,
+    0,
 };
 
 // NINJA GAIDEN BLACK vb-zh-x2.1 (title 5443000D, XDK 5849): numbers from docs/02_静态分析.md of the port project.
@@ -46,6 +52,13 @@ inline const BuildProfile kProfileBlack = {
 //    C++ 0x4162D0-0x41634C, C 0x416350-0x416368;
 //  - D3D, DSOUND and XPP are the library sections replaced; D3DX / XGRPH (CPU-only helpers), XONLINE / XNET
 //    (networking; their kernel calls are stubbed) and the rest run natively.
+// rdtsc sites (capstone scan of the executable sections for 0F 31): the engine's frame timer (FUN_0030E140 and
+// neighbours, scaled by 0.113 from Xbox TSC ticks) and XAPI's QueryPerformanceCounter (0x376E40). The engine
+// turns the character shadow and effect detail down when the measured frame time is high, and a host TSC runs
+// 4x faster than the Xbox's 733 MHz (docs/04 §3.9). The D3D (0x3CF970) and DSOUND (0x39374F) copies sit in
+// HLE-replaced sections and are left alone.
+inline const uint32_t kNgbRdtscSites[] = {0x0030CA3F, 0x0030CAA1, 0x0030E060, 0x0030E284, 0x0030E58E, 0x00376E44};
+
 inline const BuildProfile kProfileNgbHurricaneX21 = {
     "NINJA GAIDEN BLACK Hurricane vb-zh-x2.1",
     "aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6",
@@ -57,6 +70,9 @@ inline const BuildProfile kProfileNgbHurricaneX21 = {
     0x003D9694,
     0x0032A293,
     0x0045E84C,
+    kNgbRdtscSites,
+    6,
+    0x00376E44,
 };
 
 inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21};

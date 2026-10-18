@@ -82,7 +82,7 @@ std::string final_input(uint32_t b, bool rgb)
 
 } // namespace
 
-std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube)
+std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex_depth, uint32_t shadow_func)
 {
     std::string s;
     char b[512];
@@ -111,9 +111,28 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube)
         std::string tin = "t" + std::to_string(in_stage);
         std::string nin = dotmap == 0 ? tin + ".rgb" : "(" + tin + ".rgb * 2 - 1)";
         bool cube = (tex_cube >> i) & 1;
+        bool depth = (tex_depth >> i) & 1;
         switch (mode) {
         case 0: break; // NONE
         case 1: case 2: // PROJECT2D / PROJECT3D
+            if (depth && mode == 2) { // PROJECT2D samples the depth itself (see device.cpp kZDepthPS)
+                // Shadow map (NV2A: depth-format texture): the sample is SHADOWFUNC(texel depth, r/q), 0 or 1 in all
+                // channels; a 2D mode compares with 0. The bound view holds the depth in .r (device.cpp
+                // kDepthViewRaw), 24-bit fixed point scaled to 0..1 here, r/q in 0..2^24-1 as the game sets it up
+                // (xemu psh_append_shadowmap; Ninja Gaiden Black's character shadow: GEQUAL, its 128x128 D24S8 map).
+                static const char *const cmp[8] = {"0", "dz < ref", "dz == ref", "dz <= ref", "dz > ref", "dz != ref", "dz >= ref", "1"};
+                char bb[768];
+                snprintf(bb, sizeof bb,
+                         "  { float w%d = tc[%d].w == 0 ? 1 : tc[%d].w;\n"
+                         "    float dz = tex2Dproj(s2d%d, float4(tc[%d].xy, 0, w%d)).r * 16777215.0;\n"
+                         "    float ref = %s;\n"
+                         "    float r = (%s) ? 1 : 0;\n"
+                         "    t%d = float4(r, r, r, r); }\n",
+                         i, i, i, i, i, i, mode == 2 ? ("clamp(tc[" + std::to_string(i) + "].z / w" + std::to_string(i) + ", 0, 16777215.0)").c_str() : "0",
+                         cmp[shadow_func & 7], i);
+                s += bb;
+                break;
+            }
             snprintf(b, sizeof b, "  t%d = %s;\n", i,
                      cube ? ("texCUBE(scu" + std::to_string(i) + ", tc[" + std::to_string(i) + "].xyz)").c_str()
                           : ("tex2Dproj(s2d" + std::to_string(i) + ", float4(tc[" + std::to_string(i) + "].xy, 0, tc[" +
