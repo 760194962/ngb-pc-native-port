@@ -1515,7 +1515,9 @@ int shadow_func_code()
 }
 
 // ---- flash watch ----
-struct FlashStats { uint32_t frame, draws, bb_draws, prog, ps, rts; float dark, mean, rgb[3]; };
+struct FlashStats { uint32_t frame, draws, bb_draws, prog, ps, rts, reads, read_kb; float dark, mean, rgb[3]; };
+std::atomic<uint32_t> g_fl_reads, g_fl_read_bytes; // NtReadFile calls / bytes since the last Swap (kernel/k_file.cpp)
+void flash_note_read(uint32_t bytes) { g_fl_reads++; g_fl_read_bytes += bytes; }
 constexpr uint32_t kFlRing = 4096; // ~68 s of frames
 FlashStats g_fl_ring[kFlRing], g_fl_cur;
 uint32_t g_fl_n;
@@ -1576,8 +1578,8 @@ static void flash_dump_draws(const std::vector<DrawRec> &v, uint32_t frame)
 
 static void flash_log(const FlashStats &s, const char *tag)
 {
-    logf("[flash] %s frame %u: draws %u (back buffer %u, vertex programs %u, pixel shaders %u), render target binds %u, dark %.0f%%, mean %.0f (%.0f %.0f %.0f)",
-         tag, s.frame, s.draws, s.bb_draws, s.prog, s.ps, s.rts, s.dark * 100, s.mean, s.rgb[0], s.rgb[1], s.rgb[2]);
+    logf("[flash] %s frame %u: draws %u (back buffer %u, vertex programs %u, pixel shaders %u), render target binds %u, reads %u (%u KB), dark %.0f%%, mean %.0f (%.0f %.0f %.0f)",
+         tag, s.frame, s.draws, s.bb_draws, s.prog, s.ps, s.rts, s.reads, s.read_kb, s.dark * 100, s.mean, s.rgb[0], s.rgb[1], s.rgb[2]);
 }
 
 // press-file "flashdump": the frame of the ring with the biggest darkening against its predecessor, with the
@@ -1595,7 +1597,8 @@ void flash_dump_worst()
     }
     if (!best) return;
     logf("[flash] on request: biggest darkening %+.0f%% at frame %u", best_d * 100, g_fl_ring[best % kFlRing].frame);
-    for (uint32_t k = best - 3; k <= best + 3 && k < g_fl_n; k++) flash_log(g_fl_ring[k % kFlRing], k == best ? "WORST" : "near");
+    for (uint32_t k = best > 300 ? best - 300 : 0; k <= best + 3 && k < g_fl_n; k++) // +-3 frames, and earlier frames that read files
+        if (k + 3 >= best || g_fl_ring[k % kFlRing].reads) flash_log(g_fl_ring[k % kFlRing], k == best ? "WORST" : "near");
     uint32_t back = g_fl_n - best; // frames ago (the draw slots advance with g_fl_n)
     for (int o = -1; o <= 1; o++) {
         uint32_t ago = back - o;
@@ -1615,6 +1618,8 @@ void flash_check(uint32_t frame)
     }
     FlashStats s = g_fl_cur;
     s.frame = frame;
+    s.reads = g_fl_reads.exchange(0);
+    s.read_kb = g_fl_read_bytes.exchange(0) / 1024;
     g_fl_cur = {};
     IDirect3DSurface9 *bb = nullptr;
     if (fl_small && sys && SUCCEEDED(d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) {
