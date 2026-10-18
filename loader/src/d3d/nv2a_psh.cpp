@@ -115,11 +115,15 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
         switch (mode) {
         case 0: break; // NONE
         case 1: case 2: // PROJECT2D / PROJECT3D
-            if (depth && mode == 2) { // PROJECT2D samples the depth itself (see device.cpp kZDepthPS)
+            if (depth) {
                 // Shadow map (NV2A: depth-format texture): the sample is SHADOWFUNC(texel depth, r/q), 0 or 1 in all
-                // channels; a 2D mode compares with 0. The bound view holds the depth in .r (device.cpp
-                // kDepthViewRaw), 24-bit fixed point scaled to 0..1 here, r/q in 0..2^24-1 as the game sets it up
-                // (xemu psh_append_shadowmap; Ninja Gaiden Black's character shadow: GEQUAL, its 128x128 D24S8 map).
+                // channels (xemu psh_append_shadowmap, PROJECT3D). A depth texture is always sampled in that mode:
+                // the library's SetTexture (0x3C7B00) flags a stage whose texture format is 0x2A..0x31 (0x40000000)
+                // and its shader-mode writer (FUN_003D0940, NV097_SET_SHADER_STAGE_PROGRAM) turns PROJECT2D into
+                // PROJECT3D for a flagged stage. Ninja Gaiden Black's character shadow receivers ask for PROJECT2D
+                // (texmodes 0x1, 128x128 D24S8 map, GEQUAL); docs/04 §3.18. The bound view holds the depth in .r
+                // (device.cpp kDepthViewRaw), 24-bit fixed point scaled to 0..1 here, r/q in 0..2^24-1.
+                mode = 2;
                 static const char *const cmp[8] = {"0", "dz < ref", "dz == ref", "dz <= ref", "dz > ref", "dz != ref", "dz >= ref", "1"};
                 char bb[768];
                 snprintf(bb, sizeof bb,
