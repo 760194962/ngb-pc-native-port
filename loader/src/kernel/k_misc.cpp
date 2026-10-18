@@ -175,7 +175,8 @@ static std::wstring launch_target(const char *path)
     return g_cfg.game_dir + L"\\" + widen(rest);
 }
 
-static bool relaunch(const std::wstring &xbe)
+// with_data: pass the launch data page on (XLaunchNewImage); false = a fresh start (back from the dashboard)
+static bool relaunch(const std::wstring &xbe, bool with_data = true)
 {
     // the page beside the log, the log renamed after the target ("black.log" -> "black.NinjaFCJ.log")
     std::wstring log = g_cfg.log_path, dir = L".", stem = log;
@@ -192,11 +193,14 @@ static bool relaunch(const std::wstring &xbe)
     std::wstring target = xbe.substr(xbe.find_last_of(L"\\/") + 1);
     target = target.substr(0, target.find_last_of(L'.'));
     std::wstring page_file = dir + L"\\" + stem + L"." + target + L".launchdata";
-    FILE *f = _wfopen(page_file.c_str(), L"wb");
-    if (!f) return false;
-    fwrite(LaunchDataPage, 1, sizeof(XLAUNCH_DATA_PAGE), f);
-    fclose(f);
-    std::wstring new_log = dir + L"\\" + stem + (target == L"default" ? L"" : L"." + target) + L".log";
+    if (with_data) {
+        FILE *f = _wfopen(page_file.c_str(), L"wb");
+        if (!f) return false;
+        fwrite(LaunchDataPage, 1, sizeof(XLAUNCH_DATA_PAGE), f);
+        fclose(f);
+    }
+    std::wstring new_log =
+        dir + L"\\" + stem + (target == L"default" ? (with_data ? L"" : L".restart") : L"." + target) + L".log";
 
     std::vector<std::wstring> args = g_cfg.args;
     for (size_t i = 0; i < args.size(); i++) {
@@ -209,7 +213,8 @@ static bool relaunch(const std::wstring &xbe)
     }
     if (g_cfg.xbe_arg >= 0 && g_cfg.xbe_arg < (int)args.size()) args[g_cfg.xbe_arg] = xbe;
     else args.push_back(xbe);
-    args.insert(args.begin(), {L"--log", new_log, L"--launch-data", page_file});
+    args.insert(args.begin(), {L"--log", new_log});
+    if (with_data) args.insert(args.begin() + 2, {L"--launch-data", page_file});
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     std::wstring cmd = L"\"" + std::wstring(exe) + L"\"";
@@ -235,6 +240,17 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
         logf("    launch path '%.64s' -> %s", path, xbe.empty() ? "(no XBE)" : narrow(xbe).c_str());
         if (!xbe.empty() && GetFileAttributesW(xbe.c_str()) != INVALID_FILE_ATTRIBUTES && relaunch(xbe)) {
             request_exit(0, "XLaunchNewImage");
+            Sleep(INFINITE);
+        }
+    }
+    if (Routine == 1 || Routine == 2) {
+        // No title to launch: the console goes to the dashboard (Ninja Gaiden Black's Ranking > "new user" asks for
+        // the Xbox Live dashboard: it looks for dashupdate.xbe and xonlinedash.xbe, then reboots with an empty path).
+        // There is no dashboard here; coming back from it starts the game afresh, so start default.xbe without data.
+        std::wstring main_xbe = g_cfg.game_dir + L"\\default.xbe";
+        logf("    no title to launch (the dashboard): starting %s afresh", narrow(main_xbe).c_str());
+        if (GetFileAttributesW(main_xbe.c_str()) != INVALID_FILE_ATTRIBUTES && relaunch(main_xbe, false)) {
+            request_exit(0, "back from the dashboard");
             Sleep(INFINITE);
         }
     }

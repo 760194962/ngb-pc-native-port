@@ -147,6 +147,14 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
         std::string c = skip_c ? std::string("prev") : op_expr(cop, arg(k[i].c0, i), arg(k[i].c1, i), arg(k[i].c2, i), i, "prev");
         std::string a = aop == D3DTOP_DISABLE || skip_a ? std::string("prev")
                                                          : op_expr(aop, arg(k[i].a0, i), arg(k[i].a1, i), arg(k[i].a2, i), i, "prev");
+        // Two operations the Xbox library builds differently from Direct3D 9's description (FUN_003D4340):
+        // PREMODULATE on the first stage is arg1 * this stage's texture (B input = TEXTURE when the first-stage flag is
+        // set, 0x3D457C), on later stages arg1; DOTPRODUCT3 writes the dot product with AB blue-to-alpha and clears
+        // the stage's alpha combiner, so the alpha is the dot product too.
+        std::string ti = "t" + std::to_string(i);
+        if (!skip_c && cop == D3DTOP_PREMODULATE && i == first) c = "(" + arg(k[i].c1, i) + " * " + ti + ")";
+        if (!skip_a && aop == D3DTOP_PREMODULATE && i == first) a = "(" + arg(k[i].a1, i) + " * " + ti + ")";
+        if (!skip_c && cop == D3DTOP_DOTPRODUCT3) a = c;
         const char *dst = (k[i].result & 0xF) == 5 ? "temp" : "cur";
         s += std::string("  ") + dst + " = saturate(float4((" + c + ").rgb, (" + a + ").a));\n";
     }
