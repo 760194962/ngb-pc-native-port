@@ -62,14 +62,29 @@ std::vector<LibFunc> g_funcs; // the build's D3D + DSOUND + XPP tables, sorted b
 std::vector<bool> g_int3_hook;
 std::atomic<bool> g_unimplemented_hit{false};
 
+// Executable memory for the generated thunks. A full block is left in place (its thunks are in use) and a new one
+// taken; the first version wrote past its single 512 KB block once that was used up.
+constexpr size_t kCodeBlock = 0x80000;
 uint8_t *g_code;
-size_t g_code_used;
+size_t g_code_used, g_code_size;
 
 uint8_t *code_alloc(size_t n)
 {
-    if (!g_code) g_code = (uint8_t *)VirtualAlloc(nullptr, 0x80000, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    n = (n + 15) & ~(size_t)15;
+    if (!g_code || g_code_used + n > g_code_size) {
+        size_t size = n > kCodeBlock ? n : kCodeBlock;
+        uint8_t *block = (uint8_t *)VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        if (!block) {
+            logf("hooks: no executable memory for %zu bytes of thunks", n);
+            ExitProcess(3);
+        }
+        if (g_code) logf("hooks: thunk block full (%zu bytes used), a new %zu-byte block", g_code_used, size);
+        g_code = block;
+        g_code_used = 0;
+        g_code_size = size;
+    }
     uint8_t *p = g_code + g_code_used;
-    g_code_used += (n + 15) & ~15u;
+    g_code_used += n;
     return p;
 }
 

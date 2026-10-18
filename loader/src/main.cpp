@@ -23,6 +23,7 @@
 
 namespace xk {
 void load_launch_data(const std::wstring &file); // kernel/k_misc.cpp
+void set_image_file_name(const std::wstring &xbe_path, const std::wstring &game_dir); // kernel/k_misc.cpp
 }
 
 #include <bcrypt.h>
@@ -172,6 +173,7 @@ bool parse_args()
         else if (a == L"--skip-videos") g_cfg.skip_videos = true;
         else if (a == L"--normal-aspect") { g_cfg.widescreen = false; settings_mark_cli("widescreen"); }
         else if (a == L"--fullscreen") { g_cfg.fullscreen = true; settings_mark_cli("fullscreen"); }
+        else if (a == L"--windowed") { g_cfg.fullscreen = false; settings_mark_cli("fullscreen"); }
         else if (a == L"--no-reverb") { g_cfg.reverb = false; settings_mark_cli("reverb"); }
         else if (a == L"--no-fog") g_cfg.no_fog = true;
         else if (a == L"--host-ffp") g_cfg.host_ffp = true;
@@ -491,6 +493,7 @@ int run(void *reserve, unsigned reserve_size)
         return 1;
     }
 
+    xk::set_image_file_name(g_cfg.xbe_path, g_cfg.game_dir);
     if (!g_cfg.launch_data.empty()) xk::load_launch_data(g_cfg.launch_data);
     logf("starting XBE entry point 0x%08x", g_xbe.entry);
     HANDLE boot = nullptr;

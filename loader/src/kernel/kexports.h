@@ -162,6 +162,7 @@ extern XXBOX_KRNL_VERSION XboxKrnlVersion;
 extern uint8_t XboxSignatureKey[16];
 extern uint8_t XboxAlternateSignatureKeys[16][16];
 extern XANSI_STRING XeImageFileName;
+void set_image_file_name(const std::wstring &xbe_path, const std::wstring &game_dir); // kernel/k_misc.cpp
 extern uint8_t IdexChannelObject[256];
 
 // Imports BLACK does not have, used by Ninja Gaiden Black (k_ngb.cpp): implemented where the game's own code

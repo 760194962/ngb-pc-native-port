@@ -12,7 +12,7 @@
 namespace {
 
 void *g_av_saved_data;
-char g_image_file_name[] = "\\Device\\CdRom0\\default.xbe";
+char g_image_file_name[260] = "\\Device\\CdRom0\\default.xbe";
 
 } // namespace
 
@@ -30,7 +30,32 @@ uint8_t XboxHDKey[16];
 XXBOX_KRNL_VERSION XboxKrnlVersion = {1, 0, 5838, 1};
 uint8_t XboxSignatureKey[16];
 uint8_t XboxAlternateSignatureKeys[16][16];
-XANSI_STRING XeImageFileName = {(uint16_t)(sizeof g_image_file_name - 1), (uint16_t)sizeof g_image_file_name, g_image_file_name};
+XANSI_STRING XeImageFileName = {26, (uint16_t)sizeof g_image_file_name, g_image_file_name};
+
+// XeImageFileName is the running image's path on the Xbox (\Device\CdRom0\default.xbe, or a bundled program's
+// \Device\CdRom0\<dir>\<file> after XLaunchNewImage); it was always default.xbe. From the XBE's place in the
+// game folder (= \Device\CdRom0).
+void set_image_file_name(const std::wstring &xbe_path, const std::wstring &game_dir)
+{
+    wchar_t full[MAX_PATH], dir[MAX_PATH];
+    std::wstring rel;
+    if (GetFullPathNameW(xbe_path.c_str(), MAX_PATH, full, nullptr) && GetFullPathNameW(game_dir.c_str(), MAX_PATH, dir, nullptr)) {
+        std::wstring f = full, d = dir;
+        for (wchar_t &c : f) if (c == L'/') c = L'\\';
+        for (wchar_t &c : d) if (c == L'/') c = L'\\';
+        while (!d.empty() && d.back() == L'\\') d.pop_back();
+        if (f.size() > d.size() + 1 && _wcsnicmp(f.c_str(), d.c_str(), d.size()) == 0 && f[d.size()] == L'\\')
+            rel = f.substr(d.size() + 1);
+        else
+            rel = f.substr(f.find_last_of(L'\\') + 1);
+    }
+    if (rel.empty()) return;
+    std::string name = "\\Device\\CdRom0\\" + narrow(rel);
+    if (name.size() >= sizeof g_image_file_name) return;
+    memcpy(g_image_file_name, name.c_str(), name.size() + 1);
+    XeImageFileName.Length = (uint16_t)name.size();
+    logf("[k] XeImageFileName = %s", g_image_file_name);
+}
 uint8_t IdexChannelObject[256];
 
 // --- AV ---
