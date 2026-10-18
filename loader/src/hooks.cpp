@@ -401,6 +401,8 @@ void log_coverage_summary()
     logf("coverage summary: %d of %d hit;%s | not hit:%s", nh, g_cov_count, hit.c_str(), miss.c_str());
 }
 
+uint32_t probe_hit_count(int i) { return i >= 0 && i < 16 ? g_probe_hits[i].load() : 0; }
+
 void install_probes()
 {
     for (int i = 0; i < g_cfg.probe_count; i++) {

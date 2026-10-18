@@ -130,12 +130,14 @@ constexpr uint32_t DEV_TEXTURES = 0x0F98;     // Resource* [4]
 constexpr uint32_t DEV_VERTEXSHADER = 0x0794;  // m_VertexShader (XbSymbolDatabase)
 constexpr uint32_t DEV_RENDERTARGET = 0x1A04; // Surface*
 constexpr uint32_t DEV_ZBUFFER = 0x1A08;      // Surface*
-// Two more surface pointers of the library's device: SetViewport (0x3C7270 in Ninja Gaiden Black) sizes the viewport
-// from +0x1A18 when the current render target is +0x1A14, and the game's FUN_003221A0 AddRefs both and asks
-// Get2DSurfaceDesc about +0x1A18. The HLE fills them at CreateDevice with the back buffer and the depth buffer
-// (verified only as far as the boot path uses them; docs/04).
-constexpr uint32_t DEV_RT_ALIAS = 0x1A14;
-constexpr uint32_t DEV_BACKBUFFER = 0x1A18;
+// The library's frame buffers. Its Swap with D3DSWAP_COPY (0x3CBC60 in Ninja Gaiden Black) sets the render target
+// to +0x1A18 and texture 0 to +0x1A14 and draws one into the other: +0x1A14 is the back buffer the game renders
+// into, +0x1A18 the front buffer holding the last presented frame (+0x1A1C rotates with it when triple-buffered).
+// SetViewport (0x3C7270) sizes the viewport from +0x1A18 when the render target is +0x1A14. The game's FUN_003221A0
+// builds texture headers over both (0x00C0EAC8 over +0x1A18, 0x00C0EAE0 over +0x1A14); the door crossfade samples
+// the front one as "the previous frame" (docs/04 §3.13).
+constexpr uint32_t DEV_BACKBUFFER = 0x1A14;
+constexpr uint32_t DEV_FRONTBUFFER = 0x1A18;
 constexpr uint32_t DEV_SWAPCALLBACK = 0x1DB4;  // m_SwapCallback
 constexpr uint32_t DEV_VBLANKCALLBACK = 0x1DB8; // m_VBlankCallback (set by game code)
 constexpr uint32_t DEV_VBLANKEVENT = 0x1DBC;   // m_VerticalBlankEvent

@@ -3,6 +3,7 @@
 // host Direct3D 9 device.
 #include "d3d/device.h"
 #include "build_profile.h"
+#include "hooks.h"
 
 #include "d3d/dispatch.h"
 #include "d3d/draw.h"
@@ -45,6 +46,7 @@ std::atomic<bool> g_shot_requested; // request_screenshot: taken at the next Swa
 std::mutex g_shot_lock;
 std::string g_shot_tag;
 Surface *g_backbuffer, *g_depthbuffer;
+Surface *g_frontbuffer; // device +0x1A18: a copy of the back buffer made at every Swap (xd3d.h DEV_FRONTBUFFER)
 Viewport g_requested_viewport = {0, 0, 640, 480, 0.0f, 1.0f}; // as the game last set it (before clamping)
 IDirect3DSurface9 *g_host_backbuffer, *g_host_depth;
 
@@ -527,6 +529,18 @@ IDirect3DTexture9 *ramp_texture()
     return g_ramp_tex;
 }
 
+// D3DSWAP_COPY: the presented frame becomes the front buffer's contents, which the game samples during the next frame.
+void copy_to_frontbuffer()
+{
+    if (!g_frontbuffer) return;
+    HostRT &bb = host_rt(g_backbuffer), &fb = host_rt(g_frontbuffer);
+    IDirect3DSurface9 *src = nullptr, *dst = nullptr;
+    if (bb.tex && fb.tex && SUCCEEDED(bb.tex->GetSurfaceLevel(0, &src)) && SUCCEEDED(fb.tex->GetSurfaceLevel(0, &dst)))
+        host3d::dev()->StretchRect(src, nullptr, dst, nullptr, D3DTEXF_POINT);
+    if (src) src->Release();
+    if (dst) dst->Release();
+}
+
 void present_backbuffer()
 {
     static float shown_gamma = -1.0f, shown_gain = -1.0f, shown_sens = -1.0f;
@@ -830,8 +844,9 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
         // sword trails and heavy-attack bursts sample. xemu shows the trail as a translucent smear of the scene behind
         // (run/xemu_ref/xemu_swing_*.png); the user compared the four readings live (r065): 0 depth = opaque white
         // band, 1 byte split = green/orange stripes, 2 shadow compare = the trail vanishes, 3 the back buffer's colour
-        // = "very like" the original. Taken empirically: why the hardware returns colour here is not established
-        // (docs/04 §3.11). Combiner programs (the shadow receivers) keep the raw depth.
+        // = "very like" the original. The reason was found later (docs/04 §3.13): that header is built over device
+        // +0x1A14, which is the back buffer on the Xbox; the HLE had put the depth buffer there. With +0x1A14 fixed the
+        // header is a colour one and no longer comes here. Combiner programs (the shadow receivers) keep the raw depth.
         bool ffp = !g_st.pixel_shader;
         if (depth_format && ffp && g_cfg.zmode == 1) mode = kDepthViewBytes;
         if (depth_format && ffp && g_cfg.zmode == 2) mode = shadow_func_code();
@@ -966,8 +981,9 @@ HRESULT __stdcall Direct3D_CreateDevice(uint32_t Adapter, uint32_t DeviceType, u
         g_depthbuffer = make_surface(g_width, g_height, pp->AutoDepthStencilFormat ? pp->AutoDepthStencilFormat : XFMT_LIN_D24S8);
     dev_field<Surface *>(DEV_RENDERTARGET) = g_backbuffer;
     dev_field<Surface *>(DEV_ZBUFFER) = g_depthbuffer;
+    g_frontbuffer = make_surface(g_width, g_height, pp->BackBufferFormat ? pp->BackBufferFormat : XFMT_LIN_X8R8G8B8);
     dev_field<Surface *>(DEV_BACKBUFFER) = g_backbuffer;
-    dev_field<Surface *>(DEV_RT_ALIAS) = g_depthbuffer;
+    dev_field<Surface *>(DEV_FRONTBUFFER) = g_frontbuffer;
     g_st.render_target = g_backbuffer;
     g_st.depth_stencil = g_depthbuffer;
     bind_render_target(g_backbuffer, g_depthbuffer);
@@ -1378,6 +1394,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     perf::swap_begin();
     pace_swap();
     present_backbuffer();
+    copy_to_frontbuffer();
     capture_frame();
     uint32_t frames = ++g_frame_count;
     memdump_frame(frames);
@@ -1515,7 +1532,15 @@ int shadow_func_code()
 }
 
 // ---- flash watch ----
-struct FlashStats { uint32_t frame, draws, bb_draws, prog, ps, rts, reads, read_kb; float dark, mean, rgb[3]; };
+struct FlashStats { uint32_t frame, draws, bb_draws, prog, ps, rts, reads, read_kb, var[4], probe[4]; float dark, mean, rgb[3]; };
+uint32_t g_fl_probe_prev[4];
+uint32_t g_fl_var_addr[4]; // press-file "flashvar:ADDR": guest dwords sampled at every Swap and logged with the frame
+int g_fl_vars;
+void flash_add_var(uint32_t addr)
+{
+    if (g_fl_vars < 4 && addr) g_fl_var_addr[g_fl_vars++] = addr;
+    logf("[flash] sampling %d guest dwords per frame (latest %08x)", g_fl_vars, addr);
+}
 std::atomic<uint32_t> g_fl_reads, g_fl_read_bytes; // NtReadFile calls / bytes since the last Swap (kernel/k_file.cpp)
 void flash_note_read(uint32_t bytes) { g_fl_reads++; g_fl_read_bytes += bytes; }
 constexpr uint32_t kFlRing = 4096; // ~68 s of frames
@@ -1578,8 +1603,21 @@ static void flash_dump_draws(const std::vector<DrawRec> &v, uint32_t frame)
 
 static void flash_log(const FlashStats &s, const char *tag)
 {
-    logf("[flash] %s frame %u: draws %u (back buffer %u, vertex programs %u, pixel shaders %u), render target binds %u, reads %u (%u KB), dark %.0f%%, mean %.0f (%.0f %.0f %.0f)",
-         tag, s.frame, s.draws, s.bb_draws, s.prog, s.ps, s.rts, s.reads, s.read_kb, s.dark * 100, s.mean, s.rgb[0], s.rgb[1], s.rgb[2]);
+    std::string vars;
+    for (int i = 0; i < g_fl_vars; i++) {
+        char b[48];
+        float f;
+        memcpy(&f, &s.var[i], 4);
+        snprintf(b, sizeof b, " [%08x]=%08x (%g)", g_fl_var_addr[i], s.var[i], f);
+        vars += b;
+    }
+    for (int i = 0; i < g_cfg.probe_count && i < 4; i++) {
+        char b[32];
+        snprintf(b, sizeof b, " probe %08x: %u", g_cfg.probe[i], s.probe[i]);
+        vars += b;
+    }
+    logf("[flash] %s frame %u: draws %u (back buffer %u, vertex programs %u, pixel shaders %u), render target binds %u, reads %u (%u KB), dark %.0f%%, mean %.0f (%.0f %.0f %.0f)%s",
+         tag, s.frame, s.draws, s.bb_draws, s.prog, s.ps, s.rts, s.reads, s.read_kb, s.dark * 100, s.mean, s.rgb[0], s.rgb[1], s.rgb[2], vars.c_str());
 }
 
 // press-file "flashdump": the frame of the ring with the biggest darkening against its predecessor, with the
@@ -1620,6 +1658,12 @@ void flash_check(uint32_t frame)
     s.frame = frame;
     s.reads = g_fl_reads.exchange(0);
     s.read_kb = g_fl_read_bytes.exchange(0) / 1024;
+    for (int i = 0; i < g_fl_vars; i++) s.var[i] = *(const volatile uint32_t *)(uintptr_t)g_fl_var_addr[i];
+    for (int i = 0; i < g_cfg.probe_count && i < 4; i++) {
+        uint32_t n = probe_hit_count(i);
+        s.probe[i] = n - g_fl_probe_prev[i];
+        g_fl_probe_prev[i] = n;
+    }
     g_fl_cur = {};
     IDirect3DSurface9 *bb = nullptr;
     if (fl_small && sys && SUCCEEDED(d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) {

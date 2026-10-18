@@ -194,6 +194,10 @@ void read_press_file(uint32_t now_ms)
                     logf("[input] trace requested: frame %u%s", g_cfg.debug_frame, n > 1 ? " (range)" : "");
                     continue;
                 }
+                if (line.rfind("flashvar:", 0) == 0) {
+                    xd3d::flash_add_var((uint32_t)strtoul(line.c_str() + 9, nullptr, 16));
+                    continue;
+                }
                 if (line == "flashdump") {
                     xd3d::flash_dump_worst();
                     continue;

@@ -16,5 +16,6 @@ void dump_threads();
 
 // --probe: int3 at each address; logs registers and stack arguments, then single-steps and re-arms.
 void install_probes();
+uint32_t probe_hit_count(int i); // total hits of --probe i (the flash watcher logs the per-frame increase)
 void install_coverage();   // --coverage: one-shot int3 at each listed address, logged at the first hit
 void log_coverage_summary(); // press-file "coverage": hit / not-hit lists

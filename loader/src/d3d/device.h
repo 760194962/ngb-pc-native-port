@@ -25,6 +25,7 @@ void flash_count_rt();
 void flash_record_draw(uint32_t caller, uint32_t tex0, uint32_t vs);
 void flash_check(uint32_t frame);
 void flash_dump_worst();
+void flash_add_var(uint32_t addr); // press-file "flashvar:ADDR"
 bool is_backbuffer(const Surface *s);
 void vis_begin();                  // NV097_SET_ZPASS_PIXEL_COUNT_ENABLE = 1: start counting (host occlusion query)
 HRESULT vis_end(uint32_t Index);   // D3DDevice_EndVisibilityTest: finish the query, write the report slot
