@@ -1104,7 +1104,10 @@ void pace_swap()
     uint32_t n;
     switch (iv & 0xF) {
     case 0: n = (iv & 0x80000000) ? 0 : 1; break; // DEFAULT = ONE
-    case 2: n = g_cfg.fps == 60 ? 1 : 2; break; // BLACK asks for TWO_OR_IMMEDIATE (30 fps); its update uses frame time
+    // BLACK asks for TWO_OR_IMMEDIATE (30 fps) and its update uses frame time, so --fps 60 runs it at one vblank.
+    // Ninja Gaiden Black asks for TWO through its frame-rate mode 1 / 5 (FUN_0030CDB0, table 0x44B76C: modes 0-6 ->
+    // ONE, TWO, THREE, IMMEDIATE, ONE_OR_IMMEDIATE, TWO_OR_IMMEDIATE, THREE_OR_IMMEDIATE) and means it.
+    case 2: n = (g_cfg.profile && g_cfg.profile->black && g_cfg.fps == 60) ? 1 : 2; break;
     case 4: n = 3; break;
     case 8: n = 4; break;
     default: n = 1; break;
