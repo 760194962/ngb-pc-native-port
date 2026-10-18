@@ -85,13 +85,20 @@ std::string op_expr(D3DTEXTUREOP op, const std::string &a0, const std::string &a
     }
 }
 
-bool stage_reads_texture_key(const StageKey &e)
+// Whether one channel's operation reads the stage texture: only the arguments the operation uses count, as in the
+// Xbox D3D library's combiner builder (FUN_003d4340 of Ninja Gaiden Black x2.1, arguments mapped by FUN_003d42a0).
+bool op_reads_texture(D3DTEXTUREOP op, uint32_t a0, uint32_t a1, uint32_t a2, bool first)
 {
-    uint32_t args[6] = {e.c0, e.c1, e.c2, e.a0, e.a1, e.a2};
-    for (uint32_t a : args)
-        if ((a & 0xF) == 2) return true; // D3DTA_TEXTURE
-    D3DTEXTUREOP c = conv_texop(e.cop), al = conv_texop(e.aop);
-    return c == D3DTOP_BLENDTEXTUREALPHA || c == D3DTOP_BLENDTEXTUREALPHAPM || al == D3DTOP_BLENDTEXTUREALPHA || al == D3DTOP_BLENDTEXTUREALPHAPM;
+    auto tex = [](uint32_t a) { return (a & 0xF) == 2; }; // D3DTA_TEXTURE
+    switch (op) {
+    case D3DTOP_DISABLE: case D3DTOP_BUMPENVMAP: case D3DTOP_BUMPENVMAPLUMINANCE: return false;
+    case D3DTOP_SELECTARG1: return tex(a1);
+    case D3DTOP_SELECTARG2: return tex(a2);
+    case D3DTOP_PREMODULATE: return tex(a1) || first; // the first stage modulates by its own texture
+    case D3DTOP_BLENDTEXTUREALPHA: case D3DTOP_BLENDTEXTUREALPHAPM: return true;
+    case D3DTOP_MULTIPLYADD: case D3DTOP_LERP: return tex(a0) || tex(a1) || tex(a2);
+    default: return tex(a1) || tex(a2);
+    }
 }
 
 std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, bool def_specular, int first)
@@ -107,8 +114,8 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
     s += def_diffuse ? "  float4 v0 = 1;\n" : "  float4 v0 = I.v0;\n";  // no diffuse in the vertex: opaque white
     s += def_specular ? "  float4 v1 = 0;\n" : "  float4 v1 = I.v1;\n"; // no specular in the vertex: 0
     s += "  float4 cur = v0, temp = 0, prev;\n";
-    // A stage that reads its texture with none bound (cfg:untex): 3 = the stage is skipped, the current colour passes on
-    // (below), 1 = the texture reads as the diffuse colour, 0 = opaque white. 3 matches xemu in four cases (docs/04
+    // A stage that reads its texture with none bound (cfg:untex): 3 = that channel passes the current value on, as the
+    // Xbox library does (below), 1 = the texture reads as the diffuse colour, 0 = opaque white. 3 matches xemu in four cases (docs/04
     // §3.14 of the port project): the health bar and the SNES trilogy page (stage 0 MODULATE(texture, diffuse): 1 gives
     // the diffuse colour squared), the Game Over overlay (stage 0 MODULATE(texture, tfactor), nearly transparent
     // diffuse: 0 gives a yellow layer) and the nunchaku sweep (stage 1, must show).
@@ -126,10 +133,15 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
     for (int i = first; i < 4; i++) {
         D3DTEXTUREOP cop = conv_texop(k[i].cop), aop = conv_texop(k[i].aop);
         if (cop == D3DTOP_DISABLE) break; // the first disabled colour op ends the stages
-        if (g_cfg.untex == 3 && !k[i].tex && stage_reads_texture_key(k[i])) continue; // unbound texture: skip the stage
+        // cfg:untex:3: a channel whose operation reads an unbound texture passes the current value on (the first
+        // stage: the diffuse colour). The Xbox library maps the missing texture to register -1 and replaces that
+        // channel's combiner inputs with current * 1; colour and alpha are separate passes.
+        bool skip_c = g_cfg.untex == 3 && !k[i].tex && op_reads_texture(cop, k[i].c0, k[i].c1, k[i].c2, i == first);
+        bool skip_a = g_cfg.untex == 3 && !k[i].tex && op_reads_texture(aop, k[i].a0, k[i].a1, k[i].a2, i == first);
         s += "  prev = cur;\n";
-        std::string c = op_expr(cop, arg(k[i].c0, i), arg(k[i].c1, i), arg(k[i].c2, i), i, "prev");
-        std::string a = aop == D3DTOP_DISABLE ? std::string("prev") : op_expr(aop, arg(k[i].a0, i), arg(k[i].a1, i), arg(k[i].a2, i), i, "prev");
+        std::string c = skip_c ? std::string("prev") : op_expr(cop, arg(k[i].c0, i), arg(k[i].c1, i), arg(k[i].c2, i), i, "prev");
+        std::string a = aop == D3DTOP_DISABLE || skip_a ? std::string("prev")
+                                                         : op_expr(aop, arg(k[i].a0, i), arg(k[i].a1, i), arg(k[i].a2, i), i, "prev");
         const char *dst = (k[i].result & 0xF) == 5 ? "temp" : "cur";
         s += std::string("  ") + dst + " = saturate(float4((" + c + ").rgb, (" + a + ").a));\n";
     }
