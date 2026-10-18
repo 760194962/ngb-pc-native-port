@@ -218,31 +218,35 @@ void apply_render_states(IDirect3DDevice9 *d)
 {
     auto set = [&](D3DRENDERSTATETYPE s, DWORD v) { d->SetRenderState(s, v); };
     on_change(XRS_ZENABLE, [&](uint32_t v) { set(D3DRS_ZENABLE, v); });
-    // Depth bias. D3DRS_ZBIAS (0..16, D3D8 style) and the NV2A polygon offset (D3DRS_POLYGONOFFSETZOFFSET in depth
-    // units, D3DRS_POLYGONOFFSETZSLOPESCALE, enabled by D3DRS_SOLIDOFFSETENABLE) both end up in the host's
-    // DEPTHBIAS / SLOPESCALEDEPTHBIAS. D3D9's DEPTHBIAS is added to the 0..1 depth directly: a ZBIAS step is
-    // -0.000005 (as d3d8to9 maps it), a polygon offset unit is 1/2^24 of a 24-bit depth buffer. Ninja Gaiden
-    // Black draws its lightmap/decal layers coplanar over the rocks with a bias; without it they z-fought and the
-    // light patches flickered with every step (docs/04 §3.8).
-    auto depth_bias = [&]() {
+    // Depth bias: the NV2A polygon offset (D3DRS_POLYGONOFFSETZOFFSET in depth units, POLYGONOFFSETZSLOPESCALE,
+    // enabled for solid fill by SOLIDOFFSETENABLE) -> the host's DEPTHBIAS / SLOPESCALEDEPTHBIAS. D3DRS_ZBIAS reaches
+    // these states through the library's conversion (ngb/d3d_ngb.cpp SetRenderState_ZBias), the game also writes
+    // them inline (FUN_001D45C0, FUN_001D5420). A unit is 1/2^24 of the 24-bit depth range. The slope term is
+    // per pixel of the target (the largest depth change between neighbouring pixels): at k times the Xbox
+    // resolution the slope is k times smaller, so the factor is scaled by the target scale to keep the same offset.
+    // Ninja Gaiden Black draws lightmap / decal layers coplanar over the rocks with ZBIAS (docs/04 §3.8, §3.17).
+    {
         const uint32_t *rs = render_state();
-        float bias = -(float)rs[XRS_ZBIAS] * 0.000005f, slope = 0.0f;
+        float bias = 0.0f, slope = 0.0f;
         if (rs[XRS_SOLIDOFFSETENABLE]) {
             float off;
             memcpy(&off, &rs[XRS_POLYGONOFFSETZOFFSET], 4);
             memcpy(&slope, &rs[XRS_POLYGONOFFSETZSLOPESCALE], 4);
-            bias += off / 16777216.0f;
+            bias = off / 16777216.0f;
+            slope *= std::max(target_scale_x(), target_scale_y());
         }
-        DWORD b, s;
-        memcpy(&b, &bias, 4);
-        memcpy(&s, &slope, 4);
-        set(D3DRS_DEPTHBIAS, b);
-        set(D3DRS_SLOPESCALEDEPTHBIAS, s);
-    };
-    on_change(XRS_ZBIAS, [&](uint32_t) { depth_bias(); });
-    on_change(XRS_SOLIDOFFSETENABLE, [&](uint32_t) { depth_bias(); });
-    on_change(XRS_POLYGONOFFSETZOFFSET, [&](uint32_t) { depth_bias(); });
-    on_change(XRS_POLYGONOFFSETZSLOPESCALE, [&](uint32_t) { depth_bias(); });
+        static float sent_bias, sent_slope;
+        if (!g_rs_valid[XRS_ZBIAS] || bias != sent_bias || slope != sent_slope) { // ZBIAS's slot marks "sent"
+            DWORD b, s;
+            memcpy(&b, &bias, 4);
+            memcpy(&s, &slope, 4);
+            set(D3DRS_DEPTHBIAS, b);
+            set(D3DRS_SLOPESCALEDEPTHBIAS, s);
+            sent_bias = bias;
+            sent_slope = slope;
+            g_rs_valid[XRS_ZBIAS] = true;
+        }
+    }
     on_change(XRS_ZFUNC, [&](uint32_t v) { set(D3DRS_ZFUNC, conv_cmp(v)); });
     on_change(XRS_ZWRITEENABLE, [&](uint32_t v) { set(D3DRS_ZWRITEENABLE, v != 0); });
     on_change(XRS_ALPHATESTENABLE, [&](uint32_t v) { set(D3DRS_ALPHATESTENABLE, v != 0); });

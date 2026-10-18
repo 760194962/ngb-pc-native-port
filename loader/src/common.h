@@ -116,7 +116,7 @@ struct Config {
     unsigned debug_frame = 0;  // --debug-frame: describe every draw of this frame
     bool no_fog = false;       // --no-fog: never enable host fog (diagnosis of dark scenes)
     bool no_specular = false;  // press-file "spec:0": never enable host specular lighting (diagnosis of light patches)
-    unsigned tsc_divisor = 4;  // --tsc-divisor N: the engine's frame timer (rdtsc) runs N times slower than the Xbox TSC
+    unsigned tsc_divisor = 1;  // --tsc-divisor N: the engine's frame timer (rdtsc) runs N times slower than the Xbox TSC (docs/04 §3.17)
     std::wstring coverage;     // --coverage FILE: one-shot probes at the hex addresses listed (first word of each line)
     int untex = 3;             // press-file "cfg:untex:N": a stage reading an unbound texture is 3 skipped, or the texture reads as 1 the diffuse colour, 0 white (d3d/ffp_ps.cpp)
     bool flash_watch = false;  // press-file "cfg:flashwatch:1": detect single dark / flat frames, save them with draw statistics

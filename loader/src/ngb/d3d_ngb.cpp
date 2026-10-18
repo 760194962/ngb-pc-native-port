@@ -56,7 +56,22 @@ RS_SETTER(SetRenderState_StencilCullEnable, XRS_STENCILCULLENABLE)
 RS_SETTER(SetRenderState_RopZCmpAlwaysRead, XRS_ROPZCMPALWAYSREAD)
 RS_SETTER(SetRenderState_RopZRead, XRS_ROPZREAD)
 RS_SETTER(SetRenderState_DoNotCullUncompressed, XRS_DONOTCULLUNCOMPRESSED)
-RS_SETTER(SetRenderState_ZBias, XRS_ZBIAS)
+// D3DRS_ZBIAS as the library does it (D3DDevice_SetRenderState_ZBias, 0x3C5920): z becomes an NV2A polygon offset,
+// slope scale -z * 0.25 (constant at 0x4149C0) and -z depth units, with the point / wireframe / solid offset
+// enables set to z != 0; ZBIAS itself is only stored. The draw-time depth bias reads the polygon offset states.
+void __stdcall SetRenderState_ZBias(uint32_t Value)
+{
+    float f = -(float)Value, slope = f * 0.25f;
+    uint32_t on = Value != 0, fs, fo;
+    memcpy(&fs, &slope, 4);
+    memcpy(&fo, &f, 4);
+    D3DDevice_SetRenderStateNotInline(XRS_POLYGONOFFSETZSLOPESCALE, fs);
+    D3DDevice_SetRenderStateNotInline(XRS_POLYGONOFFSETZOFFSET, fo);
+    D3DDevice_SetRenderStateNotInline(XRS_POINTOFFSETENABLE, on);
+    D3DDevice_SetRenderStateNotInline(XRS_WIREFRAMEOFFSETENABLE, on);
+    D3DDevice_SetRenderStateNotInline(XRS_SOLIDOFFSETENABLE, on);
+    D3DDevice_SetRenderStateNotInline(XRS_ZBIAS, Value);
+}
 RS_SETTER(SetRenderState_MultiSampleMode, XRS_MULTISAMPLEMODE)
 RS_SETTER(SetRenderState_MultiSampleRenderTargetMode, XRS_MULTISAMPLERENDERTARGETMODE)
 RS_SETTER(SetRenderState_MultiSampleAntiAlias, XRS_MULTISAMPLEANTIALIAS)

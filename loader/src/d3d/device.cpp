@@ -848,6 +848,12 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
         // +0x1A14, which is the back buffer on the Xbox; the HLE had put the depth buffer there. With +0x1A14 fixed the
         // header is a colour one and no longer comes here. Combiner programs (the shadow receivers) keep the raw depth.
         bool ffp = !g_st.pixel_shader;
+        if (depth_format && ffp) { // no longer expected (r170/r171/r183 traces: none); note it if a scene does
+            static int noted;
+            if (noted++ < 4)
+                logf("[d3d] frame %u: a fixed-function draw samples a depth-format texture (fmt 0x%x): cfg:zmode %d applies",
+                     g_frame_count.load(), fmt, g_cfg.zmode);
+        }
         if (depth_format && ffp && g_cfg.zmode == 1) mode = kDepthViewBytes;
         if (depth_format && ffp && g_cfg.zmode == 2) mode = shadow_func_code();
         if (depth_format && ffp && g_cfg.zmode == 3) {

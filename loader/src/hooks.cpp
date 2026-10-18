@@ -170,8 +170,10 @@ int probe_index(uint32_t addr)
 // sites are patched to ud2 (0F 0B, same length) and emulated here from QueryPerformanceCounter at 733.33 MHz.
 // The engine's timer measures its own frame work, which on the Xbox excludes the GPU; here every HLE draw runs
 // synchronously on the game thread, so the measured time sat at 78-99 against thresholds of 94 (shadow fade) and
-// 103.5 and the shadow flickered on and off (docs/04 §3.9). Until rendering is asynchronous, the engine's sites
-// see the counter divided by --tsc-divisor (4: the game's CPU share of a frame looks like the Xbox's).
+// 103.5 and the shadow flickered on and off (docs/04 §3.9); --tsc-divisor (the engine's sites see the counter
+// divided by N) was set to 4 for that. With the later speed-ups the true clock reads 42 (median) / 62 (99%) on the
+// Iris Xe in chapter 1, 0.17% of frames over 94, the shadow counter stays at -5 (r186), so the default is 1 again:
+// a frame that really runs late makes the engine drop detail as it would on the console (docs/04 §3.17).
 const uint32_t *g_rdtsc_sites;
 int g_rdtsc_site_count;
 uint32_t g_rdtsc_qpc_site;
