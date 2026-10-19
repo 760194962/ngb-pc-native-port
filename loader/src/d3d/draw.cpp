@@ -392,6 +392,19 @@ void apply_render_states(IDirect3DDevice9 *d)
     }
 }
 
+// Census (docs/07 #16, #17): each value the game gives a texture stage state that is passed on unconverted or not
+// emulated, once, with the stage's texture format and whether a pixel shader draws, to know what needs doing.
+void ts_census(const char *name, int s, uint32_t v)
+{
+    static std::vector<std::pair<const char *, uint32_t>> seen;
+    if (seen.size() >= 64 || std::find(seen.begin(), seen.end(), std::make_pair(name, v)) != seen.end()) return;
+    seen.push_back({name, v});
+    Resource *r = g_st.textures[s];
+    uint32_t fmt = r && resource_type(r) == RTYPE_TEXTURE ? (((PixelContainer *)r)->Format >> FMT_FORMAT_SHIFT) & 0xFF : 0;
+    logf("[draw] frame %u: stage %d %s = 0x%x (texture format 0x%x, %s)", g_frame_count.load(), s, name, v, fmt,
+         g_st.pixel_shader ? "pixel shader" : "fixed function");
+}
+
 template <typename F> void ts_on_change(int s, int t, F apply)
 {
     uint32_t v = texture_state(s)[t];
@@ -466,7 +479,12 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
         // Texture coordinate source and transform belong to the vertex pipeline: they apply to pixel-shader draws with
         // fixed-function vertices too (the glow / blur chain), not only to fixed-function pixels.
         ts_on_change(s, 21, [&](uint32_t v) { set_ttff(d, s, v); });
-        ts_on_change(s, 28, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, v); });
+        ts_on_change(s, 28, [&](uint32_t v) {
+            if (v > 7) ts_census("TEXCOORDINDEX", s, v); // a generated coordinate: Xbox and D3D9 numbers differ above 0x30000
+            d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, v);
+        });
+        ts_on_change(s, 9, [&](uint32_t v) { if (v) ts_census("COLORKEYOP", s, v); });  // not emulated
+        ts_on_change(s, 10, [&](uint32_t v) { if (v) ts_census("COLORSIGN", s, v); });  // not emulated
         if (!fixed_function_pixels) continue;
         ts_on_change(s, 12, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_COLOROP, conv_texop(v)); });
         ts_on_change(s, 13, [&](uint32_t v) { d->SetTextureStageState(s, D3DTSS_COLORARG0, v); });
