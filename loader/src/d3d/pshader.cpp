@@ -141,9 +141,10 @@ IDirect3DPixelShader9 *ps_host_shader()
             Resource *r = g_st.textures[t];
             return r && resource_type(r) == RTYPE_TEXTURE ? (((PixelContainer *)r)->Format >> FMT_FORMAT_SHIFT) & 0xFF : 0u;
         };
+        int in = s == 1 ? 0 : s == 2 ? (def.PSInputTexture >> 16) & 1 : (int)((def.PSInputTexture >> 20) & 3) % 3;
         if (noted++ < 8)
             logf("[psh] frame %u: stage %d BUMPENVMAP%s reads stage %d (format 0x%x, COLORSIGN 0x%x), own format 0x%x, "
-                 "matrix %g %g %g %g", g_frame_count.load(), s, m == 7 ? "_LUM" : "", s - 1, fmt(s - 1), texture_state(s - 1)[10],
+                 "matrix %g %g %g %g", g_frame_count.load(), s, m == 7 ? "_LUM" : "", in, fmt(in), texture_state(in)[10],
                  fmt(s), *(const float *)&texture_state(s)[22], *(const float *)&texture_state(s)[23],
                  *(const float *)&texture_state(s)[24], *(const float *)&texture_state(s)[25]);
     }
