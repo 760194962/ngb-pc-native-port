@@ -415,6 +415,10 @@ std::string voice_str(const Voice &v)
 }
 
 // Every 2 s for the first minute (and then every 30 s): what the mixer is doing.
+// Before the limiter (docs/07 #13): the loudest sample and how many passed 0.8 (the knee) and 1.0 (full scale)
+float g_pre_peak;
+uint64_t g_pre_samples, g_pre_over_knee, g_pre_over_full;
+
 void mix_report(const float *out)
 {
     static uint64_t blocks;
@@ -434,9 +438,12 @@ void mix_report(const float *out)
         if (!s->paused && !s->queue.empty()) {
             if (!ns++ && first.empty()) first = "stream " + voice_str(*s);
         }
-    logf("[dsound] mixer: %u buffers, %u streams playing, peak %.3f, reverb send peak %.3f (bin %u)%s%s", nb, ns, peak, send_peak,
-         g_reverb_bin, first.empty() ? "" : "; e.g. ", first.c_str());
-    peak = send_peak = 0;
+    logf("[dsound] mixer: %u buffers, %u streams playing, peak %.3f (before the limiter %.3f; %.3f%% of samples over 0.8, "
+         "%.3f%% over 1), reverb send peak %.3f (bin %u)%s%s", nb, ns, peak, g_pre_peak,
+         g_pre_samples ? 100.0 * g_pre_over_knee / g_pre_samples : 0.0, g_pre_samples ? 100.0 * g_pre_over_full / g_pre_samples : 0.0,
+         send_peak, g_reverb_bin, first.empty() ? "" : "; e.g. ", first.c_str());
+    peak = send_peak = g_pre_peak = 0;
+    g_pre_samples = g_pre_over_knee = g_pre_over_full = 0;
 }
 
 void mix_block(float *out, std::vector<Completion> &done)
@@ -462,12 +469,17 @@ void mix_block(float *out, std::vector<Completion> &done)
         if (applied != g_cfg.reverb_gain) reverb::set_gain(applied = g_cfg.reverb_gain);
         reverb::process(g_send, out, audio_out::BLOCK);
     }
-    // soft knee above 0.8 instead of hard clipping (the MCPX/DSP stages that set final levels are not emulated)
+    // Saturate at full scale, as the APU's DSP output does (its fixed-point moves limit); levels below pass unchanged.
+    // This was a soft knee above 0.8, which also bent levels the Xbox plays as they are; in chapter 1 0.002% of the
+    // samples pass 0.8 and none pass 1 (r237, docs/07 #13). The mixer log keeps the counts.
     for (uint32_t i = 0; i < audio_out::BLOCK * 2; i++) {
         float x = out[i], a = fabsf(x);
-        if (a > 0.8f) x = copysignf(0.8f + 0.2f * tanhf((a - 0.8f) / 0.2f), x);
-        out[i] = x;
+        g_pre_peak = std::max(g_pre_peak, a);
+        g_pre_over_knee += a > 0.8f;
+        g_pre_over_full += a > 1.0f;
+        out[i] = a > 1.0f ? copysignf(1.0f, x) : x;
     }
+    g_pre_samples += audio_out::BLOCK * 2;
     mix_report(out);
 }
 
