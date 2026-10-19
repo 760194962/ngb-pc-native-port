@@ -7,6 +7,9 @@
 namespace xd3d {
 
 extern uint8_t *g_dev;        // Xbox device object
+// The screen-space offset the library starts with and adds to SetScreenSpaceOffset (Ninja Gaiden Black: 0.53125,
+// CreateDevice 0x3CD008 / SetScreenSpaceOffset 0x3C82F0; BLACK's library is not checked: 0)
+float screen_offset_base();
 extern uint32_t *g_push_base; // push buffer start
 extern uint32_t g_push_dwords;
 extern int g_width, g_height; // back buffer size

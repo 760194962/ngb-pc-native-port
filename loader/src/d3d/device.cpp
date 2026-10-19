@@ -1065,6 +1065,8 @@ HRESULT __stdcall Direct3D_CreateDevice(uint32_t Adapter, uint32_t DeviceType, u
     if (!g_layout.device_object) g_layout.device_object = (uint32_t)(uintptr_t)s_device;
     g_dev = (uint8_t *)(uintptr_t)g_layout.device_object;
     memset(g_dev, 0, DEVICE_SIZE);
+    dev_field<float>(DEV_SCREENOFFSET_X) = screen_offset_base(); // the library's CreateDevice (0x3CD008)
+    dev_field<float>(DEV_SCREENOFFSET_Y) = screen_offset_base();
     g_push_base = (uint32_t *)VirtualAlloc(nullptr, PUSH_BYTES, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     g_push_dwords = PUSH_BYTES / 4;
     dev_field<uint32_t *>(DEV_PUT) = g_push_base;
@@ -2088,11 +2090,13 @@ void __stdcall D3DDevice_GetViewportOffsetAndScale(float *pOffset, float *pScale
     viewport_transform(pScale, pOffset);
 }
 
+float screen_offset_base() { return g_cfg.profile && g_cfg.profile->black ? 0.0f : 0.53125f; }
+
 void __stdcall D3DDevice_SetScreenSpaceOffset(float x, float y)
 {
     DTRACE("%f, %f", x, y);
-    dev_field<float>(DEV_SCREENOFFSET_X) = x;
-    dev_field<float>(DEV_SCREENOFFSET_Y) = y;
+    dev_field<float>(DEV_SCREENOFFSET_X) = x + screen_offset_base(); // as the library stores it (0x3C82F0)
+    dev_field<float>(DEV_SCREENOFFSET_Y) = y + screen_offset_base();
     update_viewport_constants();
 }
 

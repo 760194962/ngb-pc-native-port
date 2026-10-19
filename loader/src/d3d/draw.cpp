@@ -1540,15 +1540,35 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
     auto *src = (const uint8_t *)data;
     float sx = target_scale_x(), sy = target_scale_y();
     if (ctx.path != Path::Fvf || (ctx.fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW || !src) return src;
+    if (g_dev) {
+        // Census (docs/07 #10): the screen-space offset the library's pass-through program adds to these positions
+        // (0x3C8F10: device +0xEF8/+0xEFC; 0.53125 by default, the game sets 0.03125 around some passes, 0x314430)
+        static std::vector<std::pair<uint32_t, uint32_t>> seen;
+        uint32_t ox = *(uint32_t *)(g_dev + 0xEF8), oy = *(uint32_t *)(g_dev + 0xEFC);
+        if (seen.size() < 16 && std::find(seen.begin(), seen.end(), std::make_pair(ox, oy)) == seen.end()) {
+            seen.push_back({ox, oy});
+            logf("[draw] frame %u: XYZRHW draw with screen-space offset %g, %g (fvf 0x%x) from %s", g_frame_count.load(),
+                 as_float(ox), as_float(oy), ctx.fvf, game_callers((const uint32_t *)_AddressOfReturnAddress()).c_str());
+        }
+    }
     RhwTexScale ts[4];
     int nts = rhw_tex_scales(ctx.fvf, ts);
-    if (sx == 1 && sy == 1 && !nts) return src;
+    // The library's pass-through program adds the screen-space offset to these positions (0x3C8F10). Drawn as host
+    // pre-transformed vertices they already land as at the default offset; a pass that moves it moves them by the
+    // difference: Ninja Gaiden Black sets 0.03125 for its texture copies (0x314430), half a pixel up and left, so
+    // that its bilinear reads fall between four texels (docs/07 #10).
+    float dx = 0, dy = 0;
+    if (g_dev) {
+        dx = (*(const float *)(g_dev + 0xEF8) - screen_offset_base()) * sx;
+        dy = (*(const float *)(g_dev + 0xEFC) - screen_offset_base()) * sy;
+    }
+    if (sx == 1 && sy == 1 && !nts && dx == 0 && dy == 0) return src;
     perf::Scope perf_scope(perf::kConvert);
     g_rhw.assign(src + (size_t)first * stride, src + (size_t)(first + count) * stride);
     for (uint32_t v = 0; v < count; v++) {
         float *p = (float *)&g_rhw[(size_t)v * stride];
-        p[0] *= sx;
-        p[1] *= sy;
+        p[0] = p[0] * sx + dx;
+        p[1] = p[1] * sy + dy;
     }
     apply_rhw_tex_scales(g_rhw.data(), count, stride, ts, nts);
     return g_rhw.data() - (size_t)first * stride;
