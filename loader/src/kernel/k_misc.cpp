@@ -124,7 +124,8 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
     case 0x00A: dword = 0; break;                  // XC_P_CONTROL_GAMES: no limit
     case 0x00B: dword = 0; break;                  // XC_P_CONTROL_PASSWORD
     case 0x00C: dword = 0; break;                  // XC_P_CONTROL_MOVIES
-    case 0x011: dword = 0; break;                  // XC_MISC
+    case 0x011: dword = 0; break;                  // XC_MISC: auto power-off off. XAPI 0x32F752 keeps bit 0,
+                                                   // its 6-hour timer DPC 0x32F740 shuts down only if set
     case 0x012: dword = 1; break;                  // XC_DVD_REGION
     case 0x103: dword = 0x00400100; break;         // XC_FACTORY_AV_REGION: NTSC-M, 60 Hz
     case 0x104: dword = 1; break;                  // XC_FACTORY_GAME_REGION: North America
