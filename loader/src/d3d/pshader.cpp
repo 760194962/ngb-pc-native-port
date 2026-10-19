@@ -68,26 +68,43 @@ void log_def(const PixelShaderDef &d)
 
 } // namespace
 
+const PixelShaderDef *ps_def(uint32_t handle); // d3d/device.cpp
+
 IDirect3DPixelShader9 *ps_host_shader()
 {
     const uint32_t *rs = render_state();
     PixelShaderDef def = {};
     memcpy(&def, rs, 57 * 4);
     def.PSTextureModes = rs[XRS_PSTEXTUREMODES];
-    // A stage with no texture bound runs as NONE (its register reads 0), as the library programs it: SetTexture(NULL)
-    // marks the stage 0x80000000 (0x3C7A24) and FUN_003D0940 then writes mode 0 for it, except the modes that read no
-    // texture (PASSTHRU 4, CLIPPLANE 5, DOT_ZW 0xA, DOTPRODUCT 0x11). docs/07 #4.
-    for (int s = 0; s < 4; s++) {
-        uint32_t m = (def.PSTextureModes >> (5 * s)) & 0x1F;
-        if (!g_st.textures[s] && m != 0 && m != 4 && m != 5 && m != 0xA && m != 0x11) {
-            def.PSTextureModes &= ~(0x1Fu << (5 * s));
-            static int noted;
-            if (noted++ < 4) logf("[psh] frame %u: stage %d asks for texture mode %u with no texture bound: NONE, as the library does",
-                                  g_frame_count.load(), s, m);
-        }
-    }
     uint32_t cube = cube_mask();
     uint32_t depth = depth_mask();
+    // The library fits the modes to the bound textures only for a shader with PS_GLOBALFLAGS_TEXMODE_ADJUST
+    // (PSFinalCombinerConstants bit 8): SetPixelShader keeps that bit at device+0x78C (0x3C93AC) and FUN_003D0940,
+    // which writes NV097_SET_SHADER_STAGE_PROGRAM, uses PSTextureModes as it is when the bit is clear (0x3D0AA1).
+    // With it, per stage: no texture bound (SetTexture(NULL) marks the stage 0x80000000, 0x3C7A24) -> NONE, except
+    // PASSTHRU 4, CLIPPLANE 5, DOT_ZW 0xA, DOTPRODUCT 0x11; PROJECT2D / PROJECT3D / CUBEMAP -> CUBEMAP for a cube
+    // map, PROJECT3D for a depth format or a volume, else PROJECT2D; DOT_STR_3D / DOT_STR_CUBE -> CUBE for a cube
+    // map, else 3D (0x3D0AC0-0x3D0B29). docs/07 #4, #5.
+    const PixelShaderDef *src = ps_def(g_st.pixel_shader);
+    bool adjust = src && (src->PSFinalCombinerConstants & 0x100);
+    for (int s = 0; adjust && s < 4; s++) {
+        uint32_t m = (def.PSTextureModes >> (5 * s)) & 0x1F, to = m;
+        Resource *r = g_st.textures[s];
+        if (!r) {
+            if (m != 4 && m != 5 && m != 0xA && m != 0x11) to = 0;
+        } else if (m >= 1 && m <= 3) {
+            uint32_t fmt = resource_type(r) == RTYPE_TEXTURE ? ((PixelContainer *)r)->Format : 0;
+            to = (cube >> s) & 1 ? 3 : ((depth >> s) & 1) || ((fmt >> FMT_DIMENSION_SHIFT) & 0xF) == 3 ? 2 : 1;
+        } else if (m == 0xD || m == 0xE) {
+            to = (cube >> s) & 1 ? 0xE : 0xD;
+        }
+        if (to != m) {
+            def.PSTextureModes = (def.PSTextureModes & ~(0x1Fu << (5 * s))) | to << (5 * s);
+            static int noted;
+            if (noted++ < 8) logf("[psh] frame %u: stage %d texture mode %u -> %u for the bound texture (%s), as the library adjusts",
+                                  g_frame_count.load(), s, m, to, r ? "texture" : "none");
+        }
+    }
     uint32_t shadow = depth ? (uint32_t)shadow_func_code() : 0;
     uint32_t kill = 0; // D3DTSS_ALPHAKILL per stage (texture_state 11)
     for (int s = 0; s < 4; s++)
@@ -132,7 +149,9 @@ IDirect3DPixelShader9 *ps_host_shader()
         logf("[psh] CreatePixelShader failed");
         ps = nullptr;
     } else if (logged++ < 40) {
-        logf("[psh] pixel shader #%zu translated (cube mask 0x%x, depth mask 0x%x, shadow func %u)", g_cache.size() + 1, cube, depth, shadow);
+        logf("[psh] pixel shader #%zu translated (cube mask 0x%x, depth mask 0x%x, shadow func %u, texmodes 0x%x -> 0x%x, %s)",
+             g_cache.size() + 1, cube, depth, shadow, rs[XRS_PSTEXTUREMODES], def.PSTextureModes,
+             adjust ? "TEXMODE_ADJUST" : "modes as given");
         log_def(def);
     }
     if (code) code->Release();
