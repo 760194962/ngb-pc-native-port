@@ -2,6 +2,7 @@
 #include "d3d/host.h"
 
 #include "settings.h"
+#include "hooks.h"
 #include "perf.h"
 
 #include <shellapi.h>
@@ -159,6 +160,10 @@ void perf_report(HWND hwnd)
 LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
+    case WM_POWERBROADCAST: // sleep: the Xbox never sleeps, so the game's clock skips the time asleep (hooks.cpp)
+        if (wp == PBT_APMSUSPEND) tsc_host_sleep(false);
+        if (wp == PBT_APMRESUMEAUTOMATIC) tsc_host_sleep(true);
+        break;
     case WM_CLOSE:
         g_closed = true;
         settings_save();

@@ -179,6 +179,32 @@ int g_rdtsc_site_count;
 uint32_t g_rdtsc_qpc_site;
 LARGE_INTEGER g_tsc_base, g_tsc_freq;
 std::atomic<uint32_t> g_rdtsc_hits{0};
+// Host counts the PC spent asleep, left out of the Xbox clock: the Xbox never sleeps with a game running, so to
+// the game that time does not exist. Without this the first frame after waking measured the whole sleep (docs/07
+// #14). Moving or resizing the window and the lock screen do not stop the game thread (the window has its own
+// thread; a lost device only skips drawing), so only sleep is taken out.
+std::atomic<int64_t> g_tsc_slept{0};
+LARGE_INTEGER g_sleep_at;
+
+} // namespace
+
+void tsc_host_sleep(bool resume)
+{
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    if (!resume) {
+        g_sleep_at = t;
+        logf("timing: the PC is going to sleep; the time asleep is left out of the game's clock");
+        return;
+    }
+    if (!g_sleep_at.QuadPart || !g_tsc_freq.QuadPart) return;
+    int64_t slept = t.QuadPart - g_sleep_at.QuadPart;
+    g_sleep_at.QuadPart = 0;
+    g_tsc_slept += slept;
+    logf("timing: the PC woke after %.1f s; the game's clock skips it", (double)slept / g_tsc_freq.QuadPart);
+}
+
+namespace {
 
 bool rdtsc_site(uint32_t eip)
 {
@@ -191,7 +217,8 @@ uint64_t xbox_tsc()
 {
     LARGE_INTEGER t;
     QueryPerformanceCounter(&t);
-    uint64_t d = (uint64_t)(t.QuadPart - g_tsc_base.QuadPart), f = (uint64_t)g_tsc_freq.QuadPart;
+    uint64_t d = (uint64_t)(t.QuadPart - g_tsc_base.QuadPart - g_tsc_slept.load(std::memory_order_relaxed)),
+             f = (uint64_t)g_tsc_freq.QuadPart;
     return (d / f) * 733333333ull + ((d % f) * 733333333ull) / f;
 }
 

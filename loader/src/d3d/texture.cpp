@@ -386,7 +386,10 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
     stat_frame = frame;
     bool skip = e.checked_frame == frame ||
                 (!g_cfg.tex_every_frame && e.stable >= kStableChecks && !periodic_due &&
-                 !(e.tex && written_since(pc->Data, total_bytes(pc), e.hashed_frame)));
+                 !(e.tex && written_since(pc->Data, total_bytes(pc), e.hashed_frame)) &&
+                 // a P8 texture also changes when its palette is rewritten in place: the NV2A reads the palette from
+                 // memory at every draw (docs/07 #15). The hash below covers the palette's 1024 bytes.
+                 !(e.tex && pal && fmt_of(pc) == XFMT_P8 && written_since(pal->Data, 1024, e.hashed_frame)));
     // The palette matters for P8 textures only (as in the staleness test below, which is also the only place that
     // records it): comparing it for every format sent each non-P8 texture created under another palette through the
     // full hash on every bind, ~350 hashes a frame in chapter 1 (r120).
