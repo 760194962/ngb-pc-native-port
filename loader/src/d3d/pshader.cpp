@@ -127,6 +127,10 @@ IDirect3DPixelShader9 *ps_host_shader()
         return last_ps = it->second;
     }
 
+    for (int s = 0; s < 4; s++)
+        if (((def.PSTextureModes >> (5 * s)) & 0x1F) == 5) // not seen in this game yet: note where it comes
+            logf("[psh] frame %u: new shader with CLIPPLANE on stage %d, compare mode 0x%x (docs/07 #17)", g_frame_count.load(), s,
+                 (def.PSCompareMode >> (4 * s)) & 0xF);
     std::string hlsl = psh_to_hlsl(def, cube, depth, shadow, kill);
     perf::Scope perf_scope(perf::kCompile);
     perf::add_compile();

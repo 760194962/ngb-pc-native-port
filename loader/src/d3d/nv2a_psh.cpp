@@ -152,10 +152,13 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
             s += b;
             break;
         case 5: { // CLIPPLANE: kill the pixel when a coordinate fails the compare
+            // PSCompareMode bit clear keeps the pixel where the coordinate is >= 0, bit set where it is < 0 (a zero
+            // coordinate is killed). The reverse, inherited from black-pc, cut Genma Onimusha's character shadows;
+            // genma-pc v0.2.6 reversed it and they came back (its CHANGELOG; docs/07 #17).
             uint32_t cmp = (d.PSCompareMode >> (4 * i)) & 0xF;
             for (int c = 0; c < 4; c++) {
                 const char comp = "xyzw"[c];
-                snprintf(b, sizeof b, "  clip(%stc[%d].%c);\n", (cmp >> c) & 1 ? "" : "-", i, comp);
+                snprintf(b, sizeof b, "  clip(tc[%d].%c %s 0 ? 1 : -1);\n", i, comp, (cmp >> c) & 1 ? "<" : ">=");
                 s += b;
             }
             break;
