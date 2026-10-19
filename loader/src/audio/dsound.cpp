@@ -317,15 +317,19 @@ Vec3 sub(Vec3 a, Vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 float dot(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 Vec3 cross(Vec3 a, Vec3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
 
-// m[source channel][output L/R]; send[source channel] = level into the I3DL2 reverb (mix bin 11, FXSEND_0:
-// the DSP image's effect 16 reads it and writes the four corner speakers)
+// The mix bin the DSP image's I3DL2 reverb reads, found in the image the game downloads (reverb_bin_from_image):
+// BLACK's BkXboxFx.bin feeds bin 11 (FXSEND_0) to its effect 16; Ninja Gaiden Black's dsstdfx.bin (the XDK's
+// standard image) feeds bin 10 (I3DL2) to its effect 4. 11 until an image is downloaded.
+uint32_t g_reverb_bin = 11;
+
+// m[source channel][output L/R]; send[source channel] = level into the I3DL2 reverb (mix bin g_reverb_bin)
 void voice_gains(const Voice &v, float m[2][2], float send[2])
 {
     float amp = db_to_amp(v.volume);
     m[0][0] = m[0][1] = m[1][0] = m[1][1] = 0.0f;
     send[0] = send[1] = 0.0f;
     for (uint32_t k = 0; k < v.nbins; k++)
-        if (v.bins[k].dwMixBin == 11) {
+        if (v.bins[k].dwMixBin == g_reverb_bin) {
             float a = amp * db_to_amp(v.bins[k].lVolume) * (channels(v.fmt) > 1 ? 0.5f : 1.0f);
             send[0] = send[1] = a;
         }
@@ -414,8 +418,9 @@ std::string voice_str(const Voice &v)
 void mix_report(const float *out)
 {
     static uint64_t blocks;
-    static float peak;
+    static float peak, send_peak;
     for (uint32_t i = 0; i < audio_out::BLOCK * 2; i++) peak = std::max(peak, fabsf(out[i]));
+    for (uint32_t i = 0; i < audio_out::BLOCK; i++) send_peak = std::max(send_peak, fabsf(g_send[i])); // reverb input
     uint64_t n = ++blocks;
     uint64_t every = n < 6000 ? 200 : 3000;
     if (n % every) return;
@@ -429,8 +434,9 @@ void mix_report(const float *out)
         if (!s->paused && !s->queue.empty()) {
             if (!ns++ && first.empty()) first = "stream " + voice_str(*s);
         }
-    logf("[dsound] mixer: %u buffers, %u streams playing, peak %.3f%s%s", nb, ns, peak, first.empty() ? "" : "; e.g. ", first.c_str());
-    peak = 0;
+    logf("[dsound] mixer: %u buffers, %u streams playing, peak %.3f, reverb send peak %.3f (bin %u)%s%s", nb, ns, peak, send_peak,
+         g_reverb_bin, first.empty() ? "" : "; e.g. ", first.c_str());
+    peak = send_peak = 0;
 }
 
 void mix_block(float *out, std::vector<Completion> &done)
@@ -705,11 +711,44 @@ HRESULT __stdcall IDirectSound_GetSpeakerConfig(Object *pThis, uint32_t *pdw)
     return S_OK;
 }
 
+// Which mix bin the image's reverb reads. Layout (the library's loader, NOTES.md "Sound effects image"): header
+// at 0x800 (+4 code words, +0xC another word count), descriptor at 0x818 + (w[0x80C] + w[0x804]) * 4: effect count,
+// scratch size, then per effect {code, size, state, size, Y, size, scratch, size}; a state (file offset) starts
+// {scratch offset, scratch length, Y offset, Y length, I/O count, input addresses..., outputs...} with mix bin n's
+// input at 0x1400 + 0x20 * n. The reverb is the effect with the largest scratch (its delay lines).
+int reverb_bin_from_image(const uint8_t *img, uint32_t size)
+{
+    auto w = [&](uint32_t o, uint32_t &v) {
+        if (o + 4 > size) return false;
+        memcpy(&v, img + o, 4);
+        return true;
+    };
+    uint32_t code, other, count;
+    if (!img || !w(0x804, code) || !w(0x80C, other)) return -1;
+    uint32_t desc = 0x818 + (other + code) * 4;
+    if (!w(desc, count) || count > 64) return -1;
+    uint32_t best_len = 0;
+    int bin = -1;
+    for (uint32_t e = 0; e < count; e++) {
+        uint32_t st, len, in;
+        if (!w(desc + 8 + 32 * e + 8, st) || !w(st + 4, len) || !w(st + 20, in)) return -1;
+        if (len > best_len && in >= 0x1400 && in < 0x1800 && (in - 0x1400) % 0x20 == 0) {
+            best_len = len;
+            bin = (int)((in - 0x1400) / 0x20);
+        }
+    }
+    return bin;
+}
+
 // The DSP effects image the game downloads. The descriptor it gets back is read for effect state
 // pointers, so hand out a zeroed descriptor whose maps all point at scratch memory.
 HRESULT __stdcall IDirectSound_DownloadEffectsImage(Object *pThis, void *pvImage, uint32_t size, void *pImageLoc, void **ppDesc)
 {
     STRACE("%p, %p, %u, %p, %p", pThis, pvImage, size, pImageLoc, ppDesc);
+    int bin = reverb_bin_from_image((const uint8_t *)pvImage, size);
+    if (bin >= 0) g_reverb_bin = (uint32_t)bin;
+    logf("[dsound] effects image (%u bytes): the I3DL2 reverb reads mix bin %u%s", size, g_reverb_bin,
+         bin >= 0 ? "" : " (not found in the image: default)");
     static uint8_t *desc;
     if (!desc) {
         constexpr uint32_t maps = 32;
