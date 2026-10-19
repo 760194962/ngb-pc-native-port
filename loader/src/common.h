@@ -97,6 +97,9 @@ struct Config {
     float reverb_gain = 1.0f;  // --reverb-gain: overall reverb level
     bool background = false;   // --background (tests): window minimised without focus, audio muted
     bool trace_fog_ps = false; // --trace-fog-ps (diagnosis): trace the frame after the first fogged pixel-shader draw
+    uint32_t skip_caller = 0;  // press-file "cfg:skipcaller:HEX": drop draws with this game return address on the stack (diagnosis)
+    uint32_t skip_texmodes = 0; // press-file "cfg:skiptexmodes:HEX": drop pixel-shader draws with these PSTextureModes (diagnosis)
+    bool rhw_offset = true;    // press-file "cfg:rhwoffset:0": XYZRHW positions ignore the screen-space offset (comparison)
     bool zview8 = false;       // press-file "cfg:zview8:1": depth views back to A8R8G8B8 (8-bit depth) for comparison
     bool api_count = false;    // --api-count (diagnosis): Direct3D 9 calls by kind per frame (d3d/apicount.cpp)
     std::wstring wav_path;     // --wav: record the mixer output (16-bit stereo 48 kHz)

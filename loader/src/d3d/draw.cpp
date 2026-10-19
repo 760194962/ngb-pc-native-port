@@ -1271,6 +1271,12 @@ bool begin_draw(DrawCtx &ctx)
     IDirect3DDevice9 *d = host3d::dev();
     if (!d) return false;
     g_draw_serial++;
+    if (g_cfg.skip_texmodes && g_st.pixel_shader && render_state()[XRS_PSTEXTUREMODES] == g_cfg.skip_texmodes) return false;
+    if (g_cfg.skip_caller) { // diagnosis: which game routine draws something
+        const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress();
+        for (int i = 0; i < 160; i++)
+            if (sp[i] == g_cfg.skip_caller) return false;
+    }
     if (g_cfg.flash_watch) {
         uint32_t caller = 0; // the first game .text return address above us: which game routine submitted the draw
         const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress();
@@ -1553,14 +1559,17 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
     }
     RhwTexScale ts[4];
     int nts = rhw_tex_scales(ctx.fvf, ts);
-    // The library's pass-through program adds the screen-space offset to these positions (0x3C8F10). Drawn as host
-    // pre-transformed vertices they already land as at the default offset; a pass that moves it moves them by the
-    // difference: Ninja Gaiden Black sets 0.03125 for its texture copies (0x314430), half a pixel up and left, so
-    // that its bilinear reads fall between four texels (docs/07 #10).
+    // The library's pass-through program adds the screen-space offset to these positions (0x3C8F10), and the NV2A
+    // samples pixel n at n + 0.5: the Xbox pixel at x + offset, scaled to the host target, minus the host's half pixel
+    // (a Direct3D 9 pre-transformed vertex at n lies on pixel n's centre). Scaling x alone left the last host column and
+    // row of a scaled target unwritten (copies drawn -0.5 .. 255.5 at the default offset cover all 256 Xbox pixels, but
+    // only 4 x 255.5 + 0.5 of 1024 host ones); the chapter-2 water refraction reads its 256x256 screen copy up to the
+    // edge and showed those as black / white bands (r245). Ninja Gaiden Black also sets 0.03125 for its texture copies
+    // (0x314430). BLACK's library is not checked (offset base 0): scaled as before (docs/07 #10).
     float dx = 0, dy = 0;
-    if (g_dev) {
-        dx = (*(const float *)(g_dev + 0xEF8) - screen_offset_base()) * sx;
-        dy = (*(const float *)(g_dev + 0xEFC) - screen_offset_base()) * sy;
+    if (g_dev && g_cfg.rhw_offset && screen_offset_base() != 0.0f) {
+        dx = *(const float *)(g_dev + 0xEF8) * sx - 0.5f;
+        dy = *(const float *)(g_dev + 0xEFC) * sy - 0.5f;
     }
     if (sx == 1 && sy == 1 && !nts && dx == 0 && dy == 0) return src;
     perf::Scope perf_scope(perf::kConvert);
