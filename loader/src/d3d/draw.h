@@ -32,7 +32,8 @@ void forget_sent_shaders();
 // having sent is unknown again.
 void forget_sent_state();
 // Another path set the host's D3DTS_TEXTUREn: the stage texture-scale cache sends its matrix again (d3d/draw.cpp).
-void host_texture_transform_changed(int stage);
+void host_texture_transform_changed(int stage, const D3DMATRIX *m = nullptr);
+uint32_t texture_matrix_stale_count(); // since the last call (diagnosis, logged with --api-count)
 // Before a device Reset: the dynamic vertex / index ring buffers of the indexed draws (D3DPOOL_DEFAULT) go away.
 void release_draw_buffers();
 

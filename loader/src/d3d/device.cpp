@@ -377,7 +377,17 @@ IDirect3DTexture9 *depth_view(uint64_t key, const HostZ &z, uint32_t w, uint32_t
     IDirect3DPixelShader9 *&ps = depth_format ? g_zdepth_ps : g_zview_ps;
     if (!ps) ps = depth_format ? compile_ps(kZDepthPS, "zdepth") : compile_ps(kZViewPS, "zview");
     IDirect3DTexture9 *&view = (depth_format ? g_zdepths : g_zviews)[key];
-    if (!view) host3d::dev()->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &view, nullptr);
+    // a depth-format view keeps the depth in .r: R32F where the host allows (24-bit precision for the shadow compare);
+    // press-file "cfg:zview8:1" goes back to the 8-bit view for comparison
+    D3DFORMAT fmt = depth_format && !g_cfg.zview8 ? host3d::depth_view_format() : D3DFMT_A8R8G8B8;
+    if (view) {
+        D3DSURFACE_DESC desc;
+        if (SUCCEEDED(view->GetLevelDesc(0, &desc)) && desc.Format != fmt) {
+            view->Release();
+            view = nullptr;
+        }
+    }
+    if (!view) host3d::dev()->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &view, nullptr);
     if (!ps || !view) return nullptr;
     IDirect3DSurface9 *target = nullptr;
     view->GetSurfaceLevel(0, &target);
@@ -1521,6 +1531,8 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     check_render_size();
     perf::frame_end(host_w(g_width), host_h(g_height));
     apicount::frame(frames);
+    if (g_cfg.api_count && frames % 600 == 0) logf("[api] frame %u: %u draws found a stale texture matrix on the host", frames,
+                                                 texture_matrix_stale_count());
     dev_field<uint32_t>(DEV_SWAPCOUNT)++;
     g_swap_count++;
     if (frames % 60 == 0 || frames < 4)
@@ -1614,7 +1626,7 @@ int sync_transforms_from_device()
         if (memcmp(m, &g_st.transforms[i], sizeof(D3DMATRIX)) == 0) continue;
         g_st.transforms[i] = *m;
         host3d::dev()->SetTransform(kTransforms[i], m);
-        host_texture_transform_changed(i - 2); // TEXTURE0..3 are entries 2..5
+        host_texture_transform_changed(i - 2, m); // TEXTURE0..3 are entries 2..5
         changed |= 1 << i;
     }
     return changed;
@@ -1996,7 +2008,7 @@ void __stdcall D3DDevice_SetTransform(uint32_t State, const D3DMATRIX *pMatrix)
     g_st.transforms[State] = *pMatrix;
     memcpy(g_dev + DEV_TRANSFORMS + State * 0x40, pMatrix, 0x40);
     host3d::dev()->SetTransform(kTransforms[State], pMatrix);
-    host_texture_transform_changed((int)State - 2);
+    host_texture_transform_changed((int)State - 2, pMatrix);
 }
 
 void __stdcall D3DDevice_SetViewport(const Viewport *pViewport)

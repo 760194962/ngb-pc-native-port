@@ -22,6 +22,7 @@ HANDLE g_window_ready;
 std::atomic<bool> g_closed{false};
 IDirect3D9 *g_d3d;
 bool g_intz;
+D3DFORMAT g_depth_view_fmt = D3DFMT_A8R8G8B8;
 IDirect3DDevice9 *g_dev;
 bool g_in_scene;
 std::atomic<int> g_win_w, g_win_h; // client area, follows WM_SIZE
@@ -410,6 +411,13 @@ bool create_device()
     g_d3d->GetAdapterIdentifier(D3DADAPTER_DEFAULT, 0, &id);
     g_intz = SUCCEEDED(g_d3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DUSAGE_DEPTHSTENCIL,
                                                 D3DRTYPE_TEXTURE, FMT_INTZ));
+    // Depth views (d3d/device.cpp depth_view): R32F keeps the 24-bit depth the shadow compare needs, where an
+    // 8-bit channel quantised it (docs/07 #2). The view is sampled with the game's filter, so R32F must filter.
+    if (SUCCEEDED(g_d3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
+                                           D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_FILTER, D3DRTYPE_TEXTURE, D3DFMT_R32F)))
+        g_depth_view_fmt = D3DFMT_R32F;
+    logf("host: depth views %s", g_depth_view_fmt == D3DFMT_R32F ? "R32F (full depth precision)"
+                                                                  : "A8R8G8B8 (R32F render target with filtering not supported: 8-bit depth)");
     logf("host: Direct3D 9 device, back buffer %dx%d on '%s'; INTZ depth textures %s", g_bb_w, g_bb_h, id.Description,
          g_intz ? "supported" : "NOT supported (depth-buffer reads return zero)");
     return true;
@@ -417,6 +425,7 @@ bool create_device()
 
 IDirect3DDevice9 *dev() { return g_dev; }
 bool intz() { return g_intz; }
+D3DFORMAT depth_view_format() { return g_depth_view_fmt; }
 
 void begin_scene()
 {

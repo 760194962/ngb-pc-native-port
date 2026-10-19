@@ -214,6 +214,7 @@ DWORD g_point_sent[8];
 bool g_point_valid;
 D3DMATRIX g_texm_sent[4];
 bool g_texm_valid[4];
+uint32_t g_texm_stale; // draws that found another matrix on the host where the game's own applies
 DWORD g_ttff_sent[4];
 bool g_ttff_valid[4];
 
@@ -877,7 +878,14 @@ void apply_fvf_texture_scale(IDirect3DDevice9 *d, bool rhw)
             // Black keeps an identity TEXTURE0 transform set while it copies the back buffer (720x480 linear) into
             // its menu / dialog snapshot with texel coordinates 0..720 x 0..480; without the scale the whole quad
             // sampled the clamped edge, one flat colour (docs/04 §3.7).
-            if (!scaled) continue;
+            if (!scaled) {
+                // The game's matrix as it is: a previous draw may have left M * S or the texel scale on the host
+                // (docs/07 #1). Counted when the host held something else (--api-count log).
+                const D3DMATRIX &gm = g_st.transforms[2 + s];
+                if (g_texm_valid[s] && memcmp(&g_texm_sent[s], &gm, sizeof gm)) g_texm_stale++;
+                set_tex_transform(d, s, gm);
+                continue;
+            }
             D3DMATRIX m = g_st.transforms[2 + s];
             for (int r = 0; r < 4; r++) {
                 m.m[r][0] *= sx;
@@ -1208,9 +1216,22 @@ void forget_sent_shaders()
     g_fvf_sent = ~0u;
 }
 
-void host_texture_transform_changed(int stage)
+void host_texture_transform_changed(int stage, const D3DMATRIX *m)
 {
-    if (stage >= 0 && stage < 4) g_texm_valid[stage] = false;
+    if (stage < 0 || stage >= 4) return;
+    if (m) {
+        g_texm_sent[stage] = *m; // what the host holds now
+        g_texm_valid[stage] = true;
+    } else {
+        g_texm_valid[stage] = false;
+    }
+}
+
+uint32_t texture_matrix_stale_count()
+{
+    uint32_t n = g_texm_stale;
+    g_texm_stale = 0;
+    return n;
 }
 
 void forget_sent_state()
