@@ -3,6 +3,11 @@
 #include "kernel/nt.h"
 #include "xthread.h"
 
+#include <algorithm>
+#include <intrin.h>
+#include <mutex>
+#include <vector>
+
 namespace {
 
 constexpr uint32_t MIN_HOST_STACK = 1u << 20; // Xbox stacks are small; host code called from them needs more
@@ -111,6 +116,17 @@ int32_t __stdcall KeSetBasePriorityThread(void *Thread, int32_t Increment)
         return 0;
     }
     int32_t old = t->base_priority;
+    // which priorities the game asks for (docs/07 #7): each thread and value once
+    static std::mutex mu;
+    static std::vector<std::pair<XThread *, int32_t>> seen;
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        if (seen.size() < 64 && std::find(seen.begin(), seen.end(), std::make_pair(t, Increment)) == seen.end()) {
+            seen.push_back({t, Increment});
+            logf("[k] thread '%s' base priority %d -> %d (host %d), from %08x", t->name, old, Increment, host_priority(Increment),
+                 (uint32_t)(uintptr_t)_ReturnAddress());
+        }
+    }
     t->base_priority = Increment;
     if (t->host_handle) SetThreadPriority(t->host_handle, host_priority(Increment));
     return old;
