@@ -105,7 +105,9 @@ NTSTATUS ksync_wait_object(void *object, bool alertable, const LARGE_INTEGER *ti
             return wait_result(WaitForSingleObjectEx(t->host_handle, ktimeout_ms(timeout), alertable));
     }
     DWORD ms = ktimeout_ms(timeout);
-    ULONGLONG deadline = ms == INFINITE ? 0 : GetTickCount64() + ms;
+    // the deadline on a 1 ms clock: on GetTickCount64 (~15.6 ms steps) a 1-2 ms timeout ran until the next step.
+    // The game's and XAPI's own KeWaitForSingleObject calls all wait without a timeout (docs/07 #6).
+    uint64_t deadline = ms == INFINITE ? 0 : kclock_ms() + ms;
     bool notification = h->Type == XOBJ_EVENT_NOTIFICATION || h->Type == XOBJ_TIMER_NOTIFICATION;
     EnterCriticalSection(&g_disp);
     uint64_t gen0 = g_gen[object];
@@ -121,7 +123,7 @@ NTSTATUS ksync_wait_object(void *object, bool alertable, const LARGE_INTEGER *ti
         LeaveCriticalSection(&g_disp);
         DWORD wait_ms = INFINITE;
         if (ms != INFINITE) {
-            ULONGLONG now = GetTickCount64();
+            uint64_t now = kclock_ms();
             if (now >= deadline) return XSTATUS_TIMEOUT;
             wait_ms = (DWORD)(deadline - now);
         }
@@ -227,6 +229,47 @@ std::mutex g_wait_mu;
 std::vector<WaitStat> g_wait_stats;
 }
 
+// Diagnosis (docs/07 #6): waits with a finite timeout, by the timeout asked for (whole ms, 32 = longer): how many
+// timed out and how long they actually blocked. Logged every 30 s while some come.
+namespace {
+struct TimedWait { uint32_t n, timed_out, site; double ms, max_ms; };
+TimedWait g_timed[33];
+LARGE_INTEGER g_timed_since;
+}
+
+int64_t ktimeout_req_ms(const LARGE_INTEGER *timeout)
+{
+    int64_t t = timeout->QuadPart;
+    if (t < 0) return (-t + 9999) / 10000;
+    int64_t left = t - ktime_now_100ns();
+    return left <= 0 ? 0 : (left + 9999) / 10000;
+}
+
+void note_timed_wait(int64_t req_ms, double ms, bool timed_out, uint32_t site)
+{
+    LARGE_INTEGER now, f;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&f);
+    std::lock_guard<std::mutex> lk(g_wait_mu);
+    TimedWait &w = g_timed[req_ms < 0 ? 0 : req_ms > 32 ? 32 : req_ms];
+    if (!w.n) w.site = site;
+    w.n++;
+    w.timed_out += timed_out;
+    if (timed_out) {
+        w.ms += ms;
+        if (ms > w.max_ms) w.max_ms = ms;
+    }
+    if (!g_timed_since.QuadPart) g_timed_since = now;
+    if (now.QuadPart - g_timed_since.QuadPart < 30 * f.QuadPart) return;
+    g_timed_since = now;
+    for (int i = 0; i <= 32; i++)
+        if (g_timed[i].n)
+            logf("[k] timed waits asking %s%d ms: %u, %u timed out after %.2f ms on average (max %.2f), first from %08x",
+                 i == 32 ? ">=" : "", i, g_timed[i].n, g_timed[i].timed_out,
+                 g_timed[i].timed_out ? g_timed[i].ms / g_timed[i].timed_out : 0.0, g_timed[i].max_ms, g_timed[i].site);
+    memset(g_timed, 0, sizeof g_timed);
+}
+
 void ksync_dump_waits()
 {
     std::lock_guard<std::mutex> lk(g_wait_mu);
@@ -250,6 +293,7 @@ NTSTATUS __stdcall KeWaitForSingleObject(void *Object, uint32_t WaitReason, uint
     QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
     double ms = (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+    if (Timeout) note_timed_wait(ktimeout_req_ms(Timeout), ms, st == XSTATUS_TIMEOUT, (uint32_t)(uintptr_t)_ReturnAddress());
     if (ms > 0.5) {
         uint32_t site[3] = {};
         const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress();

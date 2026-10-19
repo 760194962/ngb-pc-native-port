@@ -192,6 +192,19 @@ inline int64_t ktime_now_100ns()
     return ((int64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
 }
 
+// Milliseconds from the performance counter: the Xbox clock interrupt is 1 ms, GetTickCount64 steps by ~15.6 ms.
+inline uint64_t kclock_ms()
+{
+    static LARGE_INTEGER f = [] {
+        LARGE_INTEGER v;
+        QueryPerformanceFrequency(&v);
+        return v;
+    }();
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    return (uint64_t)(t.QuadPart / f.QuadPart * 1000 + t.QuadPart % f.QuadPart * 1000 / f.QuadPart);
+}
+
 // Converts an NT timeout (negative = relative 100ns units, positive = absolute) to milliseconds.
 inline DWORD ktimeout_ms(const LARGE_INTEGER *timeout)
 {

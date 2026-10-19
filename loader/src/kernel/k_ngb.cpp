@@ -105,13 +105,15 @@ NTSTATUS __stdcall PhyInitialize(BOOLEAN ForceReset, void *Param2)
 }
 
 // KeTickCount: milliseconds since boot, read by XAPI timeouts and XNET. It must move (xboxrecomp's note on Halo's
-// DHCP loop); the DPC thread refreshes it whenever it wakes, and readers that spin see it advance.
+// DHCP loop); the DPC thread refreshes it whenever it wakes (at most 4 ms apart), and readers that spin see it advance.
+// Readers in Ninja Gaiden Black: XAPI GetTickCount (0x329B27; its game callers time 1 s and 10 s intervals, play
+// time and seeds) and XNET (10 sites); docs/07 #6. The Xbox adds 1 every 1 ms: counted from the performance counter.
 volatile uint32_t KeTickCount;
-static ULONGLONG g_tick_base;
+static uint64_t g_tick_base;
 
 void ktick_update()
 {
-    ULONGLONG now = GetTickCount64();
+    uint64_t now = kclock_ms();
     if (!g_tick_base) g_tick_base = now;
     KeTickCount = (uint32_t)(now - g_tick_base);
 }
