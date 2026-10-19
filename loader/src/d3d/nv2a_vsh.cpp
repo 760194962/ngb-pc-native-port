@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace xd3d {
 namespace {
@@ -202,8 +203,48 @@ const char *hlsl_out(uint8_t a)
 
 } // namespace
 
-std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_mask)
+uint32_t vsh_divided_tex_outputs(const uint32_t *program, uint32_t count, int8_t *inst_stage)
 {
+    int rcp_of[16]; // register whose .w holds 1 / (register rcp_of).w, or -1
+    for (int &r : rcp_of) r = -1;
+    uint32_t mask = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        VshInst in;
+        vsh_decode(program + i * 4, in);
+        if (inst_stage) inst_stage[i] = -1;
+        auto ident = [](const VshSrc &s) { return !s.neg && s.swz[0] == 0 && s.swz[1] == 1 && s.swz[2] == 2 && s.swz[3] == 3; };
+        bool wwww = !in.b.neg && in.b.swz[0] == 3 && in.b.swz[1] == 3 && in.b.swz[2] == 3 && in.b.swz[3] == 3;
+        if (in.mac == MAC_MUL && in.out_o_mask && in.out_orb && in.out_mux == 0 && in.out_address >= VSH_OT0 &&
+            in.out_address <= VSH_OT0 + 3 && (in.out_o_mask & 0xC) == 0xC && !(in.out_o_mask & 1) && in.a.mux == MUX_R &&
+            ident(in.a) && in.b.mux == MUX_R && wwww && in.b.reg < 16 && rcp_of[in.b.reg] == in.a.reg) {
+            mask |= 1u << (in.out_address - VSH_OT0);
+            if (inst_stage) inst_stage[i] = (int8_t)(in.out_address - VSH_OT0);
+        }
+        // writes of this instruction: forget divisors they overwrite or whose source they change
+        auto written = [&](int r) {
+            if (r < 0 || r >= 16) return;
+            rcp_of[r] = -1;
+            for (int &x : rcp_of)
+                if (x == r) x = -1;
+        };
+        if (in.mac != MAC_NOP && in.mac != MAC_ARL && in.out_mac_mask) written(in.out_r);
+        int ilu_r = in.mac != MAC_NOP ? 1 : in.out_r;
+        if (in.ilu != ILU_NOP && in.out_ilu_mask) {
+            written(ilu_r);
+            if (in.ilu == ILU_RCP && (in.out_ilu_mask & 1) && in.c.mux == MUX_R && !in.c.neg && in.c.swz[0] == 3 && in.c.reg < 16 &&
+                in.c.reg != ilu_r)
+                rcp_of[ilu_r] = in.c.reg;
+        }
+        if (in.final) break;
+    }
+    return mask;
+}
+
+std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_mask, uint32_t proj_stages)
+{
+    // Outputs the program divides by w itself and the pixel side divides instead (proj_stages): leave them undivided
+    std::vector<int8_t> divide_at(count, -1);
+    if (proj_stages) proj_stages &= vsh_divided_tex_outputs(program, count, divide_at.data());
     std::string s;
     s += "float4 c[192] : register(c0);\n"
          "float4 vpScale : register(c192);\n"
@@ -301,11 +342,19 @@ std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_
             std::string mk = hlsl_mask(in.out_ilu_mask);
             s += "    " + dst + "." + mk + " = L." + mk + ";\n";
         }
-        if (in.out_o_mask) {
+        if (in.out_o_mask && divide_at[i] >= 0 && (proj_stages >> divide_at[i] & 1)) {
+            // `mul oTn, S, 1/S.w`: hand on S itself, w included, for the pixel side to divide per pixel
+            s += "    oT" + std::to_string(divide_at[i]) + " = A;\n";
+        } else if (in.out_o_mask) {
             bool from_ilu = in.out_mux != 0;
             if ((from_ilu && in.ilu != ILU_NOP) || (!from_ilu && in.mac != MAC_NOP && in.mac != MAC_ARL)) {
-                std::string mk = hlsl_mask(in.out_o_mask);
-                if (in.out_orb) {
+                uint8_t om = in.out_o_mask;
+                if (in.out_orb && in.out_address >= VSH_OT0 && in.out_address <= VSH_OT0 + 3 &&
+                    (proj_stages >> (in.out_address - VSH_OT0) & 1))
+                    om &= ~1; // the w of an undivided output stays the divisor
+                std::string mk = hlsl_mask(om);
+                if (mk.empty()) {
+                } else if (in.out_orb) {
                     if (const char *o = hlsl_out(in.out_address)) {
                         s += std::string("    ") + o + "." + mk + " = " + (from_ilu ? "L." : "M.") + mk + ";\n";
                         if (!strcmp(o, "oFog")) writes_fog = true;

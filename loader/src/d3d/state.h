@@ -26,6 +26,10 @@ struct VertexShader {
     uint32_t program_type;        // 0x2078 normal, 0x6378 read/write, 0x7778 state
     IDirect3DVertexShader9 *host_vs; // translated program, or null (not translated yet)
     bool translate_failed;
+    bool divided_scanned;          // divided_tex is valid
+    uint32_t divided_tex;          // texture outputs the program divides by w itself (vsh_divided_tex_outputs)
+    IDirect3DVertexShader9 *host_vs_undivided; // translated with those outputs left undivided (host_vs_undivided_stages)
+    uint32_t host_vs_undivided_stages;
 };
 constexpr uint32_t VSH_MAGIC = 0x48535658;
 

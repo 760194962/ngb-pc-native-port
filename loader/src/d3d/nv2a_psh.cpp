@@ -82,7 +82,8 @@ std::string final_input(uint32_t b, bool rgb)
 
 } // namespace
 
-std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex_depth, uint32_t shadow_func, uint32_t tex_kill)
+std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex_depth, uint32_t shadow_func, uint32_t tex_kill,
+                        uint32_t bump_divide)
 {
     std::string s;
     char b[512];
@@ -166,8 +167,8 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
         case 6: case 7: // BUMPENVMAP (_LUM): offset the coordinates by the bump map
             snprintf(b, sizeof b,
                      "  { float2 du = %s.rg * 2 - 1; float2 o = float2(dot(du, bumpMat[%d].xz), dot(du, bumpMat[%d].yw));\n"
-                     "    t%d = tex2D(s2d%d, tc[%d].xy + o); }\n",
-                     tin.c_str(), i, i, i, i, i);
+                     "    t%d = tex2D(s2d%d, tc[%d].xy%s + o); }\n",
+                     tin.c_str(), i, i, i, i, i, (bump_divide >> i & 1) ? (" / tc[" + std::to_string(i) + "].w").c_str() : "");
             s += b;
             break;
         case 15: // DPNDNT_AR

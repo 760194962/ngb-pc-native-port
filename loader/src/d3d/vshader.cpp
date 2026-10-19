@@ -3,6 +3,8 @@
 #include "d3d/host.h"
 #include "perf.h"
 #include "d3d/nv2a_vsh.h"
+#include "d3d/state.h"
+#include "common.h"
 #include "kernel/kexports.h"
 
 #include <d3dcompiler.h>
@@ -117,6 +119,7 @@ void vs_delete(VertexShader *vs)
 {
     if (!vs) return;
     if (vs->host_vs) vs->host_vs->Release();
+    if (vs->host_vs_undivided) vs->host_vs_undivided->Release();
     if (vs->program) xk::ExFreePool(vs->program);
     vs->magic = 0;
     xk::ExFreePool(vs);
@@ -129,9 +132,49 @@ uint32_t vs_input_mask(const VertexShader *vs)
     return m;
 }
 
-IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs)
+// The water of chapter 2 computes its refraction coordinates as the vertex's own screen position (x/w, y/w) in the
+// vertex program and hands them on with w = 1. Where the water passes the camera a vertex lies behind it (w < 0) and
+// its coordinates are a mirrored projection; interpolated across the triangle they read far outside the screen copy
+// (r247: 0.13 .. 1.38 where 0.68 is right), a stretched band whenever the camera is at the water line. xemu shows the
+// same band (the user, 2026-10-19). The fix keeps the intent: hand on (x, y, z, w) and divide per pixel, which is
+// exact everywhere. Only for outputs the program divides itself and the pixel shader reads with BUMPENVMAP.
+uint32_t bump_divide_stages()
+{
+    if (!g_cfg.vs_divide_fix || !g_st.pixel_shader || vs_is_fvf(g_st.vertex_shader)) return 0;
+    VertexShader *vs = vs_from_handle(g_st.vertex_shader);
+    if (!vs || !vs->program) return 0;
+    if (!vs->divided_scanned) {
+        vs->divided_tex = vsh_divided_tex_outputs(vs->program, vs->program_insts);
+        vs->divided_scanned = true;
+    }
+    uint32_t modes = render_state()[XRS_PSTEXTUREMODES], r = 0;
+    for (int s = 1; s < 4; s++) {
+        uint32_t m = (modes >> (5 * s)) & 0x1F;
+        if ((vs->divided_tex >> s & 1) && (m == 6 || m == 7)) r |= 1u << s;
+    }
+    return r;
+}
+
+IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stages)
 {
     if (!vs || !vs->program) return nullptr;
+    if (undivided_stages) {
+        if (vs->host_vs_undivided && vs->host_vs_undivided_stages == undivided_stages) return vs->host_vs_undivided;
+        std::string hlsl = vsh_to_hlsl(vs->program, vs->program_insts, vs_input_mask(vs), undivided_stages);
+        ID3DBlob *code = nullptr, *errors = nullptr;
+        IDirect3DVertexShader9 *hv = nullptr;
+        if (SUCCEEDED(D3DCompile(hlsl.data(), hlsl.size(), "nv2a_vsh", nullptr, nullptr, "main", "vs_2_a",
+                                 D3DCOMPILE_OPTIMIZATION_LEVEL2, 0, &code, &errors)) &&
+            SUCCEEDED(host3d::dev()->CreateVertexShader((const DWORD *)code->GetBufferPointer(), &hv))) {
+            if (vs->host_vs_undivided) vs->host_vs_undivided->Release();
+            vs->host_vs_undivided = hv;
+            vs->host_vs_undivided_stages = undivided_stages;
+            logf("[vsh] shader %p: texture outputs 0x%x handed on undivided (divided per pixel)", vs, undivided_stages);
+        }
+        if (code) code->Release();
+        if (errors) errors->Release();
+        if (hv) return hv; // else fall back to the plain translation
+    }
     if (vs->host_vs || vs->translate_failed) return vs->host_vs;
     std::string hlsl = vsh_to_hlsl(vs->program, vs->program_insts, vs_input_mask(vs));
     perf::Scope perf_scope(perf::kCompile);

@@ -240,6 +240,8 @@ void read_press_file(uint32_t now_ms)
                     else if (k == "ring") g_cfg.draw_ring = v;
                     else if (k == "zview8") g_cfg.zview8 = v;
                     else if (k == "rhwoffset") g_cfg.rhw_offset = v;
+                    else if (k == "vsdivide") g_cfg.vs_divide_fix = v;
+                    else if (k == "dumpvs") g_cfg.dump_vs_texmodes = (uint32_t)strtoul(line.c_str() + c + 1, nullptr, 16);
                     else if (k == "skipcaller") g_cfg.skip_caller = (uint32_t)strtoul(line.c_str() + c + 1, nullptr, 16);
                     else if (k == "skiptexmodes") g_cfg.skip_texmodes = (uint32_t)strtoul(line.c_str() + c + 1, nullptr, 16);
                     else if (k == "visall") g_cfg.vis_all = v;

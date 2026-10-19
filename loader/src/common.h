@@ -97,6 +97,8 @@ struct Config {
     float reverb_gain = 1.0f;  // --reverb-gain: overall reverb level
     bool background = false;   // --background (tests): window minimised without focus, audio muted
     bool trace_fog_ps = false; // --trace-fog-ps (diagnosis): trace the frame after the first fogged pixel-shader draw
+    bool vs_divide_fix = true; // press-file "cfg:vsdivide:0": refraction coordinates divided per vertex, as the game does
+    uint32_t dump_vs_texmodes = 0; // press-file "cfg:dumpvs:HEX": in a traced frame, dump the vertex program inputs of pixel-shader draws with these texture modes
     uint32_t skip_caller = 0;  // press-file "cfg:skipcaller:HEX": drop draws with this game return address on the stack (diagnosis)
     uint32_t skip_texmodes = 0; // press-file "cfg:skiptexmodes:HEX": drop pixel-shader draws with these PSTextureModes (diagnosis)
     bool rhw_offset = true;    // press-file "cfg:rhwoffset:0": XYZRHW positions ignore the screen-space offset (comparison)

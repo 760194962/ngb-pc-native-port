@@ -5,6 +5,7 @@
 #include "perf.h"
 #include "d3d/nv2a_psh.h"
 #include "d3d/state.h"
+#include "d3d/vshader.h"
 
 #include <d3dcompiler.h>
 
@@ -115,7 +116,9 @@ IDirect3DPixelShader9 *ps_host_shader()
     for (uint32_t i = 0; i < 57; i++)
         if (!(i >= 10 && i <= 25) && i != 43 && i != 44) key[n++] = rs[i];
     key[n++] = def.PSTextureModes;
+    uint32_t bump_div = bump_divide_stages();
     key[n++] = cube | depth << 8 | shadow << 16 | kill << 24;
+    key[n++] = bump_div;
     static uint32_t last_key[48], last_n;
     static IDirect3DPixelShader9 *last_ps;
     if (n == last_n && !memcmp(key, last_key, n * 4)) return last_ps; // most draws keep the previous shader
@@ -148,7 +151,7 @@ IDirect3DPixelShader9 *ps_host_shader()
                  fmt(s), *(const float *)&texture_state(s)[22], *(const float *)&texture_state(s)[23],
                  *(const float *)&texture_state(s)[24], *(const float *)&texture_state(s)[25]);
     }
-    std::string hlsl = psh_to_hlsl(def, cube, depth, shadow, kill);
+    std::string hlsl = psh_to_hlsl(def, cube, depth, shadow, kill, bump_div);
     perf::Scope perf_scope(perf::kCompile);
     perf::add_compile();
     ID3DBlob *code = nullptr, *errors = nullptr;

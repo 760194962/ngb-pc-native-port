@@ -31,6 +31,11 @@ enum : uint8_t { VSH_OPOS = 0, VSH_OD0 = 3, VSH_OD1 = 4, VSH_OFOG = 5, VSH_OPTS 
 
 // HLSL source for vs_2_0 (constants c0-c191 = Xbox c-96..c95, c192/c193 = viewport scale/offset used
 // to undo the screen-space position transform, inputs v0-v15 as TEXCOORD0-15).
-std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_mask);
+// proj_stages: texture outputs to leave undivided (see vsh_divided_tex_outputs).
+std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_mask, uint32_t proj_stages = 0);
+
+// Texture outputs oTn the program divides by w itself: `rcp X.w, S.w` then `mul oTn.xy[z], S, X.w` (S unchanged in
+// between), with oTn.w set to 1 afterwards. Bit n per stage; inst_stage[i] = the stage of instruction i's divide, -1.
+uint32_t vsh_divided_tex_outputs(const uint32_t *program, uint32_t count, int8_t *inst_stage = nullptr);
 
 } // namespace xd3d

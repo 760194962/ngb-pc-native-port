@@ -1330,7 +1330,7 @@ bool begin_draw(DrawCtx &ctx)
             ctx.fvf = h;
         }
     } else if (VertexShader *vs = vs_from_handle(h)) {
-        if (IDirect3DVertexShader9 *hv = vs_host_shader(vs)) {
+        if (IDirect3DVertexShader9 *hv = vs_host_shader(vs, bump_divide_stages())) {
             set_vs(d, hv);
             upload_vs_constants(d);
             ctx.path = Path::Prog;
@@ -1752,6 +1752,23 @@ void __stdcall D3DDevice_DrawIndexedVertices(uint32_t PrimitiveType, uint32_t Ve
         }
         uint32_t stride = convert_vertices(ctx.vs, mn, mx - mn + 1, nullptr, 0);
         debug_draw("DrawIndexedVertices", ctx, PrimitiveType, VertexCount, g_conv.data(), stride / 4);
+        if (debug_frame_active() && g_cfg.dump_vs_texmodes && g_st.pixel_shader &&
+            render_state()[XRS_PSTEXTUREMODES] == g_cfg.dump_vs_texmodes && !g_cfg.screenshot_dir.empty()) {
+            // diagnosis (cfg:dumpvs:MODES): the draw's vertex program inputs to replay it on the CPU: header, the 192
+            // constants, the indices, the converted vertices [mn, mx]
+            static int n;
+            wchar_t name[64];
+            swprintf(name, 64, L"\\vsdump_%u_%d.bin", g_frame_count.load(), n++);
+            if (FILE *f = _wfopen((g_cfg.screenshot_dir + name).c_str(), L"wb")) {
+                uint32_t hdr[6] = {0x31535644, PrimitiveType, VertexCount, mn, mx, stride};
+                fwrite(hdr, 4, 6, f);
+                fwrite(g_st.vs_constants, 4, 192 * 4, f);
+                fwrite(pIndexData, 2, VertexCount, f);
+                fwrite(g_conv.data(), 1, (size_t)(mx - mn + 1) * stride, f);
+                fclose(f);
+                logf("[draw]   vertex program inputs dumped (%u indices, vertices %u-%u, stride %u)", VertexCount, mn, mx, stride);
+            }
+        }
         if (debug_frame_active() && !g_cfg.debug_frame_end) // single debug frames only (ranges stay fast)
             dump_packed_normal_geometry(ctx.vs, PrimitiveType, VertexCount, pIndexData, mn, mx);
         set_decl(host3d::dev(), decl_for(ctx.vs));
