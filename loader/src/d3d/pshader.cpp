@@ -74,6 +74,18 @@ IDirect3DPixelShader9 *ps_host_shader()
     PixelShaderDef def = {};
     memcpy(&def, rs, 57 * 4);
     def.PSTextureModes = rs[XRS_PSTEXTUREMODES];
+    // A stage with no texture bound runs as NONE (its register reads 0), as the library programs it: SetTexture(NULL)
+    // marks the stage 0x80000000 (0x3C7A24) and FUN_003D0940 then writes mode 0 for it, except the modes that read no
+    // texture (PASSTHRU 4, CLIPPLANE 5, DOT_ZW 0xA, DOTPRODUCT 0x11). docs/07 #4.
+    for (int s = 0; s < 4; s++) {
+        uint32_t m = (def.PSTextureModes >> (5 * s)) & 0x1F;
+        if (!g_st.textures[s] && m != 0 && m != 4 && m != 5 && m != 0xA && m != 0x11) {
+            def.PSTextureModes &= ~(0x1Fu << (5 * s));
+            static int noted;
+            if (noted++ < 4) logf("[psh] frame %u: stage %d asks for texture mode %u with no texture bound: NONE, as the library does",
+                                  g_frame_count.load(), s, m);
+        }
+    }
     uint32_t cube = cube_mask();
     uint32_t depth = depth_mask();
     uint32_t shadow = depth ? (uint32_t)shadow_func_code() : 0;
