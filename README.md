@@ -1,175 +1,144 @@
-# BLACK PC port
+# NGB PC Native Port（忍者龙剑传 黑之章 飓风版 · PC 原生加载器）
 
-An unofficial native Windows port of **BLACK** (Criterion Games, 2006), made from the original Xbox version (NTSC-U).
+《忍者龙剑传 黑之章》飓风版中文汉化 **vb-zh-x2.1**（初代 Xbox）的非官方 Windows 原生移植。
 
-`black.exe` loads your own copy of the game's `default.xbe` and runs the original x86 game code directly on the
-PC.
+`black.exe` 读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
+等系统部分由加载器在 PC 上重新实现（HLE）。游戏代码不经模拟器逐条解释，也不在磁盘上修改。
 
-**You need your own copy of the game.** This repository and the release downloads contain no game code or data.
+本项目从 [black-pc](https://github.com/Spark198rus/black-pc)（BLACK 的原生移植）分支而来，在它的加载器上加入了
+忍龙主程序与附带程序的支持。原有的 BLACK NTSC-U 支持仍然保留。
 
-## Status
+**需要自备游戏。** 本仓库不含任何游戏代码、数据或 Microsoft XDK 代码。
 
-The game is fully playable. Please report problems in the issue tracker and include
-`port\black.log`.
+## 支持的版本
 
-- Any render resolution (720p to 4K and beyond, or a multiple of the window size), anti-aliasing
-- Widescreen 16:9 (the game's own widescreen mode) or 4:3, adjustable field of view
-- 60 fps (the default) or the original 30 fps
-- Mouse look, with the weapon swaying as it does with the stick; keys bound to the game's actions; XInput
-  controllers
-- The port's settings in the game's own menus (Options > PC SETTINGS, and in the pause menu), including borderless
-  fullscreen
-- Room reverb, the game's own brightness and gamma ramp; auto-aim off by default; every movie can be skipped
-- Fixes for things the Xbox hides by its low resolution: flickering seams between pieces of destructible objects,
-  a grid pattern in the blur effects
+加载器按 XBE 的 SHA-256 识别版本，其他版本不运行。
 
-## Requirements
+| 程序 | SHA-256 |
+|---|---|
+| 主程序 `default.xbe`（vb-zh-x2.1） | `aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6` |
+| `NinjaTomoe.xbe`（FC 三部曲，日版） | `2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff` |
+| `NinjaTrilogy.xbe`（FC 三部曲，美版） | `31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621` |
+| `NinjaFCJ.xbe`（SFC 三部曲，日版，x2.1 加入） | `b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31` |
+| `NinjaFCU.xbe`（SFC 三部曲，美版，x2.1 加入） | `9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1` |
 
-- Windows 10 or 11. The program is 32-bit and runs on 64-bit Windows.
-- A graphics card with Direct3D 9 (Shader Model 3). On old laptops with Intel graphics (HD 4400 class) play at 30 fps.
-- The NTSC-U (North America) Xbox disc of BLACK. Other regions and builds have different code addresses and are not
-  supported.
+附带程序从主菜单的"街机版忍者龙剑传"和"SFC忍者龙剑传"进入：游戏调用 `XLaunchNewImage`，加载器以同样的参数重启并
+载入目标 XBE。
 
-Nothing else needs installing: the C runtime is built in, and Direct3D 9, the shader compiler and XAudio2 ship with
-Windows.
+## 现状
 
-## Setting up
+逐项结论与证据见 `project/docs/06_功能验证矩阵.md`。
 
-1. Dump your NTSC-U version of the game to an ISO and extract it with [extract-xiso](https://github.com/XboxDev/extract-xiso)
-   (`extract-xiso -x Black.iso`). Rename the extracted folder to `game`.
-2. Check that you have the supported build. In PowerShell:
+- **汉化**：标题、主菜单、存读档页、暂停菜单 / 武器 / 招式表、章节标题卡、开场 CG 与实时过场字幕、结算画面、道具 /
+  商店 / 地图 / 对白，均已验证。
+- **飓风版功能**：交差之法两种模式、宁静腕轮、扳机选服装、妖刀鬼彻扣血、带金圣甲虫二周目、还魂护符开关、弓箭准星 /
+  视角、任务模式，均已实际游玩验证。
+- **附带程序**：街机版与 SFC 版从主菜单进入可以游玩。
+- **存档**：存档、读档、存后读回同一格均已验证。存档是标准 Xbox 格式，复制到 xRevive 的存档目录后可以直接读取（已实测）。
+- **声音**：软件 DirectSound 混音器，经 XAudio2 输出，带混响。
+- **性能**：第 1 章战斗场景在 Intel Iris Xe 核显上平均帧时间 10.45 ms（60 fps 的预算是 16.68 ms；r178，
+  `project/docs/05_音频输入存档.md`）。
+- **输入**：XInput 手柄。
+
+### 修过的原版缺陷
+
+以下问题原机上同样存在，移植版修掉了。每项修正都可以用开关即时切回原样对照（`project/docs/07_证据盘点.md`）：
+
+- 第 2 章水面：边缘的黑 / 白锯齿；镜头贴着水面时的拉长条纹（顶点上的除法改为逐像素除法）。
+- 熔岩房间：右边的黑条（画面复制少画一列）、热浪效果的白斑、右边缘的模糊条。
+
+## 已知问题
+
+- 镜子：第一人称近看时，屏幕最右有一条带横纹的暗带。这是原版缺陷，反射镜头没有拍到镜子的这一块；已查明，决定不修
+  （`project/docs/07_证据盘点.md`）。
+- 3D 音效与混响是对 Xbox 的近似，尚未逐项核对（`project/docs/07_证据盘点.md` #9）。
+- 排行榜"新增用户"：原机此时会进入仪表板，移植版改为重新启动本篇，窗口会关闭再打开。
+- 不带启动数据直接运行 `NinjaFCJ.xbe` 会崩溃（玩家从主菜单进入不会走这条路）。
+- 仍在核实中的模拟规则列在 `project/docs/07_证据盘点.md` 的核实进度里。
+
+## 运行
+
+1. 把 x2.1 镜像解包到一个文件夹（例如 `game\x21\`），核对 `default.xbe` 的哈希：
 
    ```powershell
-   Get-FileHash game\default.xbe -Algorithm SHA256
+   Get-FileHash game\x21\default.xbe -Algorithm SHA256
    ```
 
-   It must print `DF2739C372D254A90AEECCF5971D12097F22D89FBB90DB021FDA96DD4DEB68F6`.
-3. Download the zip from [Releases](../../releases) and extract it next to the `game` folder, so the `port` folder
-   sits beside it:
+2. 启动（`project/play.bat` 用的就是这类命令）：
 
    ```
-   BLACK\
-     game\
-       default.xbe
-       ...
-     port\
-       black.exe
-       blackrt.dll
+   black.exe --windowed --hdd savedata --log black.log game\x21\default.xbe
    ```
 
-4. Start `port\black.exe`. 
+   - `--hdd <文件夹>`：Xbox 硬盘（存档与游戏设定）放在哪里。
+   - `--windowed`：窗口模式。游戏里按 **Alt+Enter** 切换窗口 / 全屏，设定会保存。
+   - `--screenshot <目录>`：定时截图，频率由 `--shot-every N`（每 N 帧一张，默认 60）决定。玩的时候如果开了截图，
+     请把 N 设得很大（例如 `--shot-every 100000000`），否则每秒截一张图会造成卡顿。
 
-The port keeps everything it writes in the `port` folder: `savedata\` holds the Xbox hard disk (saved games and the
-game's settings), `black.ini` the port's settings, `black.log` the log of the last run and `cache\menus` the game's menu
-files with the PC SETTINGS pages added.
+`black.exe --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
 
-## Controls
+## 构建
 
-Keys and mouse buttons are bound to the game's own actions, not to controller buttons, and can be changed in
-PC SETTINGS > CONTROLS > KEY BINDINGS (two keys per action, saved to `black.ini`). Controllers work as well. Click
-the window to capture the mouse; Esc lets go of it (in play it also pauses), and play starting or resuming takes it
-again.
-
-| Action | Default |
-|---|---|
-| Move | W A S D |
-| Look | mouse |
-| Fire / Aim | left / right mouse button |
-| Reload | R |
-| Action (use, pick up) | E |
-| Crouch | C |
-| Grenade | G |
-| Melee | F |
-| Next / previous weapon | mouse wheel down / up |
-| Change firing mode | Z |
-| Toggle suppressor | Q |
-| Health pack | X |
-| Show objectives | Space |
-| Pause | Esc |
-
-In menus the arrow keys move (held, they repeat), Enter selects and Backspace goes back; Enter also passes PRESS START,
-skips movies and a mission's intro text, and closes the game's hints (PRESS A TO CONTINUE). QUIT at the bottom of the
-main menu closes the game. On the KEY BINDINGS page left / right choose the first or second key and Enter waits for the new one
-(Esc cancels, Delete clears it). Any key can be bound, F1-F12 included: the port has no keys of its own.
-
-## Settings
-
-The port's settings are in the game's menus: Options > PC SETTINGS on the main menu, and PC SETTINGS in the pause
-menu (below OPTIONS).
-
-| Page | Settings |
-|---|---|
-| VIDEO | render resolution, anti-aliasing, field of view, brightness, gamma, fullscreen |
-| DISPLAY | aspect ratio, frame rate (main menu only: used from the next start), filling geometry seams, effects at Xbox size |
-| AUDIO AND GAME | room reverb, auto-aim, skipping any movie |
-| CONTROLS | mouse sensitivity, mouse inversion, key bindings |
-
-Left / right change a setting; field of view, brightness, gamma and mouse sensitivity are sliders. Changes apply at
-once and are saved to `black.ini`. `--no-pc-menus` leaves the game's menus as they are.
-
-`black.exe --help` lists the command-line options. They override `black.ini` for that run, for example
-`--fullscreen`, `--resolution 1080`, `--fps 30`, `--fov 86`, `--normal-aspect`, `--autoaim`, `--mouse-sens 2.5`.
-
-Field of view (PC SETTINGS > VIDEO, `--fov`) is horizontal, in degrees; the game's is 70. The widescreen picture
-keeps that width and shows less height than 4:3; 86 shows the same height as the 4:3 picture. Aiming zooms by the
-same factor as before, cutscenes keep their own framing, and the gun and hands keep the game's own view (they were
-made for 70 and their animations would show their ends at a wider view).
-
-The game lets you skip a movie only once you have earned it (the intro and a mission's movies after completing that
-mission, the logos never). The port lets A, START or Enter skip every movie; set PC SETTINGS > AUDIO AND GAME > SKIP ANY
-MOVIE to off (or start with `--no-movie-skip`) for the original rule.
-
-## Known issues
-
-- The game was made for 30 fps; at 60 (the default) something may still run at the wrong speed (PC SETTINGS > DISPLAY >
-  FRAME RATE), but I didn't notice.
-- The game's on-screen prompts show Xbox controller buttons, also when you play with the keyboard.
-- Audio: the reverb is an approximation of the Xbox's, some effect sends are not mixed, there is no subwoofer
-  channel, and 3D sound uses distance and panning only.
-- **Only the NTSC-U build is supported** (`--force` tries another build, which will most likely fail).
-
-## Building from source
-
-Visual Studio 2022 or 2026 (Build Tools are enough) with the C++ x86 tools, and CMake 3.24 or newer (it ships with
-Visual Studio).
+本项目用 Visual Studio 2017（x86 C++ 工具）与 CMake 构建，产出 32 位程序：
 
 ```
-cd loader
-cmake --preset win32            # Visual Studio 2026; use win32-vs2022 for Visual Studio 2022
-cmake --build build/win32 --config RelWithDebInfo
+cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
+cmake --build build --config RelWithDebInfo
 ```
 
-This builds `build\win32\RelWithDebInfo\black.exe` and `blackrt.dll`. `loader/README.md` has the developer
-options and the source layout.
+得到 `build\RelWithDebInfo\black.exe` 与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
+2022 / 2026 预设。
 
-## How it works
+## 诊断工具
 
-`black.exe` is a small stub linked at the XBE's base address, so the game's address range belongs to it before
-Windows can put anything there. `blackrt.dll` maps `default.xbe` into that range, provides the 115 Xbox kernel
-functions the game imports, and redirects the Xbox libraries that are linked into the game (Direct3D 8,
-DirectSound, XAPI) to PC code by patching their entry points. Graphics run on Direct3D 9: the NV2A vertex programs
-and register combiners are translated to HLSL. Audio is a software DirectSound mixer on XAudio2.
+用 `--press-file <文件>` 启动后，往这个文本文件里追加一行命令，游戏会即时执行：
 
-The game's code is never changed on disk; the few patches (60 fps timing, mouse look, auto-aim switch) are applied
-in memory at start. Design notes and findings (addresses, structures, the boot sequence) are in `NOTES.md`; the
-original plan is `docs/ROADMAP.md`. `notes/` holds analysis results used to build the address tables: function
-addresses and symbol names, the XBE header report and checksums of the disc's files. It contains no game code.
+| 命令 | 作用 |
+|---|---|
+| `shot:名字` | 截下一整帧，存为 `名字.png` |
+| `trace` / `trace:N` | 记录下一帧（或之后 N 帧）的每个绘制：状态、贴图、顶点、调用者、顶点程序读到的常数，并转储渲染目标 |
+| `cfg:pixwatch:X,Y` | 在追踪帧里逐个绘制回读屏幕上的一点，记下改动它的绘制 |
+| `cfg:pixwatchrt:地址` | 同上，但盯某张渲染贴图（按数据地址） |
+| `cfg:skipcaller:地址` | 跳过调用栈里含该返回地址的绘制，用来找是谁画了某个东西 |
+| `cfg:<开关>:0` / `:1` | 即时关闭 / 打开各项修正，对照原样，例如 `rhwedge`、`edgemirror`、`vsdivide`、`rhwoffset` |
 
-## Legal
+启动参数 `--debug-frame N` 可以直接指定要追踪的帧。
 
-This project is not affiliated with or endorsed by Criterion Games or Electronic Arts. BLACK is a trademark of
-Electronic Arts Inc.; Xbox is a trademark of Microsoft Corporation. No code or data from the game and no code from
-the Microsoft Xbox Development Kit is included. You need your own legally obtained copy of the game.
+## 目录
 
-The port is free software under the GNU General Public License, version 2 or (at your option) any later version.
-See `LICENSE`.
+| 位置 | 内容 |
+|---|---|
+| `loader/` | 加载器源码：`kernel/` 内核 HLE；`d3d/` Direct3D 8 → 9，NV2A 顶点程序与寄存器合成器译为 HLSL；`audio/` DirectSound 混音；`input/` 输入；`ngb/` 忍龙专用的地址表与补丁 |
+| `project/docs/` | 过程文档：输入清单、工具链、静态分析、加载器与内核、图形、音频输入存档、功能验证矩阵、证据盘点 |
+| `project/tools/` | 分析与比对脚本：XBE 普查、函数表、图像比对、xemu 存档导出等 |
+| `notes/` | 上游 BLACK 的分析结果 |
 
-## Thanks
+反编译与反汇编输出、游戏文件、测试运行目录都只留在本地，不进仓库。
 
-[Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded) and [xemu](https://xemu.app) served as
-references for how the Xbox kernel and the NV2A behave (no code was copied).
-[XbSymbolDatabase](https://github.com/Cxbx-Reloaded/XbSymbolDatabase) identified the Xbox library functions in the
-game, [Ghidra](https://ghidra-sre.org) with [ghidra-xbe](https://github.com/XboxDev/ghidra-xbe) was used for the
-analysis, and the [nxdk](https://github.com/XboxDev/nxdk) headers document the kernel's types.
+## 原理
 
-Developed by Spark198rus with Claude Code.
+`black.exe` 是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
+`default.xbe` 映射进这段地址，提供游戏导入的 Xbox 内核函数，并在 Xbox 库（Direct3D 8、DirectSound、XAPI）的入口
+打补丁，转到 PC 上的实现。
+
+忍龙主程序是 LTCG 构建（寄存器传参、函数内联），库函数地址表是逐个核对的；附带程序是普通 D3D8，地址表由
+XbSymbolDatabase 的识别结果生成。每一条模拟规则都要有依据：原版程序、xemu / 文档、硬件规格或实测对照。依据记在
+`project/docs/07_证据盘点.md`。
+
+## 法律声明
+
+本项目与 Koei Tecmo、Team NINJA 及 Microsoft 无关，也未获其认可。Ninja Gaiden 是 Koei Tecmo 的商标，Xbox 是
+Microsoft 的商标。仓库不含游戏代码或数据，也不含 Microsoft Xbox 开发包的代码。请使用自己合法取得的游戏。
+
+本项目是自由软件，以 GNU 通用公共许可证第 2 版或（由你选择）任何更新的版本发布，见 `LICENSE`。
+
+## 致谢
+
+- [black-pc](https://github.com/Spark198rus/black-pc)（Spark198rus）：本项目所基于的加载器。
+- [ngbrecomp](https://github.com/gamboozino/ngbrecomp)：忍龙主程序的 D3D 符号表。
+- [xemu](https://xemu.app) 与 [Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded)：Xbox 内核与 NV2A
+  行为的参考（未复制代码）。
+- [genma-pc](https://github.com/w1284603830/genma-pc)：同类的 Xbox 原生移植，CLIPPLANE 等行为的参照。
+- [XbSymbolDatabase](https://github.com/Cxbx-Reloaded/XbSymbolDatabase)：识别游戏里的 Xbox 库函数。
+
+开发：哈雅布撒（b 站），与 Claude Code 合作。
