@@ -60,24 +60,51 @@
 
 ## 运行
 
-1. 把 x2.1 镜像解包到一个文件夹（例如 `game\x21\`），核对 `default.xbe` 的哈希：
+仓库根目录的 `run.bat` 是启动脚本。默认的目录结构：
+
+```
+ngb-pc-native-port\
+  run.bat
+  build\RelWithDebInfo\black.exe     构建产物，连同 blackrt.dll（见"构建"）
+  game\x21\default.xbe               你自己解包的 x2.1 镜像（整个镜像的文件）
+  savedata\                          Xbox 硬盘：存档与游戏设定（第一次运行时自动建立）
+  logs\                              日志 black.log、截图 shots\、命令文件 presses.txt
+```
+
+1. 构建 `black.exe` 与 `blackrt.dll`（见"构建"），放在 `build\RelWithDebInfo\`。
+2. 把 x2.1 镜像解包到 `game\x21\`，核对 `default.xbe` 的哈希与上表一致：
 
    ```powershell
    Get-FileHash game\x21\default.xbe -Algorithm SHA256
    ```
 
-2. 启动（`project/play.bat` 用的就是这类命令）：
+3. 双击 `run.bat`。找不到程序或游戏时，窗口里会说明缺了什么。
 
-   ```
-   black.exe --windowed --hdd savedata --log black.log game\x21\default.xbe
-   ```
+游戏里按 **Alt+Enter** 切换窗口 / 全屏，设定会保存。
 
-   - `--hdd <文件夹>`：Xbox 硬盘（存档与游戏设定）放在哪里。
-   - `--windowed`：窗口模式。游戏里按 **Alt+Enter** 切换窗口 / 全屏，设定会保存。
-   - `--screenshot <目录>`：定时截图，频率由 `--shot-every N`（每 N 帧一张，默认 60）决定。玩的时候如果开了截图，
-     请把 N 设得很大（例如 `--shot-every 100000000`），否则每秒截一张图会造成卡顿。
+**放在别的位置**：把 `default.xbe` 拖到 `run.bat` 上启动；或者在命令行里先设好路径再运行：
 
-`black.exe --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
+```bat
+set EXE=D:\ngb\black.exe
+set GAME=D:\ngb\x21\default.xbe
+set HDD=D:\ngb\savedata
+set LOGDIR=D:\ngb\logs
+run.bat
+```
+
+**存档**在 `savedata\Partition1\`：`UDATA\5443000d\` 是各存档格，`TDATA\5443000d\system.dat` 是系统存档。备份时复制整个
+`savedata` 文件夹即可。
+
+**截图**：往 `logs\presses.txt` 追加一行 `shot:名字`，下一帧存为 `logs\shots\名字.png`。更多命令见"诊断工具"。
+
+`run.bat` 实际执行的命令（也可以自己手动输入）：
+
+```
+black.exe --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+```
+
+- `--shot-every 100000000` 让定时截图实际上不发生，只在你用 `shot:` 要求时才截。默认值 60 是每秒截一张，会造成卡顿。
+- `black.exe --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
 
 ## 构建
 

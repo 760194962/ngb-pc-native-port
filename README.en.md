@@ -72,27 +72,54 @@ These also happen on the Xbox; the port fixes them. Each fix can be switched bac
 
 ## Running
 
-1. Extract the x2.1 image to a folder (for example `game\x21\`) and check the hash of `default.xbe`:
+`run.bat` in the repository root starts the game. The default layout:
+
+```
+ngb-pc-native-port\
+  run.bat
+  build\RelWithDebInfo\black.exe     the build, with blackrt.dll (see "Building")
+  game\x21\default.xbe               your own extracted x2.1 image (all of its files)
+  savedata\                          the Xbox hard disk: saved games and the game's settings (made on the first run)
+  logs\                              the log black.log, screenshots shots\, the command file presses.txt
+```
+
+1. Build `black.exe` and `blackrt.dll` (see "Building"); they go in `build\RelWithDebInfo\`.
+2. Extract the x2.1 image to `game\x21\` and check that the hash of `default.xbe` matches the table above:
 
    ```powershell
    Get-FileHash game\x21\default.xbe -Algorithm SHA256
    ```
 
-2. Start it (`project/play.bat` uses a command like this):
+3. Double-click `run.bat`. If the program or the game is missing, the window says what is missing.
 
-   ```
-   black.exe --windowed --hdd savedata --log black.log game\x21\default.xbe
-   ```
+In the game, **Alt+Enter** switches between window and fullscreen, and the setting is saved.
 
-   - `--hdd <folder>`: where the Xbox hard disk lives (saved games and the game's settings).
-   - `--windowed`: window mode. In the game, **Alt+Enter** switches between window and fullscreen, and the setting is
-     saved.
-   - `--screenshot <dir>`: timed screenshots, one every `--shot-every N` frames (default 60). When playing with
-     screenshots on, set N very large (for example `--shot-every 100000000`); one screenshot a second makes the game
-     stutter.
+**Other locations**: drop `default.xbe` onto `run.bat`, or set the paths in a command prompt first:
 
-`black.exe --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
-BLACK-only and have no effect on Ninja Gaiden.
+```bat
+set EXE=D:\ngb\black.exe
+set GAME=D:\ngb\x21\default.xbe
+set HDD=D:\ngb\savedata
+set LOGDIR=D:\ngb\logs
+run.bat
+```
+
+**Saved games** are in `savedata\Partition1\`: `UDATA\5443000d\` holds the save slots, `TDATA\5443000d\system.dat` the
+system save. To back them up, copy the whole `savedata` folder.
+
+**Screenshots**: append a line `shot:name` to `logs\presses.txt`, and the next frame is saved as `logs\shots\name.png`.
+More commands under "Diagnostics".
+
+The command `run.bat` runs (you can also type it yourself):
+
+```
+black.exe --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+```
+
+- `--shot-every 100000000` keeps timed screenshots from ever happening; screenshots are taken only on a `shot:`
+  request. The default of 60 is one a second, which makes the game stutter.
+- `black.exe --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
+  BLACK-only and have no effect on Ninja Gaiden.
 
 ## Building
 

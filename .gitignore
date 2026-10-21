@@ -47,3 +47,7 @@ cache/
 # Project notes and scripts (project/): the vendored symbol database and Python caches stay local
 project/tools/XbSymbolDatabase/
 __pycache__/
+
+# run.bat: the Xbox hard disk (saved games) and the logs it writes next to itself
+savedata/
+logs/
