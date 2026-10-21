@@ -7,6 +7,7 @@
 // File handles are real Windows handles opened through ntdll, so read/write/APC/event semantics carry over.
 #include "kernel/kexports.h"
 #include "kernel/nt.h"
+#include "perf.h"
 namespace xd3d { void texture_note_write(const void *p, uint32_t len); void flash_note_read(uint32_t bytes); } // d3d/texture.cpp, d3d/device.cpp
 
 #include <cctype>
@@ -387,6 +388,7 @@ NTSTATUS __stdcall NtReadFile(HANDLE FileHandle, HANDLE Event, void *ApcRoutine,
     }
     xd3d::texture_note_write(Buffer, Length); // the texture cache re-checks textures in this memory (d3d/texture.cpp)
     xd3d::flash_note_read(Length);
+    perf::add_file_read(Length); // [hitch] lines count the frame's reads
     NTSTATUS s = host::NtReadFile(FileHandle, Event, ApcRoutine, ApcContext, (host::IO_STATUS_BLOCK *)IoStatusBlock, Buffer, Length,
                                   ByteOffset, nullptr);
     KTRACE("%p '%s', ev %p, apc %p, %p, len 0x%x, off %lld) -> 0x%08x (", FileHandle, handle_desc(FileHandle).c_str(), Event,

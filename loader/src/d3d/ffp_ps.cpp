@@ -10,6 +10,7 @@
 #include "d3d/ffp_ps.h"
 
 #include "d3d/host.h"
+#include "d3d/shader_cache.h"
 #include "d3d/state.h"
 #include "common.h"
 #include "perf.h"
@@ -221,17 +222,17 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
     perf::Scope perf_scope(perf::kCompile);
     perf::add_compile();
     ID3DBlob *code = nullptr, *errors = nullptr;
-    HRESULT hr = D3DCompile(hlsl.data(), hlsl.size(), "ffp_ps", nullptr, nullptr, "main", "ps_2_0", D3DCOMPILE_OPTIMIZATION_LEVEL2, 0, &code, &errors);
+    HRESULT hr = cached_compile(hlsl, "ffp_ps", "ps_2_0", D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors);
     if (FAILED(hr)) {
-        errors ? void() : void();
-        hr = D3DCompile(hlsl.data(), hlsl.size(), "ffp_ps", nullptr, nullptr, "main", "ps_2_a", D3DCOMPILE_OPTIMIZATION_LEVEL2, 0, &code, &errors);
+        if (errors) errors->Release();
+        hr = cached_compile(hlsl, "ffp_ps", "ps_2_a", D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors);
     }
     IDirect3DPixelShader9 *ps = nullptr;
     static int logged;
     if (FAILED(hr)) {
         logf("[ffp] stage shader compile failed: %s", errors ? (const char *)errors->GetBufferPointer() : "?");
         if (logged++ < 3) logf("[ffp] HLSL:\n%s", hlsl.c_str());
-    } else if (FAILED(host3d::dev()->CreatePixelShader((const DWORD *)code->GetBufferPointer(), &ps))) {
+    } else if (FAILED(create_pixel_shader(host3d::dev(), code, &ps))) {
         logf("[ffp] CreatePixelShader failed");
         ps = nullptr;
     } else if (logged++ < 12) {

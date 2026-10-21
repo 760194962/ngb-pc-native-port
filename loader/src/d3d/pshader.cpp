@@ -4,6 +4,7 @@
 #include "d3d/host.h"
 #include "perf.h"
 #include "d3d/nv2a_psh.h"
+#include "d3d/shader_cache.h"
 #include "d3d/state.h"
 #include "d3d/vshader.h"
 
@@ -158,8 +159,7 @@ IDirect3DPixelShader9 *ps_host_shader()
     HRESULT hr = E_FAIL;
     for (const char *profile : {"ps_2_0", "ps_2_a", "ps_2_b"}) {
         if (errors) { errors->Release(); errors = nullptr; }
-        hr = D3DCompile(hlsl.data(), hlsl.size(), "nv2a_psh", nullptr, nullptr, "main", profile, D3DCOMPILE_OPTIMIZATION_LEVEL2, 0,
-                        &code, &errors);
+        hr = cached_compile(hlsl, "nv2a_psh", profile, D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors);
         if (SUCCEEDED(hr)) break;
     }
     IDirect3DPixelShader9 *ps = nullptr;
@@ -169,7 +169,7 @@ IDirect3DPixelShader9 *ps_host_shader()
         log_def(def);
         static int dumped;
         if (dumped++ < 3) logf("[psh] HLSL:\n%s", hlsl.c_str());
-    } else if (FAILED(host3d::dev()->CreatePixelShader((const DWORD *)code->GetBufferPointer(), &ps))) {
+    } else if (FAILED(create_pixel_shader(host3d::dev(), code, &ps))) {
         logf("[psh] CreatePixelShader failed");
         ps = nullptr;
     } else if (logged++ < 40) {

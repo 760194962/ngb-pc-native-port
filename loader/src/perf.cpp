@@ -32,6 +32,10 @@ volatile bool g_on;
 
 namespace {
 
+// [hitch] counters: kept whether or not recording (frame_end logs a slow frame's)
+std::atomic<uint32_t> g_h_compiles, g_h_uploads, g_h_upload_kb, g_h_rt_copies, g_h_reads, g_h_read_kb;
+std::atomic<uint32_t> g_h_build_us, g_h_cached; // shader builds: microseconds, of which read from the cache
+
 int64_t qpc()
 {
     LARGE_INTEGER t;
@@ -790,6 +794,23 @@ void pace_end(uint32_t vblanks, uint32_t interval)
 
 void frame_end(uint32_t render_w, uint32_t render_h)
 {
+    {
+        static int64_t last;
+        static uint32_t frames;
+        int64_t now = qpc();
+        double dt = last ? (double)(now - last) * tick_ms() : 0.0;
+        last = now;
+        frames++;
+        uint32_t c = g_h_compiles.exchange(0), u = g_h_uploads.exchange(0), ukb = g_h_upload_kb.exchange(0),
+                 rc = g_h_rt_copies.exchange(0), r = g_h_reads.exchange(0), rkb = g_h_read_kb.exchange(0),
+                 bus = g_h_build_us.exchange(0), cached = g_h_cached.exchange(0);
+        static int logged;
+        if (dt > 50.0 && frames > 2 && logged < 300) {
+            logged++;
+            logf("[hitch] frame %u took %.0f ms: new shaders %u (%.0f ms building, %u from the cache), texture uploads %u (%u KB), "
+                 "render target copies %u, file reads %u (%u KB)", frames, dt, c, bus / 1000.0, cached, u, ukb, rc, r, rkb);
+        }
+    }
     scripted();
     if (g_on && g_rec) {
         int64_t now = qpc();
@@ -833,6 +854,8 @@ void add_draw(uint32_t vertices, uint32_t bytes)
 
 void add_texture_upload(uint32_t bytes)
 {
+    g_h_uploads++;
+    g_h_upload_kb += bytes >> 10;
     if (!g_on) return;
     g_tex_uploads++;
     g_tex_bytes += bytes;
@@ -840,12 +863,26 @@ void add_texture_upload(uint32_t bytes)
 
 void add_compile()
 {
+    g_h_compiles++;
     if (g_on) g_compiles++;
 }
 
 void add_rt_copy()
 {
+    g_h_rt_copies++;
     if (g_on) g_rt_copies++;
+}
+
+void add_shader_build(double ms, bool from_cache)
+{
+    g_h_build_us += (uint32_t)(ms * 1000.0);
+    if (from_cache) g_h_cached++;
+}
+
+void add_file_read(uint32_t bytes)
+{
+    g_h_reads++;
+    g_h_read_kb += bytes >> 10;
 }
 
 const char *last_report_text()

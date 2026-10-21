@@ -1,5 +1,6 @@
 #include "d3d/apicount.h"
 #include "d3d/host.h"
+#include "d3d/shader_cache.h"
 
 #include "build_profile.h"
 #include "settings.h"
@@ -457,6 +458,7 @@ bool create_device()
                                                                   : "A8R8G8B8 (R32F render target with filtering not supported: 8-bit depth)");
     logf("host: Direct3D 9 device, back buffer %dx%d on '%s'; INTZ depth textures %s", g_bb_w, g_bb_h, id.Description,
          g_intz ? "supported" : "NOT supported (depth-buffer reads return zero)");
+    xd3d::prewarm_shaders(g_dev); // the cached shaders' objects now, not in the frame that first draws with them
     return true;
 }
 

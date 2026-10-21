@@ -116,6 +116,10 @@ system save. To back them up, copy the whole `savedata` folder.
 **Screenshots**: append a line `shot:name` to `logs\presses.txt`, and the next frame is saved as `logs\shots\name.png`.
 More commands under "Diagnostics".
 
+**Shader cache**: the first time the program meets a shader it compiles it on the spot, which can stutter; the result
+is kept in `cache\shaders\` next to the program and read into memory at the next start, so it stutters no more.
+Deleting the folder does no harm; the shaders are just compiled again.
+
 The command `run.bat` runs (you can also type it yourself):
 
 ```

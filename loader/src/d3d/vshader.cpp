@@ -3,6 +3,7 @@
 #include "d3d/host.h"
 #include "perf.h"
 #include "d3d/nv2a_vsh.h"
+#include "d3d/shader_cache.h"
 #include "d3d/state.h"
 #include "common.h"
 #include "kernel/kexports.h"
@@ -163,9 +164,8 @@ IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stag
         std::string hlsl = vsh_to_hlsl(vs->program, vs->program_insts, vs_input_mask(vs), undivided_stages);
         ID3DBlob *code = nullptr, *errors = nullptr;
         IDirect3DVertexShader9 *hv = nullptr;
-        if (SUCCEEDED(D3DCompile(hlsl.data(), hlsl.size(), "nv2a_vsh", nullptr, nullptr, "main", "vs_2_a",
-                                 D3DCOMPILE_OPTIMIZATION_LEVEL2, 0, &code, &errors)) &&
-            SUCCEEDED(host3d::dev()->CreateVertexShader((const DWORD *)code->GetBufferPointer(), &hv))) {
+        if (SUCCEEDED(cached_compile(hlsl, "nv2a_vsh", "vs_2_a", D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors)) &&
+            SUCCEEDED(create_vertex_shader(host3d::dev(), code, &hv))) {
             if (vs->host_vs_undivided) vs->host_vs_undivided->Release();
             vs->host_vs_undivided = hv;
             vs->host_vs_undivided_stages = undivided_stages;
@@ -183,8 +183,7 @@ IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stag
     HRESULT hr = E_FAIL;
     for (const char *profile : {"vs_2_0", "vs_2_a"}) {
         if (errors) { errors->Release(); errors = nullptr; }
-        hr = D3DCompile(hlsl.data(), hlsl.size(), "nv2a_vsh", nullptr, nullptr, "main", profile, D3DCOMPILE_OPTIMIZATION_LEVEL2, 0,
-                        &code, &errors);
+        hr = cached_compile(hlsl, "nv2a_vsh", profile, D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors);
         if (SUCCEEDED(hr)) break;
     }
     if (FAILED(hr)) {
@@ -192,7 +191,7 @@ IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stag
         logf("[vsh] compile failed for shader %p: %s", vs, errors ? (const char *)errors->GetBufferPointer() : "?");
         static std::atomic<int> dumped{0};
         if (dumped++ < 3) logf("[vsh] HLSL:\n%s", hlsl.c_str());
-    } else if (FAILED(host3d::dev()->CreateVertexShader((const DWORD *)code->GetBufferPointer(), &vs->host_vs))) {
+    } else if (FAILED(create_vertex_shader(host3d::dev(), code, &vs->host_vs))) {
         vs->translate_failed = true;
         logf("[vsh] CreateVertexShader failed for shader %p", vs);
     } else {
