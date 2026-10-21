@@ -11,7 +11,11 @@ namespace host3d {
 // area on the screen; a zero height alone follows from the width and the aspect.
 bool open_window(int width, int height, int aspect_w, int aspect_h);
 HWND window();
-void set_title(const char *text);
+void set_title(const wchar_t *text);
+// Copies of the program's icon (group 1), taken before the XBE is mapped over its image (main.cpp); the window's.
+void load_program_icons();
+// The game's name for the window title: Ninja Gaiden Black x2.1 and the programs it launches, or BLACK.
+const wchar_t *game_title();
 bool create_device(); // on the calling (game render) thread; back buffer = the largest monitor
 // The part of the back buffer this frame uses (the client area, shrunk to fit the back buffer if needed) and
 // the picture inside it (the game's aspect, centred; the rest are black bars). present() shows that part.

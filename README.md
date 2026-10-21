@@ -4,7 +4,7 @@
 
 《忍者龙剑传 黑之章》飓风版中文汉化 **vb-zh-x2.1**（初代 Xbox）的非官方 Windows 原生移植。
 
-`black.exe` 读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
+`Ninja Gaiden Black HurricaneX21.exe` 读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
 等系统部分由加载器在 PC 上重新实现（HLE）。游戏代码不经模拟器逐条解释，也不在磁盘上修改。
 
 本项目从 [black-pc](https://github.com/Spark198rus/black-pc)（BLACK 的原生移植）分支而来，在它的加载器上加入了
@@ -65,13 +65,14 @@
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\black.exe     构建产物，连同 blackrt.dll（见"构建"）
+  build\RelWithDebInfo\Ninja Gaiden Black HurricaneX21.exe
+                                     构建产物，连同 blackrt.dll（见"构建"）
   game\x21\default.xbe               你自己解包的 x2.1 镜像（整个镜像的文件）
   savedata\                          Xbox 硬盘：存档与游戏设定（第一次运行时自动建立）
   logs\                              日志 black.log、截图 shots\、命令文件 presses.txt
 ```
 
-1. 构建 `black.exe` 与 `blackrt.dll`（见"构建"），放在 `build\RelWithDebInfo\`。
+1. 构建 `Ninja Gaiden Black HurricaneX21.exe` 与 `blackrt.dll`（见"构建"），放在 `build\RelWithDebInfo\`。
 2. 把 x2.1 镜像解包到 `game\x21\`，核对 `default.xbe` 的哈希与上表一致：
 
    ```powershell
@@ -82,10 +83,14 @@ ngb-pc-native-port\
 
 游戏里按 **Alt+Enter** 切换窗口 / 全屏，设定会保存。
 
+**显卡**：默认用独立显卡，没有独显时用集成显卡。程序第一次运行时，若 Windows 的图形设置里还没有它的偏好，就替它登记为
+"高性能"；之后想换，在 Windows 设置 > 系统 > 屏幕 > 显示卡（图形）里改，程序不会覆盖你的选择。日志里 `host: Direct3D 9
+device ... on '显卡名'` 一行记着实际用的是哪张卡。
+
 **放在别的位置**：把 `default.xbe` 拖到 `run.bat` 上启动；或者在命令行里先设好路径再运行：
 
 ```bat
-set EXE=D:\ngb\black.exe
+set EXE=D:\ngb\Ninja Gaiden Black HurricaneX21.exe
 set GAME=D:\ngb\x21\default.xbe
 set HDD=D:\ngb\savedata
 set LOGDIR=D:\ngb\logs
@@ -100,11 +105,11 @@ run.bat
 `run.bat` 实际执行的命令（也可以自己手动输入）：
 
 ```
-black.exe --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+"Ninja Gaiden Black HurricaneX21.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
 ```
 
 - `--shot-every 100000000` 让定时截图实际上不发生，只在你用 `shot:` 要求时才截。默认值 60 是每秒截一张，会造成卡顿。
-- `black.exe --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
+- `"Ninja Gaiden Black HurricaneX21.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
 
 ## 构建
 
@@ -115,8 +120,15 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
 cmake --build build --config RelWithDebInfo
 ```
 
-得到 `build\RelWithDebInfo\black.exe` 与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
+得到 `build\RelWithDebInfo\Ninja Gaiden Black HurricaneX21.exe` 与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
 2022 / 2026 预设。
+
+**图标（可选，只在本地）**：程序图标取自你自己的游戏，所以仓库与发布包里都没有。用游戏里的图（例如暂停菜单武器页的
+龙剑，用 `trace` 转储贴图）做一个 `.ico`，配置时指定它，构建出的程序就带这个图标（文件、任务栏与窗口）：
+
+```
+cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32 -DPORT_ICON=D:/ngb/icon.ico
+```
 
 ## 诊断工具
 
@@ -146,7 +158,7 @@ cmake --build build --config RelWithDebInfo
 
 ## 原理
 
-`black.exe` 是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
+`Ninja Gaiden Black HurricaneX21.exe` 是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
 `default.xbe` 映射进这段地址，提供游戏导入的 Xbox 内核函数，并在 Xbox 库（Direct3D 8、DirectSound、XAPI）的入口
 打补丁，转到 PC 上的实现。
 

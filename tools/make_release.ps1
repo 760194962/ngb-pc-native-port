@@ -1,7 +1,7 @@
 # Packs the built loader into a release zip: dist\black-pc-<version>-win32.zip with one folder, port\, holding
-# black.exe, blackrt.dll, README.md and LICENSE.txt. Extracted next to the user's game
-# folder, port\black.exe finds ..\game and keeps what it writes in port\ (savedata\, black.ini, black.log, cache\).
-# Nothing game-derived: the build's black.exe has no icon (tools\set_exe_icon.py only stamps local copies).
+# Ninja Gaiden Black HurricaneX21.exe, blackrt.dll, README.md and LICENSE.txt. Extracted next to the user's game
+# folder, the program in port\ finds ..\game and keeps what it writes in port\ (savedata\, black.ini, black.log, cache\).
+# Nothing game-derived: build the release without PORT_ICON, so the program has no icon (loader/CMakeLists.txt).
 # blackrt.pdb and blackrt.map go into a separate -symbols zip, kept to read crash reports of that build.
 # Build first: cmake --build loader\build\win32 --config RelWithDebInfo
 param([string]$Config = 'RelWithDebInfo')
@@ -21,7 +21,7 @@ $stage = Join-Path $env:TEMP "$name-$PID"
 $sym = "$stage-symbols"
 $port = "$stage\port"
 New-Item -ItemType Directory -Force $port, $sym | Out-Null
-Copy-Item "$bin\black.exe", "$bin\blackrt.dll" $port
+Copy-Item "$bin\Ninja Gaiden Black HurricaneX21.exe", "$bin\blackrt.dll" $port
 Copy-Item "$root\README.md" "$port\README.md"
 Copy-Item "$root\LICENSE" "$port\LICENSE.txt"
 Copy-Item "$bin\blackrt.pdb", "$bin\blackrt.map" $sym

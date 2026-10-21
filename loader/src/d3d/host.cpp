@@ -1,6 +1,7 @@
 #include "d3d/apicount.h"
 #include "d3d/host.h"
 
+#include "build_profile.h"
 #include "settings.h"
 #include "hooks.h"
 #include "perf.h"
@@ -19,6 +20,7 @@ namespace host3d {
 namespace {
 
 HWND g_hwnd;
+HICON g_icon, g_icon_sm; // load_program_icons
 HANDLE g_window_ready;
 std::atomic<bool> g_closed{false};
 IDirect3D9 *g_d3d;
@@ -254,17 +256,23 @@ DWORD WINAPI ui_thread(void *)
     ULONG_PTR cookie = 0;
     if (ctx == INVALID_HANDLE_VALUE || !ActivateActCtx(ctx, &cookie))
         logf("host: common controls 6 not activated (%lu); dialogs keep the classic look", GetLastError());
-    WNDCLASSW wc = {};
+    WNDCLASSEXW wc = {sizeof wc};
     wc.lpfnWndProc = wndproc;
     wc.hInstance = GetModuleHandleW(L"blackrt.dll");
     wc.hCursor = LoadCursorW(nullptr, (LPCWSTR)IDC_ARROW);
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszClassName = L"BlackLoaderWindow";
-    RegisterClassW(&wc);
+    // The window and taskbar icon: the program's own (icon group 1), present only in a local build given PORT_ICON, an
+    // .ico made from the player's game (loader/CMakeLists.txt). Without it, the default application icon. Read from the
+    // copies load_program_icons took before the XBE was mapped over the program's image, resources included.
+    wc.hIcon = g_icon;
+    wc.hIconSm = g_icon_sm;
+    RegisterClassExW(&wc);
+    logf("host: window icon %s", wc.hIcon ? "from the program" : "none (no icon group 1: built without PORT_ICON)");
     RECT r = {0, 0, g_win_w, g_win_h};
     DWORD style = WS_OVERLAPPEDWINDOW;
     AdjustWindowRect(&r, style, FALSE);
-    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"BLACK", style, CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left,
+    g_hwnd = CreateWindowExW(0, wc.lpszClassName, game_title(), style, CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left,
                              r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
     RAWINPUTDEVICE mouse = {0x01, 0x02, 0, g_hwnd}; // generic desktop / mouse, while the window has focus
     if (!RegisterRawInputDevices(&mouse, 1, sizeof mouse)) logf("host: raw mouse input not available (%lu)", GetLastError());
@@ -333,9 +341,23 @@ bool open_window(int width, int height, int aspect_w, int aspect_h)
 
 HWND window() { return g_hwnd; }
 
-void set_title(const char *text)
+void load_program_icons()
 {
-    if (g_hwnd) SetWindowTextA(g_hwnd, text);
+    HMODULE exe = GetModuleHandleW(nullptr);
+    g_icon = (HICON)LoadImageW(exe, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0);
+    g_icon_sm = (HICON)LoadImageW(exe, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
+}
+
+void set_title(const wchar_t *text)
+{
+    if (g_hwnd) SetWindowTextW(g_hwnd, text);
+}
+
+const wchar_t *game_title()
+{
+    // "Ninja Gaiden Black·HurricaneX21[中英文版]" (the user's name for the x2.1 build, 2026-10-22)
+    if (g_cfg.profile && !g_cfg.profile->black) return L"Ninja Gaiden Black\u00B7HurricaneX21[\u4E2D\u82F1\u6587\u7248]";
+    return L"BLACK";
 }
 
 bool window_closed() { return g_closed; }

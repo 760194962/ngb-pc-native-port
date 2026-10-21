@@ -5,7 +5,7 @@
 An unofficial native Windows port of **vb-zh-x2.1**, the Chinese-localized "Hurricane" edition of *Ninja Gaiden Black*
 (original Xbox).
 
-`black.exe` loads your own `default.xbe` and runs the original x86 game code directly on the PC; the Xbox kernel,
+`Ninja Gaiden Black HurricaneX21.exe` loads your own `default.xbe` and runs the original x86 game code directly on the PC; the Xbox kernel,
 Direct3D 8, DirectSound and the other system parts are reimplemented on the PC by the loader (HLE). The game code is
 not interpreted instruction by instruction, and it is never modified on disk.
 
@@ -77,13 +77,14 @@ These also happen on the Xbox; the port fixes them. Each fix can be switched bac
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\black.exe     the build, with blackrt.dll (see "Building")
+  build\RelWithDebInfo\Ninja Gaiden Black HurricaneX21.exe
+                                     the build, with blackrt.dll (see "Building")
   game\x21\default.xbe               your own extracted x2.1 image (all of its files)
   savedata\                          the Xbox hard disk: saved games and the game's settings (made on the first run)
   logs\                              the log black.log, screenshots shots\, the command file presses.txt
 ```
 
-1. Build `black.exe` and `blackrt.dll` (see "Building"); they go in `build\RelWithDebInfo\`.
+1. Build `Ninja Gaiden Black HurricaneX21.exe` and `blackrt.dll` (see "Building"); they go in `build\RelWithDebInfo\`.
 2. Extract the x2.1 image to `game\x21\` and check that the hash of `default.xbe` matches the table above:
 
    ```powershell
@@ -94,10 +95,15 @@ ngb-pc-native-port\
 
 In the game, **Alt+Enter** switches between window and fullscreen, and the setting is saved.
 
+**Graphics card**: the dedicated one by default, the integrated one where there is none. On its first run, if Windows'
+graphics settings have no preference for the program yet, it registers "high performance" for itself; to change it
+later, use Windows Settings > System > Display > Graphics, and the program never overrides that choice. The log line
+`host: Direct3D 9 device ... on '<card>'` names the card in use.
+
 **Other locations**: drop `default.xbe` onto `run.bat`, or set the paths in a command prompt first:
 
 ```bat
-set EXE=D:\ngb\black.exe
+set EXE=D:\ngb\Ninja Gaiden Black HurricaneX21.exe
 set GAME=D:\ngb\x21\default.xbe
 set HDD=D:\ngb\savedata
 set LOGDIR=D:\ngb\logs
@@ -113,12 +119,12 @@ More commands under "Diagnostics".
 The command `run.bat` runs (you can also type it yourself):
 
 ```
-black.exe --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+"Ninja Gaiden Black HurricaneX21.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
 ```
 
 - `--shot-every 100000000` keeps timed screenshots from ever happening; screenshots are taken only on a `shot:`
   request. The default of 60 is one a second, which makes the game stutter.
-- `black.exe --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
+- `"Ninja Gaiden Black HurricaneX21.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
   BLACK-only and have no effect on Ninja Gaiden.
 
 ## Building
@@ -130,8 +136,16 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
 cmake --build build --config RelWithDebInfo
 ```
 
-This produces `build\RelWithDebInfo\black.exe` and `blackrt.dll`. `loader/CMakePresets.json` also has upstream's
+This produces `build\RelWithDebInfo\Ninja Gaiden Black HurricaneX21.exe` and `blackrt.dll`. `loader/CMakePresets.json` also has upstream's
 Visual Studio 2022 / 2026 presets.
+
+**Icon (optional, local only)**: the program's icon comes from your own game, so neither the repository nor a release
+has one. Make an `.ico` from a picture in the game (for example the Dragon Sword on the pause menu's weapons page,
+dumped with `trace`) and name it when configuring; the program then carries it (file, taskbar and window):
+
+```
+cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32 -DPORT_ICON=D:/ngb/icon.ico
+```
 
 ## Diagnostics
 
@@ -161,7 +175,7 @@ Decompiler and disassembler output, game files and test-run folders stay local a
 
 ## How it works
 
-`black.exe` is a small stub linked at the XBE's base address, so that it holds that address range before Windows can
+`Ninja Gaiden Black HurricaneX21.exe` is a small stub linked at the XBE's base address, so that it holds that address range before Windows can
 put anything there. `blackrt.dll` maps `default.xbe` into the range, provides the Xbox kernel functions the game
 imports, and patches the entry points of the Xbox libraries (Direct3D 8, DirectSound, XAPI) to go to PC
 implementations.

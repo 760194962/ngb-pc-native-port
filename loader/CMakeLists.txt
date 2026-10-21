@@ -82,6 +82,16 @@ target_link_options(blackrt PRIVATE /SAFESEH:NO /MAP) # blackrt.map: port addres
 # blackrt.dll then maps the XBE over this image (headers included) and never returns.
 # A Windows-subsystem program: no console window; started from a command prompt it attaches to that one (main.cpp).
 add_executable(black stub/stub.c)
+# The program is named after the game it runs (the user's name for the x2.1 build, 2026-10-22).
+set_target_properties(black PROPERTIES OUTPUT_NAME "Ninja Gaiden Black HurricaneX21")
+# PORT_ICON: an .ico for the program (icon group 1, also the window's), made locally from the player's own game
+# (for example from the Dragon Sword picture of the weapons page). Never part of the repository or a release.
+set(PORT_ICON "" CACHE FILEPATH "local .ico made from the player's game; empty: no icon")
+if(PORT_ICON AND EXISTS "${PORT_ICON}")
+  file(TO_CMAKE_PATH "${PORT_ICON}" _port_icon)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc" "1 ICON \"${_port_icon}\"\n")
+  target_sources(black PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc")
+endif()
 target_link_libraries(black PRIVATE blackrt kernel32)
 set_property(TARGET black PROPERTY MSVC_RUNTIME_CHECKS "")
 target_compile_options(black PRIVATE /GS- /Gs999999)

@@ -557,7 +557,7 @@ void present_backbuffer()
     static float shown_gamma = -1.0f, shown_gain = -1.0f, shown_sens = -1.0f;
     static int shown_aa = -1;
     if (shown_gamma != g_cfg.gamma || shown_gain != g_cfg.gain || shown_sens != g_cfg.mouse_sens || shown_aa != (int)g_cfg.aa) {
-        if (shown_aa < 0 && g_cfg.background) host3d::set_title("[AUTOMATED TEST, MUTED] BLACK");
+        if (shown_aa < 0 && g_cfg.background) host3d::set_title((std::wstring(L"[AUTOMATED TEST, MUTED] ") + host3d::game_title()).c_str());
         shown_gamma = g_cfg.gamma;
         shown_gain = g_cfg.gain;
         shown_sens = g_cfg.mouse_sens;

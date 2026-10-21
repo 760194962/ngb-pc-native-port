@@ -7,6 +7,7 @@
 
 #include "build_profile.h"
 #include "d3d/dispatch.h"
+#include "d3d/host.h"
 #include "fe/calls.h"
 #include "fe/pages.h"
 #include "fov.h"
@@ -401,6 +402,32 @@ namespace {
 
 bool g_image_mapped; // once true, black.exe's code is gone and BlackMain must not return
 
+// The graphics card: the dedicated one where there is one, else the integrated one (the user, 2026-10-22). That is
+// Windows' per-program "high performance" preference (HKCU\Software\Microsoft\DirectX\UserGpuPreferences, a value
+// named by the program's path, "GpuPreference=2;"), which Direct3D 9 follows here: 82 runs logged the RTX 3060 with
+// it, 185 the Iris Xe without (run\*\black.log, 2026-10-17..22). Written only when nothing is set for this program, so
+// a choice made in Windows' graphics settings stays.
+void prefer_dedicated_gpu()
+{
+    wchar_t exe[MAX_PATH];
+    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return;
+    HKEY k;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", 0, nullptr, 0,
+                        KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &k, nullptr) != ERROR_SUCCESS)
+        return;
+    wchar_t cur[64] = L"";
+    DWORD type = 0, size = sizeof cur - sizeof(wchar_t);
+    LONG q = RegQueryValueExW(k, exe, nullptr, &type, (BYTE *)cur, &size);
+    if (q == ERROR_FILE_NOT_FOUND) {
+        static const wchar_t v[] = L"GpuPreference=2;";
+        LONG r = RegSetValueExW(k, exe, 0, REG_SZ, (const BYTE *)v, sizeof v);
+        logf("gpu: no Windows graphics preference for this program; set to high performance (%s)", r == ERROR_SUCCESS ? "ok" : "failed");
+    } else {
+        logf("gpu: Windows graphics preference for this program kept: %s", q == ERROR_SUCCESS ? narrow(cur).c_str() : "(unreadable)");
+    }
+    RegCloseKey(k);
+}
+
 // Setup errors a player can fix (no game files, another build): started by a double-click, the console closes with
 // the process, so they also get a message box.
 void startup_error(const std::string &text)
@@ -463,6 +490,8 @@ int run(void *reserve, unsigned reserve_size)
     if (!g_cfg.multicore) pin_to_one_cpu();
     if (!kmem_init()) return 1;
     if (!xthread_init_slots()) return 1;
+    prefer_dedicated_gpu();
+    host3d::load_program_icons(); // the program's resources are gone once the XBE is mapped over its image
     g_image_mapped = true; // set before mapping: a partial copy also destroys the stub
     if (!image_map(g_xbe)) return 1;
     int patched = patch_fs_accesses(g_xbe);
