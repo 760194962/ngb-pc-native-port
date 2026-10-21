@@ -7,6 +7,7 @@
 #include "d3d/dispatch.h"
 #include "d3d/ffp_ps.h"
 #include "d3d/host.h"
+#include "d3d/nv2a_vsh.h"
 #include "d3d/pshader.h"
 #include "d3d/pushbuf.h"
 #include "d3d/state.h"
@@ -1065,10 +1066,56 @@ static void dump_bound_texture(int s, const Resource *r)
     logf("[draw]   tex%d %p dumped as %s", s, r, narrow(base).c_str());
 }
 
+} // namespace
+
+// cfg:pixwatch:X,Y: in a traced frame the back-buffer pixel X,Y (Xbox pixels) is read back before every draw and at
+// the swap; a change is put on the draw before (its callers). Finds the draw behind a band with no obvious owner
+// (2026-10-22). The 1x1 surfaces are made and released each time, so nothing in the default pool outlives a Reset.
+void pixwatch_check(const char *next)
+{
+    static uint32_t last = 0;
+    static bool have = false;
+    static std::string last_draw;
+    if (g_cfg.pix_watch_x < 0 || !debug_frame_active() || !g_st.render_target) return;
+    if (g_cfg.pix_watch_rt ? g_st.render_target->Data != g_cfg.pix_watch_rt : !is_backbuffer(g_st.render_target)) return;
+    IDirect3DDevice9 *d = host3d::dev();
+    IDirect3DSurface9 *rt = nullptr, *one = nullptr, *sys = nullptr;
+    if (!d || FAILED(d->GetRenderTarget(0, &rt))) return;
+    D3DSURFACE_DESC desc;
+    rt->GetDesc(&desc);
+    LONG x = lroundf(g_cfg.pix_watch_x * target_scale_x()), y = lroundf(g_cfg.pix_watch_y * target_scale_y());
+    RECT src = {x, y, x + 1, y + 1};
+    if (x >= 0 && y >= 0 && (UINT)x < desc.Width && (UINT)y < desc.Height &&
+        SUCCEEDED(d->CreateRenderTarget(1, 1, desc.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &one, nullptr)) &&
+        SUCCEEDED(d->CreateOffscreenPlainSurface(1, 1, desc.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr)) &&
+        SUCCEEDED(d->StretchRect(rt, &src, one, nullptr, D3DTEXF_POINT)) && SUCCEEDED(d->GetRenderTargetData(one, sys))) {
+        D3DLOCKED_RECT lr;
+        if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+            uint32_t v = *(const uint32_t *)lr.pBits & 0xFFFFFF;
+            sys->UnlockRect();
+            if (have && v != last)
+                logf("[pix] %d,%d: %06x -> %06x by %s", g_cfg.pix_watch_x, g_cfg.pix_watch_y, last, v, last_draw.c_str());
+            last = v;
+            have = true;
+        }
+    }
+    if (sys) sys->Release();
+    if (one) one->Release();
+    rt->Release();
+    last_draw = next;
+}
+
+namespace {
+
 void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t count, const float *verts, uint32_t stride_floats)
 {
     if (g_debug_draws < 0) g_debug_draws = (int)g_cfg.debug_draws;
     bool this_frame = debug_frame_active();
+    if (this_frame && g_cfg.pix_watch_x >= 0) {
+        char b[96];
+        snprintf(b, sizeof b, "draw %u (%s, tex0 %p)", g_draw_serial, what, (void *)g_st.textures[0]);
+        pixwatch_check((std::string(b) + " from " + game_callers((const uint32_t *)_AddressOfReturnAddress())).c_str());
+    }
     if (g_debug_draws <= 0 && !this_frame) return;
     if (!this_frame) g_debug_draws--;
     const uint32_t *rs = render_state();
@@ -1193,6 +1240,24 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
         for (int c : {96, 97, 190, 191, 0, 1, 2, 3, 10, 11, 12, 13, 18, 21, 22, 23, 24, 25})
             logf("[draw]   c%d (slot %d) = %g %g %g %g", c - 96, c, g_st.vs_constants[c][0], g_st.vs_constants[c][1],
                  g_st.vs_constants[c][2], g_st.vs_constants[c][3]);
+        if (ctx.vs && ctx.vs->program) { // the constants the program reads (relative ones from their base)
+            bool used[192] = {};
+            for (uint32_t i = 0; i < ctx.vs->program_insts; i++) {
+                VshInst in;
+                vsh_decode(ctx.vs->program + i * 4, in);
+                if ((in.a.mux == MUX_C || in.b.mux == MUX_C || in.c.mux == MUX_C) && in.cnst < 192) used[in.cnst] = true;
+                if (in.final) break;
+            }
+            std::string line;
+            for (int c = 0; c < 192; c++) {
+                if (!used[c]) continue;
+                char b[96];
+                snprintf(b, sizeof b, " c%d=(%g %g %g %g)", c - 96, g_st.vs_constants[c][0], g_st.vs_constants[c][1],
+                         g_st.vs_constants[c][2], g_st.vs_constants[c][3]);
+                line += b;
+            }
+            logf("[draw]   program reads%s", line.c_str());
+        }
     }
     if (verts && stride_floats == 64) // immediate mode: position and texture coordinates (attributes 0, 9-12)
         for (uint32_t v = 0; v < count && v < 4; v++) {

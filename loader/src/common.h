@@ -101,6 +101,9 @@ struct Config {
     uint32_t dump_vs_texmodes = 0; // press-file "cfg:dumpvs:HEX": in a traced frame, dump the vertex program inputs of pixel-shader draws with these texture modes
     uint32_t skip_caller = 0;  // press-file "cfg:skipcaller:HEX": drop draws with this game return address on the stack (diagnosis)
     uint32_t skip_texmodes = 0; // press-file "cfg:skiptexmodes:HEX": drop pixel-shader draws with these PSTextureModes (diagnosis)
+    int pix_watch_x = -1, pix_watch_y = -1; // press-file "cfg:pixwatch:X,Y" (Xbox back-buffer pixel): traced frames log
+                                            // the draws that change it (d3d/draw.cpp pixwatch_check; diagnosis)
+    uint32_t pix_watch_rt = 0; // press-file "cfg:pixwatchrt:HEX": watch that render target (its data address) instead
     bool edge_mirror = true;  // press-file "cfg:edgemirror:0": projected reads past a render target clamp as on the Xbox
                               // (on: alpha 0 past the edge, d3d/draw.cpp apply_texture_stages)
     bool rhw_edge_fix = true; // press-file "cfg:rhwedge:0": keep XYZRHW quads that stop a pixel short of their target (d3d/draw.cpp)

@@ -1525,6 +1525,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
         snprintf(tag, sizeof tag, "frame_%05u", frames);
         screenshot_now(tag);
     }
+    pixwatch_check("swap");
     if (debug_frame_active() && g_cfg.debug_frame_end) log_frame_mean_color(frames);
     if (g_cfg.flash_watch) flash_check(frames);
     logvar_check(frames);
