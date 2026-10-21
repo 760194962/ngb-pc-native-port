@@ -1295,15 +1295,18 @@ bool begin_draw(DrawCtx &ctx)
     if (!d) return false;
     g_draw_serial++;
     if (g_cfg.skip_texmodes && g_st.pixel_shader && render_state()[XRS_PSTEXTUREMODES] == g_cfg.skip_texmodes) return false;
+    // Stack scans stop at the thread's stack base: a draw near the top of a game thread's stack read past it and
+    // crashed the game (cfg:skipcaller, play 2026-10-22).
+    const uint32_t *stack_top = (const uint32_t *)((NT_TIB *)NtCurrentTeb())->StackBase;
     if (g_cfg.skip_caller) { // diagnosis: which game routine draws something
         const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress();
-        for (int i = 0; i < 160; i++)
+        for (int i = 0; i < 160 && sp + i < stack_top; i++)
             if (sp[i] == g_cfg.skip_caller) return false;
     }
     if (g_cfg.flash_watch) {
         uint32_t caller = 0; // the first game .text return address above us: which game routine submitted the draw
         const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress();
-        for (int i = 0; i < 160 && !caller; i++)
+        for (int i = 0; i < 160 && sp + i < stack_top && !caller; i++)
             if (sp[i] >= 0x00011000 && sp[i] < 0x0037A480) caller = sp[i];
         flash_record_draw(caller, (uint32_t)(uintptr_t)g_st.textures[0], g_st.vertex_shader);
     }
