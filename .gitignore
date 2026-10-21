@@ -43,3 +43,7 @@ perf/
 dist/
 # The port's rebuilt front-end files (made at start from the user's game files)
 cache/
+
+# Project notes and scripts (project/): the vendored symbol database and Python caches stay local
+project/tools/XbSymbolDatabase/
+__pycache__/
