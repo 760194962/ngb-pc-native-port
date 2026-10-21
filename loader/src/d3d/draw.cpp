@@ -364,7 +364,31 @@ void apply_render_states(IDirect3DDevice9 *d)
         set(D3DRS_VERTEXBLEND, h);
     });
     on_change(XRS_SPECULARENABLE, [&](uint32_t v) { set(D3DRS_SPECULARENABLE, v != 0 && !g_cfg.no_specular); });
-    on_change(XRS_LOCALVIEWER, [&](uint32_t v) { set(D3DRS_LOCALVIEWER, v != 0); });
+    // LOCALVIEWER: the Xbox library turns it into the LOCALEYE bit of the NV2A light control (FUN_003d18e0, method
+    // 0x294, set only with lights on) and never writes the texgen view model (method 0x9CC: no such header anywhere in
+    // the XBE, no 0x09CC in the D3D section), which keeps its reset value, so reflection vectors (TCI 0x30000) on the
+    // Xbox are taken with a local viewer (xemu: CSV0_D TEXGEN_REF, infinite only when set). D3D9 has one state for both:
+    // a draw with a reflection stage gets TRUE, the others the game's value. Ninja Gaiden Black sets FALSE on its world
+    // geometry; the military base's rails then read one spot of their environment map along their whole length, a flat
+    // white line (the user, 2026-10-22; with TRUE the light and dark along them came back). cfg:localviewer:2 sends the
+    // game's value as before, 0 / 1 force it.
+    {
+        DWORD v = render_state()[XRS_LOCALVIEWER] != 0;
+        if (g_cfg.force_localviewer == 0 || g_cfg.force_localviewer == 1) {
+            v = (DWORD)g_cfg.force_localviewer;
+        } else if (g_cfg.force_localviewer != 2) {
+            for (int s = 0; s < 4; s++) {
+                const uint32_t *ts = texture_state(s);
+                if (ts[12] != 1 && (ts[28] & 0xFFFF0000) == 0x30000) v = TRUE; // an enabled stage: reflection vector
+            }
+        }
+        static DWORD sent;
+        if (!g_rs_valid[XRS_LOCALVIEWER] || sent != v) {
+            set(D3DRS_LOCALVIEWER, v);
+            sent = v;
+            g_rs_valid[XRS_LOCALVIEWER] = true;
+        }
+    }
     on_change(XRS_COLORVERTEX, [&](uint32_t v) { set(D3DRS_COLORVERTEX, v != 0); });
     on_change(XRS_SPECULARMATERIALSOURCE, [&](uint32_t v) { set(D3DRS_SPECULARMATERIALSOURCE, v); });
     on_change(XRS_DIFFUSEMATERIALSOURCE, [&](uint32_t v) { set(D3DRS_DIFFUSEMATERIALSOURCE, v); });
@@ -1161,10 +1185,11 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
         memcpy(&fe, &rs[XRS_FOGEND], 4);
         memcpy(&fd, &rs[XRS_FOGDENSITY], 4);
         logf("[draw]   fog %u table %u start %g end %g density %g color 0x%08x range %u | lighting %u ambient 0x%08x specular %u colorvertex %u "
-             "sources d%u a%u s%u e%u | vertexblend %u",
+             "sources d%u a%u s%u e%u | vertexblend %u | localviewer %u normalizenormals %u",
              rs[XRS_FOGENABLE], rs[XRS_FOGTABLEMODE], fs, fe, fd, rs[XRS_FOGCOLOR], rs[XRS_RANGEFOGENABLE],
              rs[XRS_LIGHTING], rs[XRS_AMBIENT], rs[XRS_SPECULARENABLE], rs[XRS_COLORVERTEX], rs[XRS_DIFFUSEMATERIALSOURCE],
-             rs[XRS_AMBIENTMATERIALSOURCE], rs[XRS_SPECULARMATERIALSOURCE], rs[XRS_EMISSIVEMATERIALSOURCE], rs[XRS_VERTEXBLEND]);
+             rs[XRS_AMBIENTMATERIALSOURCE], rs[XRS_SPECULARMATERIALSOURCE], rs[XRS_EMISSIVEMATERIALSOURCE], rs[XRS_VERTEXBLEND],
+             rs[XRS_LOCALVIEWER], rs[XRS_NORMALIZENORMALS]);
         logf("[draw]   point size %g min %g max %g sprite %u scale %u (%g %g %g)", as_float(rs[XRS_POINTSIZE]),
              as_float(rs[XRS_POINTSIZE_MIN]), as_float(rs[XRS_POINTSIZE_MAX]), rs[XRS_POINTSPRITEENABLE], rs[XRS_POINTSCALEENABLE],
              as_float(rs[XRS_POINTSCALE_A]), as_float(rs[XRS_POINTSCALE_B]), as_float(rs[XRS_POINTSCALE_C]));

@@ -249,6 +249,10 @@ void read_press_file(uint32_t now_ms)
                         if (sscanf(line.c_str() + c + 1, "%d,%d", &g_cfg.pix_watch_x, &g_cfg.pix_watch_y) != 2)
                             g_cfg.pix_watch_x = g_cfg.pix_watch_y = -1;
                     }
+                    else if (k == "localviewer") {
+                        int lv = atoi(line.c_str() + c + 1);
+                        g_cfg.force_localviewer = lv >= 0 && lv <= 2 ? lv : -1; // other values: the NV2A rule
+                    }
                     else if (k == "pixwatchrt") g_cfg.pix_watch_rt = (uint32_t)strtoul(line.c_str() + c + 1, nullptr, 16);
                     else if (k == "skiptexmodes") g_cfg.skip_texmodes = (uint32_t)strtoul(line.c_str() + c + 1, nullptr, 16);
                     else if (k == "visall") g_cfg.vis_all = v;

@@ -103,6 +103,8 @@ struct Config {
     uint32_t skip_texmodes = 0; // press-file "cfg:skiptexmodes:HEX": drop pixel-shader draws with these PSTextureModes (diagnosis)
     int pix_watch_x = -1, pix_watch_y = -1; // press-file "cfg:pixwatch:X,Y" (Xbox back-buffer pixel): traced frames log
                                             // the draws that change it (d3d/draw.cpp pixwatch_check; diagnosis)
+    int force_localviewer = -1; // press-file "cfg:localviewer:N": 0 / 1 force D3DRS_LOCALVIEWER, 2 the game's value,
+                                // -1 (default, any other N) TRUE for draws with a reflection stage (d3d/draw.cpp)
     uint32_t pix_watch_rt = 0; // press-file "cfg:pixwatchrt:HEX": watch that render target (its data address) instead
     bool edge_mirror = true;  // press-file "cfg:edgemirror:0": projected reads past a render target clamp as on the Xbox
                               // (on: alpha 0 past the edge, d3d/draw.cpp apply_texture_stages)
