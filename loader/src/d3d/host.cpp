@@ -206,6 +206,16 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         if (!wp) capture_mouse(false);
         else if (GetForegroundWindow() == h && !IsIconic(h)) capture_mouse(true);
         return 0;
+    case WM_SYSKEYDOWN: // Alt+Enter: fullscreen <-> window, as PC SETTINGS > VIDEO > FULLSCREEN (first press, not repeats)
+        if (wp == VK_RETURN && (lp & (1 << 29)) && !(lp & (1 << 30))) {
+            toggle_fullscreen();
+            settings_save();
+            return 0;
+        }
+        break;
+    case WM_SYSCHAR: // the Alt+Enter character would ring the default beep
+        if (wp == VK_RETURN) return 0;
+        break;
     case WM_SYSCOMMAND:
         if ((wp & 0xFFF0) == SC_KEYMENU) return 0; // Alt / F10 must not open the system menu by keyboard and stall input
         break;
