@@ -101,6 +101,9 @@ struct Config {
     uint32_t dump_vs_texmodes = 0; // press-file "cfg:dumpvs:HEX": in a traced frame, dump the vertex program inputs of pixel-shader draws with these texture modes
     uint32_t skip_caller = 0;  // press-file "cfg:skipcaller:HEX": drop draws with this game return address on the stack (diagnosis)
     uint32_t skip_texmodes = 0; // press-file "cfg:skiptexmodes:HEX": drop pixel-shader draws with these PSTextureModes (diagnosis)
+    bool edge_mirror = true;  // press-file "cfg:edgemirror:0": projected reads past a render target clamp as on the Xbox
+                              // (on: alpha 0 past the edge, d3d/draw.cpp apply_texture_stages)
+    bool rhw_edge_fix = true; // press-file "cfg:rhwedge:0": keep XYZRHW quads that stop a pixel short of their target (d3d/draw.cpp)
     bool rhw_offset = true;    // press-file "cfg:rhwoffset:0": XYZRHW positions ignore the screen-space offset (comparison)
     bool zview8 = false;       // press-file "cfg:zview8:1": depth views back to A8R8G8B8 (8-bit depth) for comparison
     bool api_count = false;    // --api-count (diagnosis): Direct3D 9 calls by kind per frame (d3d/apicount.cpp)

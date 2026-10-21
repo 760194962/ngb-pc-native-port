@@ -186,10 +186,12 @@ IDirect3DPixelShader9 *ps_host_shader()
     return last_ps = ps;
 }
 
+void linear_texture_scale(int stage, float *sx, float *sy); // d3d/draw.cpp
+
 void upload_ps_constants(IDirect3DDevice9 *d)
 {
     const uint32_t *rs = render_state();
-    float c[23][4];
+    float c[27][4];
     for (int i = 0; i < 8; i++) {
         unpack_color(rs[XRS_PSCONSTANT0_0 + i], c[i]);
         unpack_color(rs[XRS_PSCONSTANT1_0 + i], c[8 + i]);
@@ -204,7 +206,11 @@ void upload_ps_constants(IDirect3DDevice9 *d)
         memcpy(&c[19 + s][2], &ts[25], 4); // BUMPENVMAT10
         memcpy(&c[19 + s][3], &ts[24], 4); // BUMPENVMAT11
     }
-    d->SetPixelShaderConstantF(0, &c[0][0], 23);
+    for (int s = 0; s < 4; s++) { // c23-26: 1 / size of a linear texture (nv2a_psh.cpp rectScale)
+        linear_texture_scale(s, &c[23 + s][0], &c[23 + s][1]);
+        c[23 + s][2] = c[23 + s][3] = 1.0f;
+    }
+    d->SetPixelShaderConstantF(0, &c[0][0], 27);
 }
 
 void ps_set_constant(const PixelShaderDef *def, uint32_t reg, const float *v)

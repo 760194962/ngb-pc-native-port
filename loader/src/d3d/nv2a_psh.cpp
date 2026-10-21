@@ -90,6 +90,10 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
     s += "float4 pc[18] : register(c0);\n"  // c0-7 stage C0, c8-15 stage C1, c16/17 final C0/C1
          "float4 fogColor : register(c18);\n"
          "float4 bumpMat[4] : register(c19);\n"
+         // 1 / size of a linear texture per stage (1 for swizzled): coordinates the pixel shader computes itself are
+         // in texels for those (xemu psh.c norm(): DOT_ST, BUMPENVMAP, DPNDNT, DOT_STR_3D); direct coordinates are
+         // scaled in the vertex stage (texScale)
+         "float4 rectScale[4] : register(c23);\n"
          "sampler2D s2d0 : register(s0); sampler2D s2d1 : register(s1); sampler2D s2d2 : register(s2); sampler2D s2d3 : register(s3);\n"
          "samplerCUBE scu0 : register(s0); samplerCUBE scu1 : register(s1); samplerCUBE scu2 : register(s2); samplerCUBE scu3 : register(s3);\n"
          "struct PSIn { float4 v0 : COLOR0; float4 v1 : COLOR1; float4 tc0 : TEXCOORD0; float4 tc1 : TEXCOORD1;\n"
@@ -167,16 +171,16 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
         case 6: case 7: // BUMPENVMAP (_LUM): offset the coordinates by the bump map
             snprintf(b, sizeof b,
                      "  { float2 du = %s.rg * 2 - 1; float2 o = float2(dot(du, bumpMat[%d].xz), dot(du, bumpMat[%d].yw));\n"
-                     "    t%d = tex2D(s2d%d, tc[%d].xy%s + o); }\n",
-                     tin.c_str(), i, i, i, i, i, (bump_divide >> i & 1) ? (" / tc[" + std::to_string(i) + "].w").c_str() : "");
+                     "    t%d = tex2D(s2d%d, tc[%d].xy%s + o * rectScale[%d].xy); }\n",
+                     tin.c_str(), i, i, i, i, i, (bump_divide >> i & 1) ? (" / tc[" + std::to_string(i) + "].w").c_str() : "", i);
             s += b;
             break;
         case 15: // DPNDNT_AR
-            snprintf(b, sizeof b, "  t%d = tex2D(s2d%d, %s.ar);\n", i, i, tin.c_str());
+            snprintf(b, sizeof b, "  t%d = tex2D(s2d%d, %s.ar * rectScale[%d].xy);\n", i, i, tin.c_str(), i);
             s += b;
             break;
         case 16: // DPNDNT_GB
-            snprintf(b, sizeof b, "  t%d = tex2D(s2d%d, %s.gb);\n", i, i, tin.c_str());
+            snprintf(b, sizeof b, "  t%d = tex2D(s2d%d, %s.gb * rectScale[%d].xy);\n", i, i, tin.c_str(), i);
             s += b;
             break;
         case 17: // DOTPRODUCT: keep the dot for the next stage
@@ -184,8 +188,8 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
             s += b;
             break;
         case 9: // DOT_ST: (previous dot, this dot)
-            snprintf(b, sizeof b, "  d%d = dot(tc[%d].xyz, %s); t%d = tex2D(s2d%d, float2(d%d, d%d));\n", i, i, nin.c_str(), i, i,
-                     i > 0 ? i - 1 : 0, i);
+            snprintf(b, sizeof b, "  d%d = dot(tc[%d].xyz, %s); t%d = tex2D(s2d%d, float2(d%d, d%d) * rectScale[%d].xy);\n", i, i,
+                     nin.c_str(), i, i, i > 0 ? i - 1 : 0, i, i);
             s += b;
             break;
         case 10: // DOT_ZW: depth replace (not emulated): pass the dot

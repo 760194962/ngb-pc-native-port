@@ -440,12 +440,15 @@ bool stage_reads_texture(const uint32_t *ts)
 
 void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
 {
+    bool rt_stage[4] = {};
+    g_ffp_edge_stages = 0;
     for (int s = 0; s < 4; s++) {
         IDirect3DBaseTexture9 *t = nullptr;
         if (!g_st.textures[s] && fixed_function_pixels && stage_reads_texture(texture_state(s))) t = white_texture();
         if (Resource *r = g_st.textures[s]) {
             const uint32_t *ts = texture_state(s); // MAGFILTER 3, MINFILTER 4: 2 = LINEAR and up
             t = rt_texture_for((const PixelContainer *)r, g_draw_serial, ts[3] >= 2 || ts[4] >= 2);
+            rt_stage[s] = t != nullptr;
             if (debug_frame_active() && (r->Data == backbuffer_data() || r->Data == depthbuffer_data() || t)) {
                 uint32_t w, h, dd, l;
                 pixel_container_dims((PixelContainer *)r, &w, &h, &dd, &l);
@@ -462,6 +465,22 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
         ts_on_change(s, 0, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_ADDRESSU, conv_address(v)); });
         ts_on_change(s, 1, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_ADDRESSV, conv_address(v)); });
         ts_on_change(s, 2, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_ADDRESSW, conv_address(v)); });
+        // A fix of the game, not emulation: the lava heat haze (FUN_00236010+0x130c: sprites, colour = stage 0, a
+        // 512x256 copy of the screen read through projected camera-space coordinates; alpha = stage 1's 128x128 DXT5
+        // mask x TFACTOR; blended SRCALPHA/INVSRCALPHA) reads a little past the copy's right edge. Clamped, that edge
+        // column ran down the right of the screen as a band (black on the Xbox, where the column is never drawn;
+        // smeared here once it is; mirrored, a visible mirror; transparent black border, a black band since the alpha
+        // is not the copy's: the user, 2026-10-20/22). Such a stage takes the pixel's alpha to 0 where its coordinates
+        // leave 0..1 (ffp_ps.cpp): the sprite is not drawn there and the screen shows as it is, like everywhere else.
+        // Fixed-function draws and colour targets only (a shadow map is a projected render target read too).
+        // cfg:edgemirror:0 clamps.
+        {
+            const uint32_t *ts = texture_state(s);
+            uint32_t fmt = rt_stage[s] ? (((const PixelContainer *)g_st.textures[s])->Format >> FMT_FORMAT_SHIFT) & 0xFF : 0;
+            if (g_cfg.edge_mirror && fixed_function_pixels && rt_stage[s] && !(fmt >= 0x2A && fmt <= 0x31) &&
+                (ts[21] & D3DTTFF_PROJECTED) && ts[0] == 3 && ts[1] == 3)
+                g_ffp_edge_stages |= 1u << s;
+        }
         ts_on_change(s, 3, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MAGFILTER, v > 3 ? D3DTEXF_LINEAR : v); });
         ts_on_change(s, 4, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MINFILTER, v > 3 ? D3DTEXF_LINEAR : v); });
         ts_on_change(s, 5, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MIPFILTER, v > 2 ? D3DTEXF_LINEAR : v); });
@@ -832,6 +851,8 @@ uint32_t convert_vertices(const VertexShader *vs, uint32_t first, uint32_t count
     return stride;
 }
 
+} // namespace
+
 // Linear (pitch) textures are addressed with texel coordinates on the NV2A; D3D9 wants 0..1.
 void linear_texture_scale(int stage, float *sx, float *sy)
 {
@@ -846,6 +867,8 @@ void linear_texture_scale(int stage, float *sx, float *sy)
     *sx = 1.0f / (float)w;
     *sy = 1.0f / (float)h;
 }
+
+namespace {
 
 // All 200 registers on every draw (~1.3 ms a frame in busy scenes). Sending only the registers that changed
 // since the last upload broke the picture: the device then held values that were never sent to those
@@ -1574,6 +1597,31 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
     if (sx == 1 && sy == 1 && !nts && dx == 0 && dy == 0) return src;
     perf::Scope perf_scope(perf::kConvert);
     g_rhw.assign(src + (size_t)first * stride, src + (size_t)(first + count) * stride);
+    if (g_cfg.rhw_edge_fix && g_st.render_target && !is_backbuffer(g_st.render_target)) {
+        // A game slip, not emulation: the lava heat haze (FUN_00236010) draws the screen into a 512x256 target with a
+        // -0.5 .. 510.5 x -0.5 .. 254.5 quad, a pixel short on both sides, also on the Xbox; the last column, never
+        // written, came back as a dark bar down the right of the screen (the user, 2026-10-19: in the original too).
+        // A quad from -0.5 that stops exactly one pixel short of a texture target is taken to the edge.
+        // cfg:rhwedge:0 keeps the game's quad.
+        uint32_t tw = 0, th = 0, td, tl;
+        pixel_container_dims((const PixelContainer *)g_st.render_target, &tw, &th, &td, &tl);
+        float mnx = 1e30f, mxx = -1e30f, mny = 1e30f, mxy = -1e30f;
+        for (uint32_t v = 0; v < count; v++) {
+            const float *p = (const float *)&g_rhw[(size_t)v * stride];
+            mnx = std::min(mnx, p[0]), mxx = std::max(mxx, p[0]), mny = std::min(mny, p[1]), mxy = std::max(mxy, p[1]);
+        }
+        bool fx = tw && mnx == -0.5f && mxx == (float)tw - 1.5f, fy = th && mny == -0.5f && mxy == (float)th - 1.5f;
+        if (fx || fy) {
+            for (uint32_t v = 0; v < count; v++) {
+                float *p = (float *)&g_rhw[(size_t)v * stride];
+                if (fx && p[0] == mxx) p[0] = (float)tw - 0.5f;
+                if (fy && p[1] == mxy) p[1] = (float)th - 0.5f;
+            }
+            static int noted;
+            if (noted++ < 4) logf("[draw] frame %u: XYZRHW quad a pixel short of its %ux%u target, taken to the edge (%s%s)",
+                                  g_frame_count.load(), tw, th, fx ? "x" : "", fy ? "y" : "");
+        }
+    }
     for (uint32_t v = 0; v < count; v++) {
         float *p = (float *)&g_rhw[(size_t)v * stride];
         p[0] = p[0] * sx + dx;

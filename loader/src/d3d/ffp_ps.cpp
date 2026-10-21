@@ -25,6 +25,8 @@ namespace xd3d {
 
 D3DTEXTUREOP conv_texop(uint32_t v); // draw.cpp: the Xbox op number -> D3DTEXTUREOP
 
+uint32_t g_ffp_edge_stages;
+
 namespace {
 
 std::unordered_map<std::string, IDirect3DPixelShader9 *> g_ffp_cache;
@@ -34,6 +36,7 @@ struct StageKey {
     uint32_t tex;  // 0 none, 1 2D, 2 cube
     uint32_t kill; // D3DTSS_ALPHAKILL set (texture_state 11)
     uint32_t proj; // D3DTTFF_PROJECTED: 3 = divide by z, 4 = divide by w, 0 = none
+    uint32_t edge; // g_ffp_edge_stages: alpha 0 where this stage's coordinates leave 0..1
 };
 
 // An argument (D3DTA_*) with its modifiers as an HLSL expression.
@@ -158,6 +161,12 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
         const char *dst = (k[i].result & 0xF) == 5 ? "temp" : "cur";
         s += std::string("  ") + dst + " = saturate(float4((" + c + ").rgb, (" + a + ").a));\n";
     }
+    for (int i = 0; i < 4; i++) {
+        if (!k[i].edge) continue;
+        snprintf(b, sizeof b, "  { float2 st = tc[%d].xy / tc[%d].%c; cur.a *= step(0, st.x) * step(st.x, 1) * step(0, st.y) * step(st.y, 1); }\n",
+                 i, i, k[i].proj == 4 ? 'w' : 'z');
+        s += b;
+    }
     if (g_cfg.ffp_debug == 1 && k[1].tex) s += "  return float4(t1.rgb, 1);\n}\n";        // cfg:ffpdebug:1
     else if (g_cfg.ffp_debug == 2 && k[1].tex) s += "  return float4(t1.aaa, 1);\n}\n";   // cfg:ffpdebug:2
     else s += specular ? "  return float4(saturate(cur.rgb + v1.rgb), cur.a);\n}\n" : "  return cur;\n}\n";
@@ -187,6 +196,7 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
         // whatever the combiners do. Ninja Gaiden Black enables it on stage 1 of a projected-texture pass
         // (FUN_00236010 at 0x2370D8).
         e.kill = e.tex && ts[11] != 0;
+        e.edge = e.tex == 1 && e.proj && ((g_ffp_edge_stages >> i) & 1);
     }
     bool specular = render_state()[XRS_SPECULARENABLE] != 0;
     // Point sprites: the Xbox D3D library builds the combiner stages from stage 3 on (FUN_003d4340 of Ninja Gaiden
