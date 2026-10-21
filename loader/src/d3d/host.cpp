@@ -273,8 +273,14 @@ DWORD WINAPI ui_thread(void *)
     RECT r = {0, 0, g_win_w, g_win_h};
     DWORD style = WS_OVERLAPPEDWINDOW;
     AdjustWindowRect(&r, style, FALSE);
-    g_hwnd = CreateWindowExW(0, wc.lpszClassName, game_title(), style, CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left,
-                             r.bottom - r.top, nullptr, nullptr, wc.hInstance, nullptr);
+    // Centred on the primary monitor's work area (the desktop without the taskbar) at every start (the user,
+    // 2026-10-22); a window larger than that area starts at its top left.
+    RECT work = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    int ww = r.right - r.left, wh = r.bottom - r.top;
+    int wx = work.left + std::max(0, (int)(work.right - work.left - ww) / 2);
+    int wy = work.top + std::max(0, (int)(work.bottom - work.top - wh) / 2);
+    g_hwnd = CreateWindowExW(0, wc.lpszClassName, game_title(), style, wx, wy, ww, wh, nullptr, nullptr, wc.hInstance, nullptr);
     RAWINPUTDEVICE mouse = {0x01, 0x02, 0, g_hwnd}; // generic desktop / mouse, while the window has focus
     if (!RegisterRawInputDevices(&mouse, 1, sizeof mouse)) logf("host: raw mouse input not available (%lu)", GetLastError());
     ShowWindow(g_hwnd, g_cfg.background ? SW_SHOWMINNOACTIVE : SW_SHOWNORMAL);
