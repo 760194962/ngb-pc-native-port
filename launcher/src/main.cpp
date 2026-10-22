@@ -13,12 +13,15 @@
 #include <d2d1.h>
 #include <dwrite.h>
 #include <dwrite_1.h>
+#include <dxgi1_6.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <wincodec.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -32,8 +35,8 @@ constexpr float kW = 1180, kH = 700, kNavW = 236;
 D2D1_COLOR_F rgb(uint32_t v, float a = 1.0f) { return D2D1::ColorF(v, a); }
 const uint32_t kInk = 0x0b0a0d, kInk3 = 0x2a2630, kBone = 0xece7dd, kAsh = 0xa39c92, kBlood = 0xcf3640, kGold = 0xcfa650;
 
-enum Page { kStart, kInstall, kDisplay, kControls, kSaves, kAbout, kPageCount };
-const wchar_t *const kIcons[kPageCount] = {L"\xE768", L"\xE896", L"\xE7F4", L"\xE7FC", L"\xE74E", L"\xE946"};
+enum Page { kStart, kInstall, kDisplay, kGraphics, kControls, kSaves, kAbout, kPageCount };
+const wchar_t *const kIcons[kPageCount] = {L"\xE768", L"\xE896", L"\xE7F4", L"\xE790", L"\xE7FC", L"\xE74E", L"\xE946"};
 
 template <class T> void release(T *&p)
 {
@@ -69,6 +72,7 @@ struct App {
     std::wstring game_detail;
     int help = 0; // the "?" panel open: 0 none, else its hit id
     int ask = 0;  // the confirmation open: 0 none, else kAsk*
+    int list_open = 0; // the drop-down list open: 0 none, else its hit id (kHitResList, kHitGpu)
 };
 enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete };
 App g;
@@ -76,8 +80,22 @@ App g;
 // Hit ids: 0..kPageCount-1 the navigation, then these
 enum {
     kHitStart = 100, kHitLangZh, kHitLangEn, kHitPickIso, kHitPickDest, kHitInstall, kHitCancel, kHitDeleteIso, kHitPickGame,
-    kHitHelpImage, kHitHelpInstalled, kHitHelpClose, kHitAskYes, kHitAskNo, kHitDefaultPath
+    kHitHelpImage, kHitHelpInstalled, kHitHelpClose, kHitAskYes, kHitAskNo, kHitDefaultPath,
+    kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
+    kHitGainDown = 270, kHitGainUp, kHitGammaDown, kHitGammaUp, kHitWin = 280, kHitResList = 300
 };
+// Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
+// CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
+// texture limit (loader d3d/device.cpp setup_render_scale: 10x widescreen renders 8192x4800, r289).
+constexpr int kMaxScale = 10;
+std::wstring render_size(double scale, bool wide)
+{
+    int w = (int)std::lround(std::min(720.0 * scale * (wide ? 4.0 / 3.0 : 1.0), 8192.0)), h = (int)std::lround(480.0 * scale);
+    return std::to_wstring(w) + L"\u00D7" + std::to_wstring(h);
+}
+// The window sizes offered (client area) for 16:9 and for 4:3; 0 x 0 = auto (the largest that fits the screen)
+const int kWin169[][2] = {{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
+const int kWin43[][2] = {{0, 0}, {960, 720}, {1280, 960}, {1440, 1080}, {1920, 1440}};
 constexpr UINT_PTR kTimerInstall = 1;
 struct Hit {
     int id;
@@ -127,6 +145,47 @@ std::string black_ini(const char *key)
     return v;
 }
 
+// Sets key = value in black.ini, keeping every other line (the game writes the file on exit too)
+void black_ini_set(const char *key, const std::string &value)
+{
+    std::wstring path = g.dir + L"\\black.ini";
+    std::vector<std::string> lines;
+    FILE *f = _wfopen(path.c_str(), L"r");
+    if (f) {
+        char line[512];
+        while (fgets(line, sizeof line, f)) {
+            std::string l = line;
+            l.erase(l.find_last_not_of("\r\n") + 1);
+            lines.push_back(l);
+        }
+        fclose(f);
+    }
+    size_t n = strlen(key);
+    bool done = false;
+    for (std::string &l : lines)
+        if (!l.compare(0, n, key) && l.size() > n && (l[n] == ' ' || l[n] == '=')) {
+            l = std::string(key) + " = " + value;
+            done = true;
+        }
+    if (!done) lines.push_back(std::string(key) + " = " + value);
+    f = _wfopen(path.c_str(), L"w");
+    if (!f) return;
+    for (const std::string &l : lines) fprintf(f, "%s\n", l.c_str());
+    fclose(f);
+}
+
+void set_gpu_preference(int v) // 2 high performance, 1 power saving, 0 let Windows decide
+{
+    HKEY k;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", 0, nullptr, 0, KEY_SET_VALUE,
+                        nullptr, &k, nullptr))
+        return;
+    wchar_t s[32];
+    swprintf(s, 32, L"GpuPreference=%d;", v);
+    RegSetValueExW(k, game_exe().c_str(), 0, REG_SZ, (const BYTE *)s, (DWORD)((wcslen(s) + 1) * sizeof(wchar_t)));
+    RegCloseKey(k);
+}
+
 // Windows' per-program graphics preference for the game (the game sets "high performance" on its first run)
 int gpu_preference()
 {
@@ -141,6 +200,64 @@ int gpu_preference()
     return p ? _wtoi(p + 14) : -1;
 }
 
+// The graphics cards the game can be given: Windows' per-program preference picks the high performance card, the
+// power saving card, or leaves it to the system (DXGI 1.6 EnumAdapterByGpuPreference says which card each gives).
+// With one card (a desktop with one GPU) high performance and power saving are the same card, listed once. A third
+// card that no preference reaches cannot be chosen per program, so it is not offered. Read once.
+struct GpuChoice {
+    std::wstring name;
+    int pref; // GpuPreference: 2 high performance, 1 power saving, 0 let Windows decide
+};
+const std::vector<GpuChoice> &gpu_choices()
+{
+    static std::vector<GpuChoice> v;
+    static bool done;
+    if (done) return v;
+    done = true;
+    IDXGIFactory6 *f6 = nullptr;
+    IDXGIFactory1 *f = nullptr;
+    std::wstring name[3];
+    LUID luid[3] = {};
+    if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&f))) && SUCCEEDED(f->QueryInterface(IID_PPV_ARGS(&f6)))) {
+        const DXGI_GPU_PREFERENCE prefs[3] = {DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, DXGI_GPU_PREFERENCE_MINIMUM_POWER,
+                                              DXGI_GPU_PREFERENCE_UNSPECIFIED};
+        for (int i = 0; i < 3; i++) {
+            IDXGIAdapter1 *a = nullptr;
+            DXGI_ADAPTER_DESC1 d;
+            if (SUCCEEDED(f6->EnumAdapterByGpuPreference(0, prefs[i], IID_PPV_ARGS(&a))) && SUCCEEDED(a->GetDesc1(&d))) {
+                name[i] = d.Description;
+                luid[i] = d.AdapterLuid;
+            }
+            release(a);
+        }
+    }
+    release(f6);
+    release(f);
+    if (!name[0].empty()) v.push_back({name[0], 2});
+    if (!name[1].empty() && (luid[1].LowPart != luid[0].LowPart || luid[1].HighPart != luid[0].HighPart))
+        v.push_back({name[1], 1});
+    v.push_back({name[2], 0});
+    return v;
+}
+
+// The choice in effect: not set yet is high performance (the game sets that on its first run)
+int gpu_choice_index()
+{
+    const std::vector<GpuChoice> &v = gpu_choices();
+    int pref = gpu_preference();
+    if (pref < 0) pref = 2;
+    for (size_t i = 0; i < v.size(); i++)
+        if (v[i].pref == pref) return (int)i;
+    return 0; // power saving with a single card: that card
+}
+
+// "Let Windows decide · Intel ..." / the card's name
+std::wstring gpu_label(const GpuChoice &ch)
+{
+    if (ch.pref) return ch.name;
+    return std::wstring(S(Str::GpuWindows)) + (ch.name.empty() ? L"" : L"  \x00B7  " + ch.name);
+}
+
 void launch_game()
 {
     if (!exists(game_exe()) || !exists(g.game)) {
@@ -150,7 +267,7 @@ void launch_game()
     // launcher.ini: hdd = the Xbox hard disk (default savedata next to the program); args = extra options for the game
     // (development: a log and a command file elsewhere), which then replace the default log
     std::wstring hdd = ini_get(L"hdd", (g.dir + L"\\savedata").c_str()), args = ini_get(L"args");
-    std::wstring cmd = L"\"" + game_exe() + L"\" --windowed --hdd \"" + hdd + L"\" ";
+    std::wstring cmd = L"\"" + game_exe() + L"\" --hdd \"" + hdd + L"\" "; // display settings come from black.ini
     if (args.empty()) {
         CreateDirectoryW((g.dir + L"\\logs").c_str(), nullptr);
         cmd += L"--log \"" + g.dir + L"\\logs\\black.log\" ";
@@ -382,9 +499,16 @@ IWICBitmapSource *load_jpeg(int id)
 
 // --- drawing ----------------------------------------------------------------------------------------------------
 
+// A row of a drop-down list (Painter::drop_list): the choice, then two details (strong: 1 or 2 = that one brighter)
+struct ListRow {
+    std::wstring a, b, c;
+    int strong = 0;
+};
+
 struct Painter {
     ID2D1RenderTarget *rt;
     ID2D1Bitmap *hero = nullptr, *texture = nullptr;
+    std::function<void()> overlay; // an open drop-down list, drawn after the page
 
     void text(const std::wstring &s, D2D1_RECT_F r, float size, uint32_t color, float alpha = 1.0f,
               DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL, const wchar_t *family = nullptr,
@@ -520,6 +644,20 @@ struct Painter {
         }
     }
 
+    // "Window 1600x900 · 16:9" / "Fullscreen · 16:9" / "Borderless · 4:3"
+    std::wstring display_summary()
+    {
+        std::string fs = black_ini("fullscreen"), win = black_ini("window");
+        std::wstring s = S(fs == "2" ? Str::ModeFullscreen : fs == "1" ? Str::ModeBorderless : Str::ModeWindow);
+        if (fs != "1" && fs != "2" && !win.empty() && win != "auto") {
+            std::wstring w(win.begin(), win.end());
+            size_t x = w.find(L'x');
+            if (x != std::wstring::npos) w[x] = L'\u00D7';
+            s += L" " + w;
+        }
+        return s + L"  \x00B7  " + (black_ini("widescreen") == "0" ? L"4:3" : L"16:9");
+    }
+
     void start_page()
     {
         const float x = kNavW + 56;
@@ -556,11 +694,8 @@ struct Painter {
         stroke(c, kInk3);
         fill({c.left, c.top, c.left + 3, c.bottom}, kGold, 0.8f);
         std::wstring rows[3][2] = {{S(Str::Game), ready ? folder_of(g.game) : S(Str::GameMissing)},
-                                   {S(Str::Gpu), S(gpu_preference() == 1 ? Str::GpuIntegrated
-                                                   : gpu_preference() == 2 ? Str::GpuDedicated
-                                                                           : Str::GpuAuto)},
-                                   {S(Str::Display), std::wstring(S(black_ini("fullscreen") == "1" ? Str::Fullscreen : Str::Windowed)) +
-                                                         L"  \x00B7  " + (black_ini("widescreen") == "0" ? L"4:3" : L"16:9")}};
+                                   {S(Str::Gpu), gpu_label(gpu_choices()[gpu_choice_index()])},
+                                   {S(Str::Display), display_summary()}};
         for (int i = 0; i < 3; i++) {
             float y = c.top + 12 + i * 46;
             text(rows[i][0], {c.left + 26, y, c.left + 130, y + 46}, 13.5f, kAsh);
@@ -763,6 +898,218 @@ struct Painter {
              {c2.left + 26, y2 + 36, c2.right - 20, y2 + 64}, 12.5f, !have ? kAsh : g.game_ok ? kGold : kBlood);
     }
 
+    // A row of options; returns nothing, registers base + i for each
+    void segmented(int base, float x, float y, const std::vector<std::wstring> &opts, int sel, float w = 104)
+    {
+        for (size_t i = 0; i < opts.size(); i++) {
+            D2D1_RECT_F r = {x + i * (w + 6), y, x + i * (w + 6) + w, y + 30};
+            bool on = (int)i == sel, hov = g.hover == base + (int)i;
+            g_hits.push_back({base + (int)i, r});
+            if (on) {
+                fill(r, kBlood, 0.22f, 3);
+                stroke(r, kBlood, 0.9f, 3);
+            } else {
+                fill(r, hov ? kInk3 : kInk, 0.85f, 3);
+                stroke(r, hov ? kGold : kInk3, 1.0f, 3);
+            }
+            text(opts[i], r, 13, on || hov ? kBone : kAsh, 1.0f, on ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+                 nullptr, DWRITE_TEXT_ALIGNMENT_CENTER);
+        }
+    }
+
+    void stepper(int down, int up, float x, float y, float value)
+    {
+        button(down, {x, y, x + 30, y + 30}, L"\x2212", false);
+        wchar_t b[16];
+        swprintf(b, 16, L"%.2f", value);
+        text(b, {x + 34, y, x + 104, y + 30}, 14, kBone, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, L"Segoe UI", DWRITE_TEXT_ALIGNMENT_CENTER);
+        button(up, {x + 108, y, x + 138, y + 30}, L"+", false);
+    }
+
+    // A settings page's title, its note, and its card; returns the card's content top. The rows are 40 high.
+    float settings_page(Str title, Str heading, int rows, D2D1_RECT_F *card_out)
+    {
+        const float x = kNavW + 56, w = 800;
+        text(S(title), {x, 46, x + 700, 98}, 32, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
+        fill({x, 102, x + 36, 104}, kBlood);
+        text(S(Str::AppliesNext), {x + 60, 88, x + w, 112}, 12.5f, kAsh, 0.85f);
+        *card_out = {x, 124, x + w, 124 + 50 + rows * 40.0f + 8};
+        return card(*card_out, S(heading));
+    }
+
+    // Display: how the picture reaches the screen
+    void display_page()
+    {
+        D2D1_RECT_F c;
+        float y = settings_page(Str::NavDisplay, Str::Picture, 5, &c);
+        const float lx = c.left + 26, cx = c.left + 210;
+        auto label = [&](Str s) { text(S(s), {lx, y, cx - 10, y + 30}, 13.5f, kAsh); };
+        std::string fs = black_ini("fullscreen"), ws = black_ini("widescreen");
+        label(Str::DisplayMode); // fullscreen = 0 window, 2 exclusive fullscreen, 1 borderless
+        segmented(kHitMode, cx, y, {S(Str::ModeWindow), S(Str::ModeFullscreen), S(Str::ModeBorderless)},
+                  fs == "2" ? 1 : fs == "1" ? 2 : 0, 120);
+        y += 40;
+        label(Str::WindowSize);
+        {
+            const int(*sizes)[2] = ws == "0" ? kWin43 : kWin169;
+            std::string cur = black_ini("window");
+            RECT work;
+            SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+            int wsel = 0;
+            std::vector<std::wstring> opts;
+            for (int i = 0; i < 5; i++) {
+                if (!i) opts.push_back(S(Str::SizeAuto));
+                else opts.push_back(std::to_wstring(sizes[i][0]) + L"\u00D7" + std::to_wstring(sizes[i][1]));
+                if (i && cur == std::to_string(sizes[i][0]) + "x" + std::to_string(sizes[i][1])) wsel = i;
+            }
+            for (size_t i = 0; i < opts.size(); i++) {
+                D2D1_RECT_F r = {cx + i * 98, y, cx + i * 98 + 92, y + 30};
+                bool fits = !i || (sizes[i][0] <= work.right - work.left && sizes[i][1] <= work.bottom - work.top);
+                bool on = (int)i == wsel, hov = fits && g.hover == kHitWin + (int)i;
+                if (fits) g_hits.push_back({kHitWin + (int)i, r});
+                if (on) {
+                    fill(r, kBlood, 0.22f, 3);
+                    stroke(r, kBlood, 0.9f, 3);
+                } else {
+                    fill(r, hov ? kInk3 : kInk, fits ? 0.85f : 0.4f, 3);
+                    stroke(r, hov ? kGold : kInk3, fits ? 1.0f : 0.5f, 3);
+                }
+                text(opts[i], r, 12.5f, on || hov ? kBone : kAsh, fits ? 1.0f : 0.4f,
+                     on ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_CENTER);
+            }
+        }
+        y += 40;
+        label(Str::Aspect);
+        segmented(kHitAspect, cx, y, {L"16:9", L"4:3"}, ws == "0" ? 1 : 0, 72);
+        text(S(Str::AspectSoon), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
+        y += 40;
+        label(Str::Brightness);
+        std::string gn = black_ini("gain"), gm = black_ini("gamma");
+        stepper(kHitGainDown, kHitGainUp, cx, y, gn.empty() ? 1.0f : (float)atof(gn.c_str()));
+        y += 40;
+        label(Str::Gamma);
+        stepper(kHitGammaDown, kHitGammaUp, cx, y, gm.empty() ? 1.0f : (float)atof(gm.c_str()));
+    }
+
+    // Graphics: how the picture is made
+    void graphics_page()
+    {
+        D2D1_RECT_F c;
+        float y = settings_page(Str::NavGraphics, Str::Rendering, 4, &c);
+        const float lx = c.left + 26, cx = c.left + 210;
+        auto label = [&](Str s) { text(S(s), {lx, y, cx - 10, y + 30}, 13.5f, kAsh); };
+        label(Str::Resolution);
+        resolution_list(cx, y - 2, c.right - 26);
+        y += 40;
+        label(Str::AntiAlias);
+        segmented(kHitAa, cx, y, {S(Str::On), S(Str::Off)}, black_ini("aa") == "0" ? 1 : 0, 72);
+        y += 40;
+        label(Str::SeamFill);
+        segmented(kHitSeam, cx, y, {S(Str::On), S(Str::Off)}, black_ini("seamfill") == "0" ? 1 : 0, 72);
+        y += 40;
+        label(Str::EffectsNative);
+        segmented(kHitFx, cx, y, {S(Str::On), S(Str::Off)}, black_ini("effectsnative") == "1" ? 0 : 1, 72);
+
+        D2D1_RECT_F c2 = {c.left, c.bottom + 14, c.right, c.bottom + 14 + 92};
+        float y2 = card(c2, S(Str::GpuCard));
+        gpu_list(cx, y2, c2.right - 26);
+    }
+
+    // Render resolution: a list of the window's size and 1x - 10x, each with its size in 16:9 and in 4:3 (the
+    // current aspect's brighter). black.ini: render = native, or render = scale + scale = N. A "render = 1080" from
+    // the game's own PC SETTINGS shows as 1080p until a choice here replaces it.
+    void resolution_list(float x, float y, float right)
+    {
+        bool wide = black_ini("widescreen") != "0";
+        std::string rd = black_ini("render"), sc = black_ini("scale");
+        double scale = sc.empty() ? 3.0 : atof(sc.c_str());
+        std::vector<ListRow> rows;
+        rows.push_back({S(Str::ResWindow), S(Str::ResWindowNote), L"", 0});
+        for (int i = 1; i <= kMaxScale; i++) {
+            std::wstring a = std::to_wstring(i) + L"\u00D7";
+            if (i == 1) a += S(Str::ResOriginal);
+            if (i == 3) a += S(Str::ResDefault);
+            rows.push_back({a, L"16:9  " + render_size(i, true), L"4:3  " + render_size(i, false), wide ? 1 : 2});
+        }
+        int sel = -1;
+        ListRow shown;
+        if (rd == "native") sel = 0;
+        else if (rd.empty() || rd == "scale") {
+            if (scale == std::floor(scale) && scale >= 1 && scale <= kMaxScale) sel = (int)scale;
+            wchar_t b[16];
+            swprintf(b, 16, L"%g\u00D7", scale);
+            shown = {b, L"", render_size(scale, wide), 0};
+        } else
+            shown = {std::wstring(rd.begin(), rd.end()) + L"p", L"", L"", 0};
+        if (sel >= 0) {
+            shown = rows[sel];
+            if (sel) shown = {shown.a, L"", wide ? shown.b : shown.c, 0}; // the box: the current aspect's size only
+        }
+        drop_list(kHitResList, {x, y, right, y + 34}, shown, rows, sel, S(Str::ResFooter));
+    }
+
+    // The graphics card: the cards that can be chosen (gpu_choices), and what Windows calls each choice
+    void gpu_list(float x, float y, float right)
+    {
+        std::vector<ListRow> rows;
+        for (const GpuChoice &ch : gpu_choices())
+            rows.push_back({gpu_label(ch), L"", ch.pref ? S(ch.pref == 2 ? Str::GpuHigh : Str::GpuLow) : L"", 0});
+        int sel = gpu_choice_index();
+        drop_list(kHitGpu, {x, y, right, y + 34}, rows[sel], rows, sel, L"");
+    }
+
+    // One row of a list: the choice on the left; b in a column, c on the right (strong: 1 or 2 = that one brighter)
+    void list_row(D2D1_RECT_F r, const ListRow &row, bool on)
+    {
+        text(row.a, {r.left + 14, r.top, r.right - (row.b.empty() ? 170 : 330), r.bottom}, 13.5f, on ? kBone : kAsh, 1.0f,
+             on ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+        if (!row.b.empty())
+            text(row.b, {r.right - 320, r.top, r.right - (row.c.empty() ? 36 : 180), r.bottom}, 12.5f, row.strong == 1 ? kBone : kAsh,
+                 row.strong == 1 ? 1.0f : 0.7f, DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+        if (!row.c.empty())
+            text(row.c, {r.right - (row.b.empty() ? 180 : 160), r.top, r.right - 36, r.bottom}, 12.5f, row.strong == 2 || !row.strong ? kBone : kAsh,
+                 row.strong == 2 ? 1.0f : 0.7f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
+                 row.b.empty() ? DWRITE_TEXT_ALIGNMENT_TRAILING : DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+    }
+
+    // A drop-down list: the box shows `shown`; a click opens the rows (hit id + 1 + row) under it, over the rest of
+    // the page (drawn last, see draw), with an optional note at the bottom. A click anywhere else closes it.
+    void drop_list(int id, D2D1_RECT_F box, const ListRow &shown, const std::vector<ListRow> &rows, int sel,
+                   const std::wstring &note)
+    {
+        bool open = g.list_open == id, hov = g.hover == id || open;
+        fill(box, hov ? kInk3 : kInk, 0.9f, 3);
+        stroke(box, hov ? kGold : kInk3, 1.0f, 3);
+        list_row(box, shown, true);
+        text(L"\xE70D", {box.right - 34, box.top, box.right - 10, box.bottom}, 12, hov ? kGold : kAsh, 1.0f,
+             DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons", DWRITE_TEXT_ALIGNMENT_CENTER);
+        g_hits.push_back({id, box});
+        if (!open) return;
+        overlay = [this, id, box, rows, sel, note] {
+            g_hits.push_back({kHitListClose, {0, 0, kW, kH}}); // outside the list: close it
+            g_hits.push_back({id, box});                       // the box again: close it
+            const float rh = 32, note_h = note.empty() ? 0.0f : 30.0f;
+            D2D1_RECT_F list = {box.left, box.bottom + 4, box.right, box.bottom + 4 + rows.size() * rh + 8 + note_h};
+            fill(list, 0x16141a, 1.0f, 4);
+            stroke(list, kGold, 0.8f, 4);
+            for (size_t i = 0; i < rows.size(); i++) {
+                D2D1_RECT_F r = {list.left + 4, list.top + 4 + i * rh, list.right - 4, list.top + 4 + (i + 1) * rh};
+                int rid = id + 1 + (int)i;
+                bool on = (int)i == sel, over = g.hover == rid;
+                g_hits.push_back({rid, r});
+                if (on) fill({r.left, r.top + 7, r.left + 3, r.bottom - 7}, kBlood);
+                if (over) fill(r, kBone, 0.06f, 3);
+                list_row(r, rows[i], on || over);
+            }
+            if (!note.empty()) {
+                float ny = list.bottom - 4 - note_h;
+                fill({list.left + 14, ny, list.right - 14, ny + 1}, kInk3);
+                g_hits.push_back({0x7fff, {list.left, ny, list.right, list.bottom}});
+                text(note, {list.left + 18, ny, list.right - 14, list.bottom - 4}, 11.5f, kAsh, 0.85f);
+            }
+        };
+    }
+
     void placeholder_page()
     {
         const float x = kNavW + 56;
@@ -778,7 +1125,10 @@ struct Painter {
         nav();
         if (g.page == kStart) start_page();
         else if (g.page == kInstall) install_page();
+        else if (g.page == kDisplay) display_page();
+        else if (g.page == kGraphics) graphics_page();
         else placeholder_page();
+        if (overlay) overlay(); // an open drop-down list, over the page
         if (g.help) help_panel();
         if (g.ask) ask_panel();
     }
@@ -885,6 +1235,19 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
+        if (g.list_open) { // a drop-down list: a row chooses it, any click closes the list
+            int row = id - g.list_open - 1;
+            if (g.list_open == kHitGpu && row >= 0 && row < (int)gpu_choices().size())
+                set_gpu_preference(gpu_choices()[row].pref);
+            if (g.list_open == kHitResList && row == 0) black_ini_set("render", "native");
+            if (g.list_open == kHitResList && row >= 1 && row <= kMaxScale) {
+                black_ini_set("render", "scale");
+                black_ini_set("scale", std::to_string(row));
+            }
+            g.list_open = 0;
+            InvalidateRect(h, nullptr, FALSE);
+            return 0;
+        }
         if (g.ask) { // a confirmation: yes does what it asked, no (or outside) closes
             int ask = g.ask;
             if (id == kHitAskYes || id == kHitAskNo) g.ask = 0;
@@ -906,6 +1269,29 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id == kHitDeleteIso && g.offer_delete) g.ask = kAskDelete;
         else if (id == kHitPickGame) choose_existing();
         else if (id == kHitDefaultPath && !installing()) set_game_folder(default_game_folder());
+        else if (id >= kHitMode && id < kHitMode + 3) black_ini_set("fullscreen", id == kHitMode ? "0" : id == kHitMode + 1 ? "2" : "1");
+        else if (id >= kHitWin && id < kHitWin + 5) {
+            const int(*sizes)[2] = black_ini("widescreen") == "0" ? kWin43 : kWin169;
+            int i = id - kHitWin;
+            black_ini_set("window", i ? std::to_string(sizes[i][0]) + "x" + std::to_string(sizes[i][1]) : std::string("auto"));
+        }
+        else if (id >= kHitAspect && id < kHitAspect + 2) {
+            black_ini_set("widescreen", id == kHitAspect ? "1" : "0");
+            black_ini_set("window", "auto"); // a fixed size belongs to the other aspect
+        }
+        else if (id >= kHitAa && id < kHitAa + 2) black_ini_set("aa", id == kHitAa ? "1" : "0");
+        else if (id >= kHitSeam && id < kHitSeam + 2) black_ini_set("seamfill", id == kHitSeam ? "1" : "0");
+        else if (id >= kHitFx && id < kHitFx + 2) black_ini_set("effectsnative", id == kHitFx ? "1" : "0");
+        else if (id == kHitGpu || id == kHitResList) g.list_open = id;
+        else if (id >= kHitGainDown && id <= kHitGammaUp) { // 0.05 steps in the loader's range 0.5 - 3.0
+            const char *key = id <= kHitGainUp ? "gain" : "gamma";
+            std::string cur = black_ini(key);
+            double v = (cur.empty() ? 1.0 : atof(cur.c_str())) + ((id == kHitGainUp || id == kHitGammaUp) ? 0.05 : -0.05);
+            v = std::min(3.0, std::max(0.5, v));
+            char b[16];
+            sprintf_s(b, "%.2f", v);
+            black_ini_set(key, b);
+        }
         InvalidateRect(h, nullptr, FALSE);
         return 0;
     }
@@ -1006,6 +1392,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
             g.iso_need = install::image_size(g.iso, &err);
         }
         if (!wcscmp(argv[i], L"--show-ask") && i + 1 < argc) g.ask = _wtoi(argv[i + 1]); // with --snap: a confirmation
+        if (!wcscmp(argv[i], L"--show-list") && i + 1 < argc) // with --snap: a drop-down list open (gpu | res)
+            g.list_open = !wcscmp(argv[i + 1], L"gpu") ? kHitGpu : kHitResList;
         if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed)
             g.help = !wcscmp(argv[i + 1], L"image") ? kHitHelpImage : kHitHelpInstalled;
         if (!wcscmp(argv[i], L"--game") && i + 1 < argc) { // with --snap: this game folder
