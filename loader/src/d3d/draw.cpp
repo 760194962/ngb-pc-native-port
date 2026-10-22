@@ -463,10 +463,15 @@ bool stage_reads_texture(const uint32_t *ts)
     return false;
 }
 
+// Stage 0 of the draw being set up samples something the game drew (a render target, swizzled or not), not a picture
+// it loaded: scale_rhw tells screen copies from the game's art by it
+bool g_stage0_rendered;
+
 void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
 {
     bool rt_stage[4] = {};
     g_ffp_edge_stages = 0;
+    g_stage0_rendered = false;
     for (int s = 0; s < 4; s++) {
         IDirect3DBaseTexture9 *t = nullptr;
         if (!g_st.textures[s] && fixed_function_pixels && stage_reads_texture(texture_state(s))) t = white_texture();
@@ -474,6 +479,7 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
             const uint32_t *ts = texture_state(s); // MAGFILTER 3, MINFILTER 4: 2 = LINEAR and up
             t = rt_texture_for((const PixelContainer *)r, g_draw_serial, ts[3] >= 2 || ts[4] >= 2);
             rt_stage[s] = t != nullptr;
+            if (s == 0) g_stage0_rendered = rt_stage[0];
             if (debug_frame_active() && (r->Data == backbuffer_data() || r->Data == depthbuffer_data() || t)) {
                 uint32_t w, h, dd, l;
                 pixel_container_dims((PixelContainer *)r, &w, &h, &dd, &l);
@@ -1014,20 +1020,21 @@ std::string game_callers(const uint32_t *sp)
     return out;
 }
 
-// The return address of the game code that made this call (as game_callers, the first one only); 0 if none
-uint32_t first_game_caller(const uint32_t *sp)
+// The return addresses of the game code that made this call (as game_callers, the first `max`); how many were found
+int first_game_callers(const uint32_t *sp, uint32_t *out, int max)
 {
     const uint32_t *top = (const uint32_t *)((NT_TIB *)NtCurrentTeb())->StackBase;
     static const uint32_t code_end = game_code_end();
-    for (const uint32_t *p = sp; p < top && p < sp + 0x800; p++) {
+    int found = 0;
+    for (const uint32_t *p = sp; p < top && p < sp + 0x800 && found < max; p++) {
         uint32_t v = *p;
         if (v < 0x00011005 || v >= code_end) continue;
         const uint8_t *c = (const uint8_t *)(uintptr_t)v;
         if (c[-5] == 0xE8 || (c[-2] == 0xFF && (c[-1] & 0x38) == 0x10) || (c[-3] == 0xFF && (c[-2] & 0x38) == 0x10) ||
             (c[-6] == 0xFF && (c[-5] & 0x38) == 0x10))
-            return v;
+            out[found++] = v;
     }
-    return 0;
+    return found;
 }
 
 static bool write_png_bgra(const wchar_t *path, uint32_t w, uint32_t h, const uint8_t *px)
@@ -1509,8 +1516,38 @@ bool begin_draw(DrawCtx &ctx)
     return true;
 }
 
+// Set by scale_rhw for a picture squeezed to 16:9 that would show past it: the host rectangle the next draw is
+// clipped to; empty otherwise
+RECT g_rhw_clip;
+
+// For one draw: the scissor narrowed to g_rhw_clip (within the game's own, if on), and put back after
+struct ClipRhw {
+    IDirect3DDevice9 *d = nullptr;
+    DWORD on = FALSE;
+    RECT old = {};
+    ClipRhw()
+    {
+        if (g_rhw_clip.right <= g_rhw_clip.left) return;
+        d = host3d::dev();
+        RECT r = g_rhw_clip;
+        g_rhw_clip = {};
+        d->GetRenderState(D3DRS_SCISSORTESTENABLE, &on);
+        d->GetScissorRect(&old);
+        if (on) r = {std::max(r.left, old.left), std::max(r.top, old.top), std::min(r.right, old.right), std::min(r.bottom, old.bottom)};
+        d->SetScissorRect(&r);
+        if (!on) d->SetRenderState(D3DRS_SCISSORTESTENABLE, TRUE);
+    }
+    ~ClipRhw()
+    {
+        if (!d) return;
+        d->SetScissorRect(&old);
+        if (!on) d->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    }
+};
+
 void draw_up(uint32_t xprim, uint32_t verts, const void *data, uint32_t stride)
 {
+    ClipRhw clip;
     Prim p = conv_prim(xprim, verts);
     if (!p.count) return;
     perf::add_draw(verts, verts * stride);
@@ -1557,6 +1594,7 @@ bool pages_readable(const void *p, size_t n)
 
 void draw_indexed_up(uint32_t xprim, uint32_t nidx, const uint16_t *idx, const void *verts, uint32_t stride)
 {
+    ClipRhw clip;
     if (!nidx) return;
     uint32_t mn = 0xFFFF, mx = 0;
     for (uint32_t i = 0; i < nidx; i++) {
@@ -1684,6 +1722,65 @@ void apply_rhw_tex_scales(uint8_t *verts, uint32_t count, uint32_t stride, const
         }
 }
 
+// 16:10 / 21:9 (ngb_aspect.cpp): the game lays its 2D out for 16:9 over the 720-wide buffer, so a wider picture
+// stretched its HUD, text and menus. Screen-space draws on the back buffer are squeezed back to 16:9 about the
+// centre. All of them come from one sprite routine (FUN_00325810).
+//  - The game's own pictures (swizzled textures: HUD, text, menus, the title screen, backgrounds) always, and they
+//    are clipped to the 16:9 part (g_rhw_clip, draw_up): a menu's pieces that reach or pass the sides (the title's
+//    background runs -32..751 at full height, its credits quad out to 744, r368; the main menu's bands and
+//    scrolling patterns out to -1153 and 1920, r371) then end at its edges, with black or the game on either side,
+//    rather than some stretched and some not (r369).
+//  - Untextured quads and screen copies (linear textures: fades, dimming, the glow pass at -0.5..719.5, r340) keep
+//    their full width when they reach a side or are nearly full height; smaller ones are squeezed.
+//  - A movie frame (linear, the Sofdec player's blit FUN_0031DA50 + 0x13C, the full-screen quad of r346) keeps its
+//    16:9 shape, with black on either side.
+// 16:10 is narrower than 16:9: there the same 16:9 shape is kept by lowering the 2D instead (see the end).
+// Works on Xbox-pixel positions (x, y at the start of each vertex), before the render scale (sx, sy) is applied.
+void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, float sy)
+{
+    g_rhw_clip = {}; // none left from a draw that was not made
+    if (!g_cfg.widescreen || g_cfg.aspect_w * 9 == g_cfg.aspect_h * 16 || !g_st.render_target || !is_backbuffer(g_st.render_target)) return;
+    float mnx = 1e30f, mxx = -1e30f, mny = 1e30f, mxy = -1e30f;
+    for (uint32_t v = 0; v < count; v++) {
+        const float *p = (const float *)&verts[(size_t)v * stride];
+        mnx = std::min(mnx, p[0]), mxx = std::max(mxx, p[0]), mny = std::min(mny, p[1]), mxy = std::max(mxy, p[1]);
+    }
+    float w = (float)backbuffer_width(), h = (float)backbuffer_height();
+    Resource *t0 = g_st.textures[0];
+    bool art = t0 && (resource_type(t0) == RTYPE_TEXTURE || resource_type(t0) == RTYPE_SURFACE) && !((PixelContainer *)t0)->Size &&
+               !g_stage0_rendered;
+    bool full_h = mxy - mny >= 0.9f * h, squeeze = art || !(mnx <= 0.5f || mxx >= w - 2.0f || full_h), clip = art;
+    if (!squeeze) {
+        uint32_t by[3] = {};
+        first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 3);
+        // a menu's band or rule: the menus' 2D (FUN_00222730, 234 bytes; its calls at 0x222795 and 0x222805) draws
+        // sprites through FUN_00325810, and their lines through 0x3273B8 (r375)
+        auto menu = [](uint32_t a) { return a >= 0x00222730 && a < 0x0022281A; };
+        if (full_h && by[0] == 0x0031DB8C) squeeze = true; // a movie frame
+        else if (!full_h && (menu(by[1]) || menu(by[2]))) squeeze = clip = true;
+    }
+    if (!squeeze) return;
+    float k = (16.0f / 9.0f) * g_cfg.aspect_h / g_cfg.aspect_w;
+    if (k < 1.0f) { // wider than 16:9 (21:9): narrowed about the centre, black or the game on either side
+        float c = w * 0.5f;
+        for (uint32_t v = 0; v < count; v++) {
+            float *p = (float *)&verts[(size_t)v * stride];
+            p[0] = c + (p[0] - c) * k;
+        }
+        if (clip && (mnx < c - c * k || mxx > c + c * k)) // only what would show outside the 16:9 part
+            g_rhw_clip = {(LONG)((c - c * k) * sx + 0.5f), 0, (LONG)((c + c * k) * sx + 0.5f), (LONG)(h * sy + 0.5f)};
+    } else { // narrower (16:10): widening it would cut its sides off (r392: the title's credits); lowered about the
+             // middle instead, the whole 16:9 layout shown with black or the game above and below
+        float ky = 1.0f / k, c = h * 0.5f;
+        for (uint32_t v = 0; v < count; v++) {
+            float *p = (float *)&verts[(size_t)v * stride];
+            p[1] = c + (p[1] - c) * ky;
+        }
+        if (clip && (mny < c - c * ky || mxy > c + c * ky))
+            g_rhw_clip = {0, (LONG)((c - c * ky) * sy + 0.5f), (LONG)(w * sx + 0.5f), (LONG)((c + c * ky) * sy + 0.5f)};
+    }
+}
+
 // Pre-transformed (XYZRHW) vertices carry Xbox screen pixels, but host render targets are scale_x/y() times
 // larger: copy vertices [first, first+count) with x/y scaled (and texel coordinates normalized, see above).
 // Returns a pointer usable with the original indices (the copy offset by -first vertices); other paths get
@@ -1747,33 +1844,7 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
                                   g_frame_count.load(), tw, th, fx ? "x" : "", fy ? "y" : "");
         }
     }
-    // 16:10 / 21:9 (ngb_aspect.cpp): the game lays its 2D out for 16:9 over the 720-wide buffer, so a wider picture
-    // stretched its HUD, text and menus. Screen-space draws on the back buffer are squeezed back to 16:9 about the
-    // centre, except the layout's own pieces: what reaches or passes a side of the screen, or is nearly as tall as it
-    // (fades, full-screen pictures in tiles, the scrolling patterns and bands of a chapter card, the glow pass), keeps
-    // its full width. All of them come from one sprite routine (FUN_00325810): a gameplay frame had the HUD's 13
-    // sprites at x 50..662 and the glow pass at -0.5..719.5 (r340); a chapter card 56, its picture in two full-height
-    // tiles -1.4..598.5 and 598.5..718.2 and patterns out to -130 and 1826 (r342).
-    if (g_cfg.widescreen && g_cfg.aspect_w * 9 != g_cfg.aspect_h * 16 && g_st.render_target && is_backbuffer(g_st.render_target)) {
-        float mnx = 1e30f, mxx = -1e30f, mny = 1e30f, mxy = -1e30f;
-        for (uint32_t v = 0; v < count; v++) {
-            const float *p = (const float *)&g_rhw[(size_t)v * stride];
-            mnx = std::min(mnx, p[0]), mxx = std::max(mxx, p[0]), mny = std::min(mny, p[1]), mxy = std::max(mxy, p[1]);
-        }
-        float w = (float)backbuffer_width(), h = (float)backbuffer_height();
-        bool layout = mnx <= 0.5f || mxx >= w - 2.0f || mxy - mny >= 0.9f * h;
-        // A movie frame (the Sofdec player's blit, FUN_0031DA50 + 0x13C: the full-screen quad of r346) keeps its 16:9
-        // shape too, with black on either side, rather than being stretched
-        if (layout && mxy - mny >= 0.9f * h && first_game_caller((const uint32_t *)_AddressOfReturnAddress()) == 0x0031DB8C)
-            layout = false;
-        if (!layout) {
-            float k = (16.0f / 9.0f) * g_cfg.aspect_h / g_cfg.aspect_w, c = w * 0.5f;
-            for (uint32_t v = 0; v < count; v++) {
-                float *p = (float *)&g_rhw[(size_t)v * stride];
-                p[0] = c + (p[0] - c) * k;
-            }
-        }
-    }
+    squeeze_169(g_rhw.data(), count, stride, sx, sy);
     for (uint32_t v = 0; v < count; v++) {
         float *p = (float *)&g_rhw[(size_t)v * stride];
         p[0] = p[0] * sx + dx;
@@ -1808,6 +1879,12 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
             for (int c = 0; c < 4; c++) wv[r * 4 + c] = W.m[r][0] * V.m[0][c] + W.m[r][1] * V.m[1][c] + W.m[r][2] * V.m[2][c] + W.m[r][3] * V.m[3][c];
         for (int r = 0; r < 4; r++)
             for (int c = 0; c < 4; c++) m[r * 4 + c] = wv[r * 4 + 0] * P.m[0][c] + wv[r * 4 + 1] * P.m[1][c] + wv[r * 4 + 2] * P.m[2][c] + wv[r * 4 + 3] * P.m[3][c];
+    }
+    std::vector<uint8_t> squeezed; // screen-space lines: squeezed to 16:9 as the other 2D (squeeze_169)
+    if (rhw) {
+        squeezed.assign((const uint8_t *)data, (const uint8_t *)data + (size_t)count * stride);
+        squeeze_169(squeezed.data(), count, stride, sx, sy);
+        data = squeezed.data();
     }
     struct SV { float x, y, z, rhw; uint32_t c; bool ok; };
     std::vector<SV> sv(count);
@@ -1852,6 +1929,7 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
         for (uint32_t i = 0; i + 1 < count; i++) segment(sv[i], sv[i + 1]);
         if (xprim == XPT_LINELOOP) segment(sv[count - 1], sv[0]);
     }
+    ClipRhw clip;
     if (q.empty()) return true;
     set_fvf(d, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
     d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)(q.size() / 3), q.data(), sizeof(QV));

@@ -145,9 +145,10 @@ corner (off by default); `aniso` anisotropic texture filtering (1 = off, 2-16). 
 `--perfhud`, `--aniso N`; command-line values hold for that run only and are not written back to `black.ini`.
 
 **Picture shape**: with `widescreen = 1`, `aspect = 16:9` (default), `16:10` or `21:9` (experimental), on the command
-line `--aspect W:H`; `widescreen = 0` is 4:3. At 16:10 / 21:9 the 3D view widens (the height stays) and the HUD, text,
-menus and the intro movie keep a 16:9 shape in the centre; the title screen's background art is stretched. Ninja
-Gaiden Black itself only: the bundled SNES / arcade programs stay 16:9.
+line `--aspect W:H`; `widescreen = 0` is 4:3. At 21:9 the 3D view widens (the height stays), at 16:10 it is a little
+narrower; the HUD, text, menus, the title screen and the intro movie keep a 16:9 shape (black at the sides at 21:9, above
+and below at 16:10); at 21:9 screens such as the shop and game over have not all been checked yet. Ninja Gaiden Black
+itself only: the bundled SNES / arcade programs stay 16:9.
 
 **Keyboard and controller**: the game itself reads only its controller; each key presses one controller input (by
 default WASD to move, arrows for the camera, J / K to attack, Space to jump, Esc for Start...). The launcher's Controls

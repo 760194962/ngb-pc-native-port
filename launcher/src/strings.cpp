@@ -296,13 +296,13 @@ const Pair kText[(int)Str::Count] = {
     {L"窗口：带边框的窗口，可拖动、改大小。\n全屏：独占屏幕，按桌面的分辨率与刷新率显示。Alt+Tab 切出再切回时，画面要稍等一下才恢复。\n无边框：铺满屏幕的无边框窗口，切换到其他程序是即时的。\n游戏中按 Alt+Enter 可以在窗口与全屏之间切换。\n\n性能：模式本身几乎没有影响。但渲染分辨率选「跟随窗口」时，画面越大（全屏、无边框）要画的像素越多，越吃显卡。",
      L"Window: a framed window you can move and resize.\nFullscreen: takes over the screen at the desktop\u2019s resolution and refresh rate. After Alt+Tab away and back the picture takes a moment to return.\nBorderless: a borderless window over the whole screen; switching to other programs is instant.\nIn the game, Alt+Enter switches between window and fullscreen.\n\nPerformance: the mode itself costs next to nothing. With the render resolution at \u201CWindow size\u201D, a bigger picture (fullscreen, borderless) means more pixels to draw and more GPU time."},
     {L"画面的形状：16:9、16:10、21:9 宽屏，或 4:3 原版。下方「窗口大小」的选项会跟着改变。\n"
-     L"16:10 与 21:9 时游戏的 3D 视野左右变宽（上下不变）；HUD、文字、菜单与片头视频保持 16:9 的比例放在中央，"
-     L"铺满画面的背景与过场图仍铺满。21:9 为实验性：标题画面的背景图会被横向拉宽，部分画面可能还有未处理的地方。\n\n"
+     L"21:9 时游戏的 3D 视野左右变宽（上下不变），16:10 时左右略窄；HUD、文字、菜单、标题画面与片头视频保持 16:9 的比例："
+     L"21:9 时放在中央、左右留黑边，16:10 时上下留黑边。21:9 为实验性：商店、游戏结束等画面还没有逐一检查。\n\n"
      L"性能：同样的渲染倍数下，画面越宽像素越多（3× 时 16:9 为 2880×1440，21:9 为 3780×1440，多约 31%），稍吃显卡。",
      L"The picture\u2019s shape: 16:9, 16:10 or 21:9 widescreen, or the original 4:3. The window sizes below follow it.\n"
-     L"At 16:10 and 21:9 the game\u2019s 3D view widens (the height stays); the HUD, text, menus and the intro movie keep a 16:9 "
-     L"shape in the centre, and full-screen backgrounds and cards still fill the screen. 21:9 is experimental: the title "
-     L"screen\u2019s background art is stretched, and some screens may still need work.\n\n"
+     L"At 21:9 the game\u2019s 3D view widens (the height stays), at 16:10 it is a little narrower; the HUD, text, menus, the "
+     L"title screen and the intro movie keep a 16:9 shape: at 21:9 in the centre with black at the sides, at 16:10 with black "
+     L"above and below. 21:9 is experimental: screens such as the shop and game over have not all been checked yet.\n\n"
      L"Performance: at the same render scale a wider picture has more pixels (at 3\u00D7, 2880\u00D71440 for 16:9 and "
      L"3780\u00D71440 for 21:9, about 31% more): a little more GPU time."},
     {L"窗口模式下游戏画面的大小。「自动」选能放进屏幕的最大尺寸；超出屏幕的尺寸不能选。全屏与无边框按屏幕大小显示，不使用这一项。\n\n性能：只有渲染分辨率选「跟随窗口」时，窗口越大越吃显卡；其他情况下窗口大小只影响最后的缩放，几乎没有代价。",
