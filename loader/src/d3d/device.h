@@ -32,6 +32,8 @@ void flash_add_var(uint32_t addr); // press-file "flashvar:ADDR"
 void logvar_add(uint32_t addr);    // press-file "logvar:ADDR": log a guest dword at each Swap where it changed
 void logvar_check(uint32_t frame); // called at every Swap
 bool is_backbuffer(const Surface *s);
+int backbuffer_width(); // the game's back buffer in Xbox pixels (720 x 480 for Ninja Gaiden Black)
+int backbuffer_height();
 void backbuffer_cpu_lock(); // D3DSurface_LockRect on the back buffer: the title draws it with the CPU
 void vis_begin();                  // NV097_SET_ZPASS_PIXEL_COUNT_ENABLE = 1: start counting (host occlusion query)
 HRESULT vis_end(uint32_t Index);   // D3DDevice_EndVisibilityTest: finish the query, write the report slot

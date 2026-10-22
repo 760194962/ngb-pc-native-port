@@ -64,6 +64,11 @@ void load_file()
         else if (k == "aniso") g_cfg.aniso = std::clamp(atoi(val), 1, 16);
         else if (k == "fps") g_cfg.fps = atoi(val) == 60 ? 60 : 30;
         else if (k == "widescreen") g_cfg.widescreen = v != 0;
+        else if (k == "aspect") { // 16:9, 16:10, 21:9 (widescreen shapes; 4:3 is widescreen = 0)
+            int w = 0, h = 0;
+            if (sscanf_s(val, "%d:%d", &w, &h) == 2 && w > 0 && h > 0 && w * 10 >= h * 15 && w * 10 <= h * 25)
+                g_cfg.aspect_w = w, g_cfg.aspect_h = h;
+        }
         else if (k == "fullscreen") { // 0 window, 1 borderless, 2 exclusive
             g_cfg.fullscreen = v != 0;
             g_cfg.exclusive = (int)v == 2;
@@ -156,6 +161,7 @@ void write_all(FILE *f)
     bool wide = g_cfg.widescreen_next >= 0 ? g_cfg.widescreen_next != 0 : g_cfg.widescreen;
     fprintf(f, "aa = %d\nfps = %d\nwidescreen = %d\nfullscreen = %d\n", g_cfg.aa ? 1 : 0, fps, wide ? 1 : 0,
             g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0);
+    fprintf(f, "aspect = %d:%d\n", g_cfg.aspect_w, g_cfg.aspect_h);
     if (g_cfg.window_w > 0 && g_cfg.window_h > 0) fprintf(f, "window = %dx%d\n", g_cfg.window_w, g_cfg.window_h);
     else fprintf(f, "window = auto\n");
     fprintf(f, "gain = %.2f\ngamma = %.2f\n", g_cfg.gain, g_cfg.gamma);

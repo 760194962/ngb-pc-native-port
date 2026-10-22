@@ -70,6 +70,9 @@ struct Config {
     // for original Xbox games: BLACK then uses a 16:9 projection and its `_wide` UI layouts in the same 640x480
     // buffer (anamorphic), and the loader renders and shows that buffer at 16:9. --normal-aspect turns it off.
     bool widescreen = true;
+    // The widescreen shape (black.ini aspect, Ninja Gaiden Black only): 16:9 as the game has it, or 16:10 / 21:9 by
+    // replacing the game's 16:9 constant (ngb_aspect.cpp). 4:3 is widescreen = false.
+    int aspect_w = 16, aspect_h = 9;
     bool fullscreen = false;   // --fullscreen: start borderless fullscreen
     bool exclusive = false;    // black.ini "fullscreen = 2": fullscreen is exclusive (D3D9 Windowed = FALSE), not borderless
     // Mouse look rotates the player directly (input/mouselook.cpp): mouse_sens x 0.022 degrees per count, the
@@ -165,6 +168,7 @@ extern std::atomic<uint32_t> g_frame_count; // frames presented so far (d3d/devi
 // Logging: every line goes to the log file and the console, prefixed with time and host thread id.
 void log_init(const std::wstring &path);
 void logf(const char *fmt, ...); // the log file (and the console with --verbose)
+void install_ngb_aspect();        // black.ini aspect 16:10 / 21:9 for Ninja Gaiden Black x2.1 (ngb_aspect.cpp)
 void logv(const char *fmt, va_list ap);
 void logc(const char *fmt, ...); // the log file and the console: startup, setup errors, exit, crashes
 [[noreturn]] void fatal(const char *fmt, ...);

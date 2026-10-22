@@ -1014,6 +1014,22 @@ std::string game_callers(const uint32_t *sp)
     return out;
 }
 
+// The return address of the game code that made this call (as game_callers, the first one only); 0 if none
+uint32_t first_game_caller(const uint32_t *sp)
+{
+    const uint32_t *top = (const uint32_t *)((NT_TIB *)NtCurrentTeb())->StackBase;
+    static const uint32_t code_end = game_code_end();
+    for (const uint32_t *p = sp; p < top && p < sp + 0x800; p++) {
+        uint32_t v = *p;
+        if (v < 0x00011005 || v >= code_end) continue;
+        const uint8_t *c = (const uint8_t *)(uintptr_t)v;
+        if (c[-5] == 0xE8 || (c[-2] == 0xFF && (c[-1] & 0x38) == 0x10) || (c[-3] == 0xFF && (c[-2] & 0x38) == 0x10) ||
+            (c[-6] == 0xFF && (c[-5] & 0x38) == 0x10))
+            return v;
+    }
+    return 0;
+}
+
 static bool write_png_bgra(const wchar_t *path, uint32_t w, uint32_t h, const uint8_t *px)
 {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -1729,6 +1745,33 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
             static int noted;
             if (noted++ < 4) logf("[draw] frame %u: XYZRHW quad a pixel short of its %ux%u target, taken to the edge (%s%s)",
                                   g_frame_count.load(), tw, th, fx ? "x" : "", fy ? "y" : "");
+        }
+    }
+    // 16:10 / 21:9 (ngb_aspect.cpp): the game lays its 2D out for 16:9 over the 720-wide buffer, so a wider picture
+    // stretched its HUD, text and menus. Screen-space draws on the back buffer are squeezed back to 16:9 about the
+    // centre, except the layout's own pieces: what reaches or passes a side of the screen, or is nearly as tall as it
+    // (fades, full-screen pictures in tiles, the scrolling patterns and bands of a chapter card, the glow pass), keeps
+    // its full width. All of them come from one sprite routine (FUN_00325810): a gameplay frame had the HUD's 13
+    // sprites at x 50..662 and the glow pass at -0.5..719.5 (r340); a chapter card 56, its picture in two full-height
+    // tiles -1.4..598.5 and 598.5..718.2 and patterns out to -130 and 1826 (r342).
+    if (g_cfg.widescreen && g_cfg.aspect_w * 9 != g_cfg.aspect_h * 16 && g_st.render_target && is_backbuffer(g_st.render_target)) {
+        float mnx = 1e30f, mxx = -1e30f, mny = 1e30f, mxy = -1e30f;
+        for (uint32_t v = 0; v < count; v++) {
+            const float *p = (const float *)&g_rhw[(size_t)v * stride];
+            mnx = std::min(mnx, p[0]), mxx = std::max(mxx, p[0]), mny = std::min(mny, p[1]), mxy = std::max(mxy, p[1]);
+        }
+        float w = (float)backbuffer_width(), h = (float)backbuffer_height();
+        bool layout = mnx <= 0.5f || mxx >= w - 2.0f || mxy - mny >= 0.9f * h;
+        // A movie frame (the Sofdec player's blit, FUN_0031DA50 + 0x13C: the full-screen quad of r346) keeps its 16:9
+        // shape too, with black on either side, rather than being stretched
+        if (layout && mxy - mny >= 0.9f * h && first_game_caller((const uint32_t *)_AddressOfReturnAddress()) == 0x0031DB8C)
+            layout = false;
+        if (!layout) {
+            float k = (16.0f / 9.0f) * g_cfg.aspect_h / g_cfg.aspect_w, c = w * 0.5f;
+            for (uint32_t v = 0; v < count; v++) {
+                float *p = (float *)&g_rhw[(size_t)v * stride];
+                p[0] = c + (p[0] - c) * k;
+            }
         }
     }
     for (uint32_t v = 0; v < count; v++) {

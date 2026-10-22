@@ -176,6 +176,13 @@ bool parse_args()
         }
         else if (a == L"--skip-videos") g_cfg.skip_videos = true;
         else if (a == L"--normal-aspect") { g_cfg.widescreen = false; settings_mark_cli("widescreen"); }
+        else if (a == L"--aspect") { // W:H widescreen shape (Ninja Gaiden Black: 16:9, 16:10, 21:9)
+            std::wstring v;
+            if (!next(v)) return false;
+            int w = 0, h = 0;
+            if (swscanf_s(v.c_str(), L"%d:%d", &w, &h) == 2 && w > 0 && h > 0) g_cfg.aspect_w = w, g_cfg.aspect_h = h;
+            settings_mark_cli("aspect");
+        }
         else if (a == L"--fullscreen") { g_cfg.fullscreen = true; settings_mark_cli("fullscreen"); }
         else if (a == L"--windowed") { g_cfg.fullscreen = false; settings_mark_cli("fullscreen"); }
         else if (a == L"--no-reverb") { g_cfg.reverb = false; settings_mark_cli("reverb"); }
@@ -536,6 +543,9 @@ int run(void *reserve, unsigned reserve_size)
     }
     // BLACK runs at 30 fps and needs patches for 60; Ninja Gaiden Black is a 60 fps game as it is.
     if (black && g_cfg.fps == 60 && !install_60fps_patches()) g_cfg.fps = 30;
+    // A widescreen shape other than 16:9: Ninja Gaiden Black x2.1 itself only (its bundled programs and BLACK keep 16:9)
+    if (profile && !black && !profile->aux) install_ngb_aspect();
+    else g_cfg.aspect_w = 16, g_cfg.aspect_h = 9;
     if (!profile) g_cfg.fps = 30;
     if (!kdpc_init()) {
         logf("could not start the kernel DPC/timer thread");
