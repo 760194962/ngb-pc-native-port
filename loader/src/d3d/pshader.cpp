@@ -188,13 +188,72 @@ IDirect3DPixelShader9 *ps_host_shader()
 
 void linear_texture_scale(int stage, float *sx, float *sy); // d3d/draw.cpp
 
+// Census of the glow's kind of trick (see the glow blur below): a combiner program whose constants take one set on
+// even frames and another on odd ones, a pair of frames meant to be seen as one on a 480i television. Each program is
+// looked at once a frame (its first draw); after 8 frames in a row of A, B, A, B it is logged once with its constants.
+void note_alternating_constants(const uint32_t *rs)
+{
+    struct Seen {
+        uint32_t frame = ~0u, run = 0;
+        uint64_t now = 0, last = 0, before = 0;
+        bool logged = false;
+    };
+    static std::unordered_map<uint64_t, Seen> seen;
+    static uint64_t last_program;
+    static uint32_t last_frame = ~0u;
+    uint32_t frame = g_frame_count.load(std::memory_order_relaxed);
+    uint64_t prog = 1469598103934665603ull, consts = 1469598103934665603ull;
+    auto mix = [](uint64_t &h, uint32_t v) { h = (h ^ v) * 1099511628211ull; };
+    for (int i = 0; i < 10; i++) mix(prog, rs[i]);  // alpha inputs, final combiner
+    for (int i = 26; i < 42; i++) mix(prog, rs[i]); // alpha outputs, rgb inputs
+    for (int i = 45; i < 54; i++) mix(prog, rs[i]); // rgb outputs, control
+    mix(prog, rs[XRS_PSTEXTUREMODES]);
+    if (prog == last_program && frame == last_frame) return; // the same program again in this frame
+    last_program = prog;
+    last_frame = frame;
+    for (int i = 10; i < 26; i++) mix(consts, rs[i]);
+    mix(consts, rs[43]);
+    mix(consts, rs[44]);
+    Seen &e = seen[prog];
+    if (e.frame == frame) return;
+    if (e.frame + 1 != frame) e.run = 0; // not drawn in the frame before
+    e.before = e.last;
+    e.last = e.now;
+    e.now = consts;
+    e.frame = frame;
+    e.run = (e.now != e.last && e.now == e.before) ? e.run + 1 : 0;
+    if (e.run >= 8 && !e.logged) {
+        e.logged = true;
+        logf("[census] frame %u: combiner program 0x%x (texmodes 0x%x, stage 0 rgb in 0x%08x) alternates its constants every "
+             "frame (c0 0x%08x c1 0x%08x now): a pair of frames meant to be seen as one", frame, rs[53], rs[XRS_PSTEXTUREMODES],
+             rs[34], rs[XRS_PSCONSTANT0_0], rs[XRS_PSCONSTANT1_0]);
+    }
+}
+
 void upload_ps_constants(IDirect3DDevice9 *d)
 {
     const uint32_t *rs = render_state();
+    note_alternating_constants(rs);
     float c[27][4];
     for (int i = 0; i < 8; i++) {
         unpack_color(rs[XRS_PSCONSTANT0_0 + i], c[i]);
         unpack_color(rs[XRS_PSCONSTANT1_0 + i], c[8 + i]);
+    }
+    // Ninja Gaiden Black's glow blur (FUN_00314430: three combiner stages summing c0 * (taps 2 texels out) and c1 * (taps
+    // 6 texels out), texture modes 0x8421) alternates its weights every frame: 0.25 / 0.25, then 0.33 / 0.17 (r423,
+    // frames 9161-9164 traced in a row). On a 480i television the two frames merged into one soft glow; on a PC screen
+    // a still lamp's halo flickered between wide and narrow at 30 Hz (the user, 2026-10-22). Both frames get the mean
+    // kernel instead, 0.2922 / 0.2098: the glow they made together, every frame and without delay. (A mean of the
+    // last two frames' results did the same for a still picture but left a second halo behind when the view turned.)
+    if (rs[53] == 0x11103 && rs[XRS_PSTEXTUREMODES] == 0x8421 && rs[34] == 0xC1C8C2C9) {
+        for (int i = 0; i < 8; i++) {
+            uint32_t k0 = rs[XRS_PSCONSTANT0_0 + i], k1 = rs[XRS_PSCONSTANT1_0 + i];
+            if ((k0 == 0x40404040 && k1 == 0x40404040) || (k0 == 0x55555555 && k1 == 0x2B2B2B2B)) {
+                const float inner = 0.5f * (64.0f + 85.0f) / 255.0f, outer = 0.5f * (64.0f + 43.0f) / 255.0f;
+                c[i][0] = c[i][1] = c[i][2] = c[i][3] = inner;
+                c[8 + i][0] = c[8 + i][1] = c[8 + i][2] = c[8 + i][3] = outer;
+            }
+        }
     }
     unpack_color(rs[43], c[16]); // PSFinalCombinerConstant0
     unpack_color(rs[44], c[17]); // PSFinalCombinerConstant1

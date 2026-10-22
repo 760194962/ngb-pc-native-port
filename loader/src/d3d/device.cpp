@@ -65,6 +65,11 @@ struct HostRT {
     uint32_t epoch = 0;      // times bound for drawing (its contents may have changed since)
     IDirect3DTexture9 *smooth = nullptr; // box-filtered copy for the game's blur taps (scaled small buffers)
     uint32_t smooth_epoch = ~0u, smooth_serial = ~0u;
+    IDirect3DTexture9 *reduced = nullptr; // at its Xbox size, box-filtered: what a small buffer is drawn from (reduced_rt)
+    uint32_t reduced_epoch = ~0u;
+    bool blurred = false;                 // drawn from another Xbox-size buffer (the glow's last blur step)
+    IDirect3DTexture9 *soft = nullptr, *soft_tmp = nullptr; // softened for the picture (softened_rt)
+    uint32_t soft_epoch = ~0u;
 };
 uint64_t mem_key(uint32_t data, uint32_t w, uint32_t h) { return ((uint64_t)data << 24) | ((uint64_t)(w & 0xFFF) << 12) | (h & 0xFFF); }
 std::unordered_map<uint64_t, HostRT> g_rts;
@@ -81,6 +86,8 @@ IDirect3DPixelShader9 *g_zview_ps, *g_zfill_ps;
 enum class Owner : uint8_t { None, Color, Depth };
 std::unordered_map<uint64_t, Owner> g_owner;
 IDirect3DTexture9 *g_cur_rt; // host texture currently bound as render target
+uint32_t g_cur_xw, g_cur_xh; // its Xbox size
+uint64_t g_cur_key;          // and its key (mem_key)
 uint64_t g_cur_zkey;         // key of the depth surface currently bound (0: none)
 uint32_t g_zbind_count;      // depth-surface binds so far: a depth view made after the last bind of its surface stays valid
 std::unordered_map<uint64_t, uint32_t> g_zbind_at; // depth key -> g_zbind_count at its last bind
@@ -183,10 +190,19 @@ bool native_size(uint32_t xw, uint32_t xh) { return g_cfg.effects_native && smal
 // buffer (mem_key), recorded when they are first bound together (bind_render_target).
 std::unordered_set<uint64_t> g_shadow_keys;
 
+// Buffers the game fills by drawing a bigger one into them (the glow's 256x256, 256x128 and 128x128, screen copies):
+// kept at their Xbox size. Their blur takes 4 taps 2 and 6 texels apart (FUN_00314430); at the Xbox size the copies
+// it makes lie a texel or three apart and the final stretch over the screen melts them into one soft glow, as on the
+// Xbox (the user's xemu picture, 2026-10-22). At 4 x 3 they stood 8-24 host pixels apart: sharp stripes around lamps
+// and Ryu's legs that jumped as the lights moved (r414, r420). Recorded by rt_texture_for when such a draw is first
+// seen; the targets are then made again at 1x (request_render_rebuild).
+std::unordered_set<uint64_t> g_xbox_size_keys;
+
 // The scale a host buffer for Xbox memory `key` (w x h Xbox pixels) is made at
 void buffer_scale(uint64_t key, uint32_t w, uint32_t h, float *sx, float *sy)
 {
     if (g_shadow_keys.count(key)) *sx = *sy = (float)g_cfg.shadow_scale;
+    else if (g_xbox_size_keys.count(key)) *sx = *sy = 1.0f;
     else if (native_size(w, h)) *sx = *sy = 1.0f;
     else {
         *sx = scale_x();
@@ -715,6 +731,9 @@ void bind_render_target(Surface *rt, Surface *z)
     d->SetRenderTarget(0, s);
     s->Release();
     g_cur_rt = h.tex;
+    g_cur_xw = h.xw;
+    g_cur_xh = h.xh;
+    g_cur_key = mem_key(rt->Data, rw, rh);
     d->SetDepthStencilSurface(zs);
     if (g_cur_sx != h.sx || g_cur_sy != h.sy) { // a target of another scale: the scissor follows (SetRenderTarget
         g_cur_sx = h.sx;                         // re-applies the viewport itself)
@@ -885,6 +904,74 @@ IDirect3DTexture9 *smoothed_rt(HostRT &h, uint32_t draw_serial)
     return h.smooth;
 }
 
+// A scaled buffer at its Xbox size: each pixel the average of the host pixels over it (the box taps above, a quarter
+// Xbox texel off the centre, cover the 4 x 3 block at the default scale). The game makes its small effect buffers by
+// drawing the whole picture into them (Ninja Gaiden Black's glow: the back buffer, 720x480, into 256x256, then a sparse
+// 4-tap blur, FUN_00314430 from FUN_00316AA0). On the Xbox each of those pixels picked from a 720x480 picture; from
+// the 2880x1440 one it picked a sixteenth as much, so thin highlights (Ryu's armour, lamps at night) came and went
+// from frame to frame and the blur drew them as stripes (the user, 2026-10-22; r414 trace, frame 16978). Drawn from
+// this copy instead, the small buffers get what the Xbox gave them.
+IDirect3DTexture9 *reduced_rt(HostRT &h)
+{
+    if (h.reduced && h.reduced_epoch == h.epoch) return h.reduced;
+    static bool tried;
+    if (!g_box_ps && !tried) {
+        tried = true;
+        g_box_ps = compile_ps(kBoxPS, "box");
+    }
+    if (!g_box_ps) return h.tex;
+    if (!h.reduced) host3d::dev()->CreateTexture(h.xw, h.xh, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &h.reduced, nullptr);
+    if (!h.reduced) return h.tex;
+    IDirect3DSurface9 *s = nullptr;
+    h.reduced->GetSurfaceLevel(0, &s);
+    float c[4] = {0.25f / h.xw, 0.25f / h.xh, 0, 0};
+    host3d::end_scene();
+    fullscreen_pass(g_box_ps, h.tex, s, nullptr, h.xw, h.xh, false, c, true);
+    s->Release();
+    h.reduced_epoch = h.epoch;
+    return h.reduced;
+}
+
+// The glow as it was seen on the Xbox. Its blur (FUN_00314430) adds four copies of the bright parts 2 and 6 texels
+// out; in the 128x128 result they lie 1 and 3 texels apart, and stretched over the picture those gaps showed as
+// stripes round lamps and Ryu's legs that swirled when the view turned (the user, 2026-10-22, against an xemu picture
+// with a soft glow; on the Xbox a 480i television blurred them together). The final blur result is softened by a
+// 7-tap Gaussian across and down (sigma 1.5 of its texels) before it is drawn over the picture.
+const char kSoftPS[] = "sampler2D s : register(s0);\n"
+                       "float4 o : register(c0);\n"
+                       "float4 main(float2 uv : TEXCOORD0) : COLOR0 {\n"
+                       "  return 0.2660 * tex2D(s, uv) + 0.2130 * (tex2D(s, uv + o.xy) + tex2D(s, uv - o.xy)) +\n"
+                       "         0.1093 * (tex2D(s, uv + 2 * o.xy) + tex2D(s, uv - 2 * o.xy)) +\n"
+                       "         0.0360 * (tex2D(s, uv + 3 * o.xy) + tex2D(s, uv - 3 * o.xy));\n"
+                       "}\n";
+IDirect3DPixelShader9 *g_soft_ps;
+
+IDirect3DTexture9 *softened_rt(HostRT &h)
+{
+    if (h.soft && h.soft_epoch == h.epoch) return h.soft;
+    static bool tried;
+    if (!g_soft_ps && !tried) {
+        tried = true;
+        g_soft_ps = compile_ps(kSoftPS, "soft");
+    }
+    if (!g_soft_ps) return h.tex;
+    IDirect3DDevice9 *d = host3d::dev();
+    if (!h.soft) d->CreateTexture(h.w, h.h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &h.soft, nullptr);
+    if (!h.soft_tmp) d->CreateTexture(h.w, h.h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &h.soft_tmp, nullptr);
+    if (!h.soft || !h.soft_tmp) return h.tex;
+    IDirect3DSurface9 *tmp = nullptr, *out = nullptr;
+    h.soft_tmp->GetSurfaceLevel(0, &tmp);
+    h.soft->GetSurfaceLevel(0, &out);
+    host3d::end_scene();
+    float across[4] = {1.0f / h.w, 0, 0, 0}, down[4] = {0, 1.0f / h.h, 0, 0};
+    fullscreen_pass(g_soft_ps, h.tex, tmp, nullptr, h.w, h.h, false, across, false);
+    fullscreen_pass(g_soft_ps, h.soft_tmp, out, nullptr, h.w, h.h, false, down, false);
+    tmp->Release();
+    out->Release();
+    h.soft_epoch = h.epoch;
+    return h.soft;
+}
+
 IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_serial, bool linear)
 {
     uint32_t w, h;
@@ -940,7 +1027,44 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
     }
     if (it == g_rts.end()) return nullptr;
     IDirect3DTexture9 *t = it->second.tex;
-    if (linear && it->second.sx > 1.5f && small_buffer(it->second.xw, it->second.xh)) return smoothed_rt(it->second, draw_serial);
+    // A scaled buffer drawn into one of at most half its size (in Xbox pixels): from its Xbox-size copy, filtered or not
+    // (a point sample of the 2880-wide picture flickers the same way). The glow's steps: the back buffer 720x480 into
+    // 256x256, then 256x128 and 128x128 (r417: 256x256 is not a "small buffer", its height is over half of 480, so
+    // that rule missed it). Each case is logged once (size, target, filter).
+    HostRT &src = it->second;
+    // A buffer drawn into one of at most half its size (in Xbox pixels) whose own pixels are finer than the Xbox's, or
+    // one already kept at its Xbox size: the target is kept at its Xbox size too (the glow's 256x256 from the back
+    // buffer, then its 256x128 and 128x128; r417: 256x256 is not a "small buffer", its height is over half of 480).
+    // A scaled source is read from its Xbox-size copy, filtered or not (a point sample of the 2880-wide picture flickers
+    // the same way). Each case is logged once (size, target, filter).
+    bool src_xbox = g_xbox_size_keys.count(key) != 0;
+    uint64_t cur_area = (uint64_t)g_cur_xw * g_cur_xh, src_area = (uint64_t)src.xw * src.xh;
+    bool down = t != g_cur_rt && cur_area * 2 <= src_area;
+    auto cur = g_rts.find(g_cur_key);
+    if (down && (src.sx > 1.5f || src_xbox)) {
+        static std::vector<uint64_t> seen;
+        uint64_t k = key ^ ((uint64_t)g_cur_xw << 40) ^ ((uint64_t)g_cur_xh << 52) ^ (linear ? 1ull << 63 : 0);
+        if (seen.size() < 64 && std::find(seen.begin(), seen.end(), k) == seen.end()) {
+            seen.push_back(k);
+            logf("[d3d] frame %u: %ux%u buffer 0x%08x drawn into a %ux%u one (%s)%s", g_frame_count.load(), src.xw, src.xh,
+                 tex->Data, g_cur_xw, g_cur_xh, linear ? "filtered" : "point", src.sx > 1.5f ? ": from its Xbox-size copy" : "");
+        }
+        if (cur != g_rts.end() && g_xbox_size_keys.insert(g_cur_key).second) {
+            logf("[d3d] frame %u: the %ux%u buffer it is drawn into is kept at its Xbox size from now on", g_frame_count.load(),
+                 g_cur_xw, g_cur_xh);
+            if (cur->second.sx != 1.0f) request_render_rebuild();
+        }
+    }
+    // An Xbox-size buffer drawn into another (the glow's blur steps) marks the target; such a result drawn onto
+    // something bigger (the picture) is softened first (softened_rt)
+    if (src_xbox && key != g_cur_key && g_xbox_size_keys.count(g_cur_key) && cur != g_rts.end() && !cur->second.blurred) {
+        cur->second.blurred = true;
+        logf("[d3d] frame %u: the %ux%u buffer is a blur of another: softened when drawn over the picture", g_frame_count.load(),
+             g_cur_xw, g_cur_xh);
+    }
+    if (src.blurred && t != g_cur_rt && cur_area > src_area) return softened_rt(src);
+    if (down && src.sx > 1.5f) return reduced_rt(src);
+    if (linear && src.sx > 1.5f && small_buffer(src.xw, src.xh)) return smoothed_rt(src, draw_serial);
     if (t != g_cur_rt) return t;
     static uint32_t snap_serial = ~0u;
     static IDirect3DTexture9 *snap_src, *snap;
@@ -1379,6 +1503,9 @@ void release_host_targets()
     for (auto &kv : g_rts) {
         if (kv.second.tex) kv.second.tex->Release();
         if (kv.second.smooth) kv.second.smooth->Release();
+        if (kv.second.reduced) kv.second.reduced->Release();
+        if (kv.second.soft) kv.second.soft->Release();
+        if (kv.second.soft_tmp) kv.second.soft_tmp->Release();
     }
     g_rts.clear();
     for (auto &kv : g_zs) {

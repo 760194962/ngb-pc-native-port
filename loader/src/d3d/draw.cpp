@@ -467,11 +467,41 @@ bool stage_reads_texture(const uint32_t *ts)
 // it loaded: scale_rhw tells screen copies from the game's art by it
 bool g_stage0_rendered;
 
+// Census of the glow's other kind of trick: one draw sampling the same render target in several stages (a tap
+// filter: blur, glow, depth of field), each kind (sizes, caller) logged once, with the target it is drawn into
+bool g_rt_stage[4]; // which stages of the draw being set up sample a render target (apply_texture_stages)
+int first_game_callers(const uint32_t *sp, uint32_t *out, int max); // below
+std::string game_callers(const uint32_t *sp);
+
+void note_tap_filter(const bool *rt_stage)
+{
+    int first = -1, taps = 0;
+    for (int s = 0; s < 4; s++)
+        if (rt_stage[s] && g_st.textures[s]) {
+            if (first < 0) first = s;
+            if (g_st.textures[s]->Data == g_st.textures[first]->Data) taps++;
+        }
+    if (taps < 2) return;
+    uint32_t sw = 0, sh = 0, tw = 0, th = 0, dd, l;
+    pixel_container_dims((PixelContainer *)g_st.textures[first], &sw, &sh, &dd, &l);
+    if (g_st.render_target) pixel_container_dims((PixelContainer *)g_st.render_target, &tw, &th, &dd, &l);
+    uint32_t caller = 0;
+    first_game_callers((const uint32_t *)_AddressOfReturnAddress(), &caller, 1);
+    static std::vector<uint64_t> seen;
+    uint64_t k = ((uint64_t)caller << 32) ^ ((uint64_t)sw << 20) ^ ((uint64_t)sh << 8) ^ tw ^ ((uint64_t)th << 44) ^ taps;
+    if (seen.size() >= 64 || std::find(seen.begin(), seen.end(), k) != seen.end()) return;
+    seen.push_back(k);
+    logf("[census] frame %u: a %d-tap filter reads a %ux%u target (data 0x%08x) into %ux%u%s, from %s", g_frame_count.load(), taps,
+         sw, sh, g_st.textures[first]->Data, tw, th, is_backbuffer(g_st.render_target) ? " (the picture)" : "",
+         game_callers((const uint32_t *)_AddressOfReturnAddress()).c_str());
+}
+
 void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
 {
     bool rt_stage[4] = {};
     g_ffp_edge_stages = 0;
     g_stage0_rendered = false;
+    for (bool &b : g_rt_stage) b = false;
     for (int s = 0; s < 4; s++) {
         IDirect3DBaseTexture9 *t = nullptr;
         if (!g_st.textures[s] && fixed_function_pixels && stage_reads_texture(texture_state(s))) t = white_texture();
@@ -480,6 +510,7 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
             t = rt_texture_for((const PixelContainer *)r, g_draw_serial, ts[3] >= 2 || ts[4] >= 2);
             rt_stage[s] = t != nullptr;
             if (s == 0) g_stage0_rendered = rt_stage[0];
+            g_rt_stage[s] = rt_stage[s];
             if (debug_frame_active() && (r->Data == backbuffer_data() || r->Data == depthbuffer_data() || t)) {
                 uint32_t w, h, dd, l;
                 pixel_container_dims((PixelContainer *)r, &w, &h, &dd, &l);
@@ -1443,6 +1474,7 @@ bool begin_draw(DrawCtx &ctx)
     apply_render_states(d);
     bool ps = g_st.pixel_shader != 0;
     apply_texture_stages(d, !ps); // may copy a render target (outside the scene) first
+    note_tap_filter(g_rt_stage);
     host3d::begin_scene();
     // Fixed-function draws get a generated stage shader too (d3d/ffp_ps.cpp); the host's own fixed-function pixel
     // pipeline (D3D9On12) dropped alpha modulation on pass-through stages (docs/04 §3.9). --host-ffp keeps it.
