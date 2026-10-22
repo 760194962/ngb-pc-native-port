@@ -40,6 +40,8 @@ Each item's verdict and evidence are in `project/docs/06_功能验证矩阵.md` 
   left trigger, the Kitetsu blade's health drain (妖刀鬼彻), a second playthrough keeping the golden scarabs, the
   Talisman of Rebirth switch (还魂护符), bow crosshair / view, Mission Mode: all verified in play.
 - **Launched programs**: the arcade and SNES versions are playable from the main menu.
+- **Exit game**: the main menu has a last row, 退出游戏 (EXIT GAME on the English menus), that asks "Exit the game?" in
+  the game's own confirmation box: Ⓐ yes returns to the desktop, Ⓑ no goes back to the menu.
 - **Saves**: saving, loading and loading back the same slot verified. Saves are in the standard Xbox format; copied
   into xRevive's save folder they load directly (tested).
 - **Sound**: a software DirectSound mixer on XAudio2, with reverb.

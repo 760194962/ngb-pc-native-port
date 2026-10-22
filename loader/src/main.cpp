@@ -565,6 +565,7 @@ int run(void *reserve, unsigned reserve_size)
     // A widescreen shape other than 16:9: Ninja Gaiden Black x2.1 itself only (its bundled programs and BLACK keep 16:9)
     if (profile && !black && !profile->aux) install_ngb_aspect();
     else g_cfg.aspect_w = 16, g_cfg.aspect_h = 9;
+    if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
     if (!profile) g_cfg.fps = 30;
     if (!kdpc_init()) {
         logf("could not start the kernel DPC/timer thread");

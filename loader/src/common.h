@@ -168,6 +168,7 @@ extern std::atomic<uint32_t> g_frame_count; // frames presented so far (d3d/devi
 // Logging: every line goes to the log file and the console, prefixed with time and host thread id.
 void log_init(const std::wstring &path);
 void logf(const char *fmt, ...); // the log file (and the console with --verbose)
+void install_ngb_exitmenu();      // the main menu's EXIT GAME row for Ninja Gaiden Black x2.1 (ngb_exitmenu.cpp)
 void install_ngb_aspect();        // black.ini aspect 16:10 / 21:9 for Ninja Gaiden Black x2.1 (ngb_aspect.cpp)
 void logv(const char *fmt, va_list ap);
 void logc(const char *fmt, ...); // the log file and the console: startup, setup errors, exit, crashes
