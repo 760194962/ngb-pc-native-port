@@ -156,6 +156,10 @@ const int kAnisoLevels[5] = {1, 2, 4, 8, 16};
 const int kShadowScales[4] = {1, 4, 8, 16};
 // The project's site (the author's; About page)
 const wchar_t kSite[] = L"https://akirahayabusa.github.io/ngb-hurricane-patch/";
+// The author's links on the About page (the user, 2026-10-22): signed "bilibili 哈雅布撒", with the open-source repository
+// and contacts. Clicking one opens it (kHitWebsite + index).
+const wchar_t *const kLinks[5] = {kSite, L"https://github.com/akirahayabusa/ngb-pc-native-port", L"https://github.com/akirahayabusa",
+                                  L"https://space.bilibili.com/20292587", L"mailto:2682557218@qq.com"};
 // Brightness and gamma sliders: the loader's range (settings.cpp clamps gain and gamma to 0.5 - 3.0), 0.05 steps
 constexpr float kSliderMin = 0.5f, kSliderMax = 3.0f, kSliderW = 260;
 // The window sizes offered (client area) for 16:9 and for 4:3; 0 x 0 = auto (the largest that fits the screen)
@@ -1486,23 +1490,31 @@ struct Painter {
         const float x = kNavW + 56, w = 800, lx = x + 26, vx = x + 150;
         text(S(Str::NavAbout), {x, 46, x + 700, 98}, 32, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({x, 102, x + 36, 104}, kBlood);
-        D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 3 * 36 + 64};
+        D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 52 + 8 * 31 + 6};
         float y = card(c, S(Str::AboutTitle));
-        text(S(Str::AboutDesc), {lx, y, c.right - 20, y + 52}, 13.5f, kBone, 0.92f);
-        y += 58;
-        auto row = [&](Str label, const std::wstring &v) {
-            text(S(label), {lx, y, vx - 10, y + 30}, 13.5f, kAsh);
-            text(v, {vx, y, c.right - 160, y + 30}, 13.5f, kBone, 1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
-                 DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
-            y += 36;
+        text(S(Str::AboutDesc), {lx, y, c.right - 20, y + 48}, 13.5f, kBone, 0.92f);
+        y += 52;
+        auto row = [&](Str label, const std::wstring &v, int link) { // link: kLinks index to open on a click, or -1
+            text(S(label), {lx, y, vx - 10, y + 28}, 13.5f, kAsh);
+            D2D1_RECT_F r = {vx, y, vx + std::min(c.right - 26 - vx, measure(v, 13.5f, DWRITE_FONT_WEIGHT_NORMAL) + 4), y + 28};
+            bool hov = link >= 0 && g.hover == kHitWebsite + link;
+            if (link >= 0) g_hits.push_back({kHitWebsite + link, r});
+            text(v, {vx, y, c.right - 26, y + 28}, 13.5f, link >= 0 ? (hov ? kGold : kBone) : kBone, 1.0f,
+                 DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+            if (link >= 0) fill({r.left, r.bottom - 5, r.right - 4, r.bottom - 4}, hov ? kGold : kAsh, hov ? 1.0f : 0.5f);
+            y += 31;
         };
         wchar_t ver[128];
         swprintf(ver, 128, S(Str::AboutVersion), L"0.1", L"" GAME_VERSION);
-        row(Str::AboutVersionLabel, ver);
-        row(Str::AboutSiteLabel, kSite);
-        button(kHitWebsite, {c.right - 150, y - 36, c.right - 20, y - 6}, S(Str::OpenSite), false);
-        row(Str::AboutLicenseLabel, S(Str::AboutLicense));
-        D2D1_RECT_F c2 = {x, c.bottom + 14, x + w, c.bottom + 14 + 50 + 170};
+        row(Str::AboutVersionLabel, ver, -1);
+        row(Str::AboutAuthorLabel, L"bilibili \u54C8\u96C5\u5E03\u6492", -1);
+        row(Str::AboutSiteLabel, kLinks[0], 0);
+        row(Str::AboutSourceLabel, kLinks[1], 1);
+        row(Str::AboutGithubLabel, kLinks[2], 2);
+        row(Str::AboutBilibiliLabel, kLinks[3], 3);
+        row(Str::AboutEmailLabel, L"2682557218@qq.com", 4);
+        row(Str::AboutLicenseLabel, S(Str::AboutLicense), -1);
+        D2D1_RECT_F c2 = {x, c.bottom + 10, x + w, c.bottom + 10 + 46 + 130}; // five lines of English
         y = card(c2, S(Str::LegalTitle));
         IDWriteTextFormat *fmt = nullptr;
         if (SUCCEEDED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr,
@@ -1512,7 +1524,7 @@ struct Painter {
             ID2D1SolidColorBrush *b = nullptr;
             rt->CreateSolidColorBrush(rgb(kBone, 0.85f), &b);
             const wchar_t *s = S(Str::LegalText);
-            if (b) rt->DrawText(s, (UINT32)wcslen(s), fmt, {lx, y, c2.right - 26, c2.bottom - 12}, b), b->Release();
+            if (b) rt->DrawText(s, (UINT32)wcslen(s), fmt, {lx, y - 6, c2.right - 26, c2.bottom - 6}, b), b->Release();
             fmt->Release();
         }
     }
@@ -1891,7 +1903,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
         else if (id >= kHitPadMap && id < kHitPadMap + keys::kButtons * 16 && (id - kHitPadMap) % 16 == 0) g.list_open = id;
         else if (id == kHitOpenSaves) open_folder(save_hdd());
-        else if (id == kHitWebsite) ShellExecuteW(h, L"open", kSite, nullptr, nullptr, SW_SHOWNORMAL);
+        else if (id >= kHitWebsite && id < kHitWebsite + 5) ShellExecuteW(h, L"open", kLinks[id - kHitWebsite], nullptr, nullptr, SW_SHOWNORMAL);
         else if (id == kHitOpenBackups) {
             CreateDirectoryW(backup_root().c_str(), nullptr);
             open_folder(backup_root());
