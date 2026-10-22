@@ -40,6 +40,7 @@ work\                符号表、反汇编等中间物（不提交）
 - 不删备份 / 镜像 / 用户文件；原版镜像、路线 A 目录、汉化工程目录只读。E 盘空间很紧（2026-10-17 约 6 GB），大文件操作前看剩余空间，run 目录一次只留一个。
 - 截图只截游戏窗口；只关自己开的测试进程。
 - git：白名单 `.gitignore`，`.gitattributes` 设 `* -text`；绝不提交游戏数据、镜像、解包文件、第三方字体或库。fork 许可 GPL-2.0-or-later；可引用 ngbrecomp 的 MIT 部分（保留声明），不抄 Cxbx / xemu / xboxrecomp 的 GPL 代码。
+  - 唯一例外（用户 2026-10-22 决定）：启动器背景图 `launcher/art/`（取自用户自己的网站，隼龙主视觉版权属光荣特库摩）进仓库与发布包，出处记在 `launcher/art/SOURCES.md`，README 法律声明已注明。不得据此扩大到其他游戏素材。
 - 发布物写作者 "b站 哈雅布撒"、QQ 2682557218。GitHub 只经 `GH_CONFIG_DIR=E:\games\emu\ninja gaiden black local\tools\gh\config` 使用 gh。
 - 禁止阅读 `D:\NGB-hanhua`、`E:\games\emu\games\hanhua-project\`。
 

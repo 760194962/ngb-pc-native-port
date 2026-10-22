@@ -155,6 +155,7 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32 -DPORT_ICON=D:/ngb/
 | `loader/` | 加载器源码：`kernel/` 内核 HLE；`d3d/` Direct3D 8 → 9，NV2A 顶点程序与寄存器合成器译为 HLSL；`audio/` DirectSound 混音；`input/` 输入；`ngb/` 忍龙专用的地址表与补丁 |
 | `project/docs/` | 过程文档：输入清单、工具链、静态分析、加载器与内核、图形、音频输入存档、功能验证矩阵、证据盘点 |
 | `project/tools/` | 分析与比对脚本：XBE 普查、函数表、图像比对、xemu 存档导出等 |
+| `launcher/` | 启动器（开发中，见 `project/docs/08_PC启动器计划.md`）：从镜像安装、选择游戏安装路径、启动游戏；`art/` 为界面背景图 |
 | `notes/` | 上游 BLACK 的分析结果 |
 
 反编译与反汇编输出、游戏文件、测试运行目录都只留在本地，不进仓库。
@@ -173,6 +174,9 @@ XbSymbolDatabase 的识别结果生成。每一条模拟规则都要有依据：
 
 本项目与 Koei Tecmo、Team NINJA 及 Microsoft 无关，也未获其认可。Ninja Gaiden 是 Koei Tecmo 的商标，Xbox 是
 Microsoft 的商标。仓库不含游戏代码或数据，也不含 Microsoft Xbox 开发包的代码。请使用自己合法取得的游戏。
+
+唯一的例外是启动器的背景图（`launcher/art/`）：取自作者自己的网站，其中隼龙的主视觉版权属于 Koei Tecmo，仅作为本非商业
+粉丝移植的界面使用，出处见 `launcher/art/SOURCES.md`。
 
 本项目是自由软件，以 GNU 通用公共许可证第 2 版或（由你选择）任何更新的版本发布，见 `LICENSE`。
 

@@ -173,6 +173,7 @@ The start option `--debug-frame N` names a frame to trace.
 | `loader/` | loader source: `kernel/` kernel HLE; `d3d/` Direct3D 8 → 9, with NV2A vertex programs and register combiners translated to HLSL; `audio/` DirectSound mixing; `input/`; `ngb/` Ninja Gaiden address tables and patches |
 | `project/docs/` | project documents (Simplified Chinese): inputs, toolchain, static analysis, loader and kernel, graphics, audio / input / saves, verification matrix, evidence ledger |
 | `project/tools/` | analysis and comparison scripts: XBE census, function tables, image comparison, xemu save export and more |
+| `launcher/` | the launcher (in progress, see `project/docs/08_PC启动器计划.md`): install from a disc image, choose the game folder, start the game; `art/` holds its background art |
 | `notes/` | upstream's analysis results for BLACK |
 
 Decompiler and disassembler output, game files and test-run folders stay local and are not in the repository.
@@ -194,6 +195,10 @@ specifications or a measured comparison. The bases are recorded in `project/docs
 This project is not affiliated with or endorsed by Koei Tecmo, Team NINJA or Microsoft. Ninja Gaiden is a trademark
 of Koei Tecmo; Xbox is a trademark of Microsoft. The repository contains no game code or data and no code from the
 Microsoft Xbox Development Kit. Please use your own legally obtained copy of the game.
+
+The one exception is the launcher's background art (`launcher/art/`), taken from the author's own website: its Ryu
+Hayabusa key art is Koei Tecmo's, used only as the interface of this non-commercial fan port; the sources are in
+`launcher/art/SOURCES.md`.
 
 This project is free software under the GNU General Public License, version 2 or (at your option) any later version.
 See `LICENSE`.

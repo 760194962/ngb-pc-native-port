@@ -1,0 +1,5 @@
+// Launcher resources: the art (RCDATA), loaded with WIC at start.
+#include "resource.h"
+
+IDR_HERO    RCDATA "../art/hero.jpg"
+IDR_TEXTURE RCDATA "../art/texture.jpg"

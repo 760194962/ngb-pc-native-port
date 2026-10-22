@@ -1,0 +1,101 @@
+#include "strings.h"
+
+Lang g_lang = Lang::Zh;
+
+namespace {
+
+struct Pair {
+    const wchar_t *zh, *en;
+};
+
+const Pair kText[(int)Str::Count] = {
+    {L"Ninja Gaiden Black·HurricaneX21[中英文版] 启动器", L"Ninja Gaiden Black·HurricaneX21 Launcher"},
+    {L"飓风版 X21 · 中英文版", L"Hurricane X21 · Chinese / English"},
+    {L"开始游戏", L"Play"},
+    {L"安装", L"Install"},
+    {L"画面", L"Display"},
+    {L"控制", L"Controls"},
+    {L"存档", L"Saves"},
+    {L"关于", L"About"},
+    {L"忍者龙剑传  黑之章", L"NINJA GAIDEN BLACK"},
+    {L"飓风版 · 中英文版 · PC 原生移植", L"Hurricane edition · Chinese / English · native PC port"},
+    {L"开始游戏", L"PLAY"},
+    {L"还没有找到游戏：请先在「安装」页安装。", L"The game is not installed yet: see Install."},
+    {L"游戏", L"Game"},
+    {L"未安装", L"Not installed"},
+    {L"显卡", L"Graphics card"},
+    {L"自动（首次启动时选用独立显卡）", L"Automatic (the dedicated card from the first start)"},
+    {L"独立显卡（高性能）", L"Dedicated (high performance)"},
+    {L"集成显卡（省电）", L"Integrated (power saving)"},
+    {L"画面", L"Display"},
+    {L"全屏", L"Fullscreen"},
+    {L"窗口", L"Windowed"},
+    {L"非官方粉丝移植 · 需要自备游戏镜像 · 启动器 0.1", L"Unofficial fan port · your own game image required · launcher 0.1"},
+    {L"此页面将在接下来的步骤中实现。", L"This page comes in the next steps."},
+    {L"从镜像安装", L"Install from a disc image"},
+    {L"镜像", L"Image"},
+    {L"安装到", L"Install to"},
+    {L"选择镜像…", L"Choose image…"},
+    {L"更改…", L"Change…"},
+    {L"未选择", L"None chosen"},
+    {L"将安装到下方的游戏安装路径 · 需要 %.1f GB · 可用 %.1f GB", L"Installs to the game folder below · %.1f GB needed · %.1f GB free"},
+    {L"空间不足", L"Not enough space"},
+    {L"开始安装", L"Install"},
+    {L"取消", L"Cancel"},
+    {L"正在安装 %d / %d", L"Installing %d / %d"},
+    {L"安装完成，已核对 default.xbe 与 4 个附带程序。", L"Installed; default.xbe and the 4 bundled programs check out."},
+    {L"安装失败：", L"Install failed: "},
+    {L"已取消安装。", L"Install cancelled."},
+    {L"删除镜像（移到回收站）", L"Delete the image (to the Recycle Bin)"},
+    {L"游戏已安装并核对无误。要把镜像移到回收站吗？", L"The game is installed and checked. Move the image to the Recycle Bin?"},
+    {L"镜像已移到回收站。", L"The image is in the Recycle Bin."},
+    {L"游戏安装路径", L"Game folder"},
+    {L"已核对：支持的版本（default.xbe 与 4 个附带程序）", L"Checked: the supported build (default.xbe and 4 bundled programs)"},
+    {L"不是支持的版本：", L"Not the supported build: "},
+    {L"选择已有游戏…", L"Use an installed copy…"},
+    {L"不是 Xbox 光盘镜像", L"Not an Xbox disc image"},
+    {L"Xbox 光盘镜像 (*.iso)", L"Xbox disc image (*.iso)"},
+    {L"选择你自己的《忍者龙剑传 黑之章 飓风版》x2.1 中英文版光盘镜像（.iso）。extract-xiso 做的精简镜像和完整的 redump 镜像都可以。\n\n"
+     L"安装会把镜像里的全部文件（约 5.9 GB）写到下方「游戏安装路径」的文件夹，写完后核对 default.xbe 与 4 个附带程序（街机版、FC 与 SFC 三部曲）的 SHA-256，"
+     L"确认是支持的版本。\n\n"
+     L"安装中可以随时取消；已经写出的文件会留在文件夹里，再次安装时会被覆盖。\n\n"
+     L"核对通过后，可以把镜像移到回收站来节省空间；以后需要时，还能从回收站还原。",
+     L"Choose your own disc image (.iso) of NINJA GAIDEN BLACK, Hurricane edition x2.1 (Chinese / English). Both an "
+     L"extract-xiso image and a full redump image will do.\n\n"
+     L"Installing writes every file of the image (about 5.9 GB) to the game folder below, then checks the SHA-256 of "
+     L"default.xbe and the 4 bundled programs (the arcade version, the NES and SNES trilogies) to make sure this is the "
+     L"supported build.\n\n"
+     L"You can cancel at any time; the files written so far stay in the folder and are overwritten by the next install.\n\n"
+     L"Once the check passes you can move the image to the Recycle Bin to save space, and restore it from there later."},
+    {L"这里是游戏所在的文件夹：从镜像安装时装到这里，开始游戏时也从这里启动。\n\n"
+     L"点「更改…」选一个文件夹：如果里面已经有解包好的游戏（有 default.xbe），就直接使用，不需要重新安装；"
+     L"如果是空文件夹，就可以从上方的镜像安装到这里。「默认路径」会改回启动器旁边的 game\\x21 文件夹。\n\n"
+     L"核对会计算 default.xbe 与 4 个附带程序的 SHA-256：金色的「已核对」表示是支持的 x2.1 版本；红色表示缺少文件或是别的版本，"
+     L"游戏可能无法启动。\n\n"
+     L"存档不在游戏文件夹里，更换路径不会影响存档。",
+     L"This is the game's folder: an install from an image goes here, and the game starts from here.\n\n"
+     L"Choose a folder with \"Change\": if the game is already extracted there (a folder with default.xbe in it), it "
+     L"is used as it is, with no need to install again; if the folder is empty, install into it from an image above. "
+     L"\"Default\" goes back to the game\\x21 folder next to the launcher.\n\n"
+     L"The check computes the SHA-256 of default.xbe and the 4 bundled programs: a gold \"Checked\" line means the "
+     L"supported x2.1 build; red means a file is missing or another build, and the game may not start.\n\n"
+     L"Saved games are not kept in the game folder, so changing it does not touch them."},
+    {L"知道了", L"Got it"},
+    {L"覆盖已安装的游戏？", L"Replace the installed game?"},
+    {L"这个文件夹里已经装有核对无误的游戏。重新安装会用镜像里的文件覆盖它们（存档不受影响）。\n\n要继续吗？",
+     L"This folder already holds a game that checks out. Installing again replaces its files with the image's (saved "
+     L"games are not touched).\n\nContinue?"},
+    {L"文件夹不是空的", L"The folder is not empty"},
+    {L"这个文件夹里已经有其他文件。安装会覆盖同名的文件，其余的文件保留不动。\n\n如果里面是别的版本，两个版本的文件会混在一起，建议换一个空文件夹。\n\n要继续吗？",
+     L"This folder already has files in it. Installing replaces those with the same names and leaves the rest.\n\nIf "
+     L"another build is in there, the two would be mixed: an empty folder is better.\n\nContinue?"},
+    {L"删除镜像？", L"Delete the image?"},
+    {L"继续", L"Continue"},
+    {L"移到回收站", L"Move to Recycle Bin"},
+    {L"尚未安装：可以从上方的镜像安装到这里。", L"Not installed yet: install it here from an image above."},
+    {L"默认路径", L"Default"},
+};
+
+} // namespace
+
+const wchar_t *S(Str s) { return g_lang == Lang::Zh ? kText[(int)s].zh : kText[(int)s].en; }
