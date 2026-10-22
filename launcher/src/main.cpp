@@ -73,16 +73,18 @@ struct App {
     int help = 0; // the "?" panel open: 0 none, else its hit id
     int ask = 0;  // the confirmation open: 0 none, else kAsk*
     int list_open = 0; // the drop-down list open: 0 none, else its hit id (kHitResList, kHitGpu)
+    int drag = 0;         // the slider being dragged (kHitGain, kHitGamma), its value until the button is released
+    float drag_value = 1.0f;
 };
-enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete };
+enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete, kAskReset };
 App g;
 
 // Hit ids: 0..kPageCount-1 the navigation, then these
 enum {
     kHitStart = 100, kHitLangZh, kHitLangEn, kHitPickIso, kHitPickDest, kHitInstall, kHitCancel, kHitDeleteIso, kHitPickGame,
-    kHitHelpImage, kHitHelpInstalled, kHitHelpClose, kHitAskYes, kHitAskNo, kHitDefaultPath,
+    kHitHelpImage, kHitHelpInstalled, kHitHelpClose, kHitAskYes, kHitAskNo, kHitDefaultPath, kHitResetPage,
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
-    kHitGainDown = 270, kHitGainUp, kHitGammaDown, kHitGammaUp, kHitWin = 280, kHitResList = 300
+    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitResList = 300, kHitShadow = 320
 };
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -93,6 +95,10 @@ std::wstring render_size(double scale, bool wide)
     int w = (int)std::lround(std::min(720.0 * scale * (wide ? 4.0 / 3.0 : 1.0), 8192.0)), h = (int)std::lround(480.0 * scale);
     return std::to_wstring(w) + L"\u00D7" + std::to_wstring(h);
 }
+// Shadow quality: the shadow map's scale for each level (low = the Xbox's 128x128)
+const int kShadowScales[4] = {1, 4, 8, 16};
+// Brightness and gamma sliders: the loader's range (settings.cpp clamps gain and gamma to 0.5 - 3.0), 0.05 steps
+constexpr float kSliderMin = 0.5f, kSliderMax = 3.0f, kSliderW = 260;
 // The window sizes offered (client area) for 16:9 and for 4:3; 0 x 0 = auto (the largest that fits the screen)
 const int kWin169[][2] = {{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
 const int kWin43[][2] = {{0, 0}, {960, 720}, {1280, 960}, {1440, 1080}, {1920, 1440}};
@@ -106,6 +112,14 @@ std::vector<Hit> g_hits;
 bool inside(const D2D1_RECT_F &r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
 
 // --- settings ---------------------------------------------------------------------------------------------------
+
+std::string black_ini(const char *key);
+float slider_value(int id)
+{
+    if (g.drag == id) return g.drag_value;
+    std::string v = black_ini(id == kHitGain ? "gain" : "gamma");
+    return v.empty() ? 1.0f : (float)atof(v.c_str());
+}
 
 std::wstring ini_get(const wchar_t *key, const wchar_t *def = L"")
 {
@@ -278,6 +292,7 @@ void launch_game()
     STARTUPINFOW si = {sizeof si};
     PROCESS_INFORMATION pi = {};
     if (CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, g.dir.c_str(), &si, &pi)) {
+        AllowSetForegroundWindow(pi.dwProcessId); // the game's window comes to the front (d3d/host.cpp ui_thread)
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
         PostQuitMessage(0); // the game's window takes over
@@ -503,6 +518,12 @@ IWICBitmapSource *load_jpeg(int id)
 struct ListRow {
     std::wstring a, b, c;
     int strong = 0;
+    bool off = false; // shown dimmed, cannot be chosen
+};
+// A drop-down list's shape: the box's width, the open list's width, where its b and c columns start (0: c is
+// right-aligned)
+struct ListShape {
+    float box_w, list_w, col_b, col_c;
 };
 
 struct Painter {
@@ -774,8 +795,12 @@ struct Painter {
     {
         fill({0, 0, kW, kH}, kInk, 0.72f);
         g_hits.push_back({kHitAskNo, {0, 0, kW, kH}}); // outside: cancel
-        Str title = g.ask == kAskOverwrite ? Str::AskOverwriteTitle : g.ask == kAskNonEmpty ? Str::AskNonEmptyTitle : Str::AskDeleteTitle;
-        Str body = g.ask == kAskOverwrite ? Str::AskOverwrite : g.ask == kAskNonEmpty ? Str::AskNonEmpty : Str::DeleteConfirm;
+        Str title = g.ask == kAskOverwrite ? Str::AskOverwriteTitle : g.ask == kAskNonEmpty ? Str::AskNonEmptyTitle
+                  : g.ask == kAskReset   ? Str::ResetTitle
+                                         : Str::AskDeleteTitle;
+        Str body = g.ask == kAskOverwrite ? Str::AskOverwrite : g.ask == kAskNonEmpty ? Str::AskNonEmpty
+                 : g.ask == kAskReset     ? (g.page == kDisplay ? Str::ResetDisplay : Str::ResetGraphics)
+                                          : Str::DeleteConfirm;
         const float pw = 560, ph = 300, px = (kW - pw) / 2, py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
@@ -797,7 +822,7 @@ struct Painter {
         }
         button(kHitAskNo, {p.right - 34 - 120 - 12 - 160, p.bottom - 56, p.right - 34 - 120 - 12, p.bottom - 20}, S(Str::Cancel), false);
         button(kHitAskYes, {p.right - 34 - 120, p.bottom - 56, p.right - 34, p.bottom - 20},
-               S(g.ask == kAskDelete ? Str::MoveToBin : Str::Continue), true);
+               S(g.ask == kAskDelete ? Str::MoveToBin : g.ask == kAskReset ? Str::ResetYes : Str::Continue), true);
     }
 
     // The "?" panel over the window
@@ -933,6 +958,7 @@ struct Painter {
         text(S(title), {x, 46, x + 700, 98}, 32, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({x, 102, x + 36, 104}, kBlood);
         text(S(Str::AppliesNext), {x + 60, 88, x + w, 112}, 12.5f, kAsh, 0.85f);
+        button(kHitResetPage, {x + w - 140, 70, x + w, 104}, S(Str::ResetPage), false); // this page only (reset_page)
         *card_out = {x, 124, x + w, 124 + 50 + rows * 40.0f + 8};
         return card(*card_out, S(heading));
     }
@@ -941,78 +967,152 @@ struct Painter {
     void display_page()
     {
         D2D1_RECT_F c;
-        float y = settings_page(Str::NavDisplay, Str::Picture, 5, &c);
+        float y = settings_page(Str::NavDisplay, Str::Picture, 6, &c); // 5 rows and the note under the sliders
         const float lx = c.left + 26, cx = c.left + 210;
         auto label = [&](Str s) { text(S(s), {lx, y, cx - 10, y + 30}, 13.5f, kAsh); };
-        std::string fs = black_ini("fullscreen"), ws = black_ini("widescreen");
-        label(Str::DisplayMode); // fullscreen = 0 window, 2 exclusive fullscreen, 1 borderless
-        segmented(kHitMode, cx, y, {S(Str::ModeWindow), S(Str::ModeFullscreen), S(Str::ModeBorderless)},
-                  fs == "2" ? 1 : fs == "1" ? 2 : 0, 120);
+        const float right = c.right - 26;
+        label(Str::DisplayMode);
+        mode_list(cx, y - 2, right);
+        y += 40;
+        label(Str::Aspect); // above the window size: the sizes offered follow it
+        aspect_list(cx, y - 2, right);
         y += 40;
         label(Str::WindowSize);
-        {
-            const int(*sizes)[2] = ws == "0" ? kWin43 : kWin169;
-            std::string cur = black_ini("window");
-            RECT work;
-            SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-            int wsel = 0;
-            std::vector<std::wstring> opts;
-            for (int i = 0; i < 5; i++) {
-                if (!i) opts.push_back(S(Str::SizeAuto));
-                else opts.push_back(std::to_wstring(sizes[i][0]) + L"\u00D7" + std::to_wstring(sizes[i][1]));
-                if (i && cur == std::to_string(sizes[i][0]) + "x" + std::to_string(sizes[i][1])) wsel = i;
-            }
-            for (size_t i = 0; i < opts.size(); i++) {
-                D2D1_RECT_F r = {cx + i * 98, y, cx + i * 98 + 92, y + 30};
-                bool fits = !i || (sizes[i][0] <= work.right - work.left && sizes[i][1] <= work.bottom - work.top);
-                bool on = (int)i == wsel, hov = fits && g.hover == kHitWin + (int)i;
-                if (fits) g_hits.push_back({kHitWin + (int)i, r});
-                if (on) {
-                    fill(r, kBlood, 0.22f, 3);
-                    stroke(r, kBlood, 0.9f, 3);
-                } else {
-                    fill(r, hov ? kInk3 : kInk, fits ? 0.85f : 0.4f, 3);
-                    stroke(r, hov ? kGold : kInk3, fits ? 1.0f : 0.5f, 3);
-                }
-                text(opts[i], r, 12.5f, on || hov ? kBone : kAsh, fits ? 1.0f : 0.4f,
-                     on ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_CENTER);
-            }
-        }
-        y += 40;
-        label(Str::Aspect);
-        segmented(kHitAspect, cx, y, {L"16:9", L"4:3"}, ws == "0" ? 1 : 0, 72);
-        text(S(Str::AspectSoon), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
+        window_list(cx, y - 2, right);
         y += 40;
         label(Str::Brightness);
-        std::string gn = black_ini("gain"), gm = black_ini("gamma");
-        stepper(kHitGainDown, kHitGainUp, cx, y, gn.empty() ? 1.0f : (float)atof(gn.c_str()));
+        slider(kHitGain, cx, y, slider_value(kHitGain));
         y += 40;
         label(Str::Gamma);
-        stepper(kHitGammaDown, kHitGammaUp, cx, y, gm.empty() ? 1.0f : (float)atof(gm.c_str()));
+        slider(kHitGamma, cx, y, slider_value(kHitGamma));
+        text(S(Str::GainNote), {cx, y + 34, right, y + 56}, 12, kAsh, 0.75f);
+    }
+
+    // A value slider over the loader's range (kSliderMin - kSliderMax), with a mark at 1.00 (no change) and the
+    // value on the right; dragged with the mouse (wndproc: WM_LBUTTONDOWN / WM_MOUSEMOVE / WM_LBUTTONUP)
+    void slider(int id, float x, float y, float value)
+    {
+        const float w = kSliderW, cy = y + 15;
+        bool hot = g.hover == id || g.drag == id;
+        g_hits.push_back({id, {x - 10, y, x + w + 10, y + 30}});
+        auto px = [&](float v) { return x + (v - kSliderMin) / (kSliderMax - kSliderMin) * w; };
+        fill({x, cy - 2, x + w, cy + 2}, kInk3, 1.0f, 2);
+        float one = px(1.0f), at = px(value);
+        fill({std::min(one, at), cy - 2, std::max(one, at), cy + 2}, kBlood, 0.9f, 2);
+        fill({one - 1, cy - 8, one + 1, cy + 8}, kAsh, 0.8f); // 1.00
+        ID2D1SolidColorBrush *b = nullptr;
+        rt->CreateSolidColorBrush(rgb(hot ? kGold : kBone), &b);
+        if (b) {
+            rt->FillEllipse({{at, cy}, 8, 8}, b);
+            b->Release();
+        }
+        wchar_t s[16];
+        swprintf(s, 16, L"%.2f", value);
+        text(s, {x + w + 20, y, x + w + 80, y + 30}, 14, kBone, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, L"Segoe UI");
+    }
+
+    // Display mode: black.ini fullscreen = 0 window, 2 exclusive fullscreen, 1 borderless
+    void mode_list(float x, float y, float right)
+    {
+        std::string fs = black_ini("fullscreen");
+        std::vector<ListRow> rows = {{S(Str::ModeWindow), S(Str::ModeWindowNote)},
+                                     {S(Str::ModeFullscreen), S(Str::ModeFullscreenNote)},
+                                     {S(Str::ModeBorderless), S(Str::ModeBorderlessNote)}};
+        int sel = fs == "2" ? 1 : fs == "1" ? 2 : 0;
+        drop_list(kHitMode, x, y, {200, 540, 110, 0}, rows[sel], rows, sel, L"");
+    }
+
+    // Aspect ratio: black.ini widescreen = 1 (16:9) / 0 (4:3); the window sizes below follow it
+    void aspect_list(float x, float y, float right)
+    {
+        std::vector<ListRow> rows = {{L"16:9", S(Str::Aspect169Note)}, {L"4:3", S(Str::Aspect43Note)}};
+        int sel = black_ini("widescreen") == "0" ? 1 : 0;
+        drop_list(kHitAspect, x, y, {200, 300, 80, 0}, {rows[sel].a, L"", rows[sel].b}, rows, sel, S(Str::AspectSoon));
+    }
+
+    // Window size (the client area, used in window mode): auto = what the game picks, the largest whole multiple of
+    // the aspect within 90% of the desktop's work area (loader d3d/host.cpp open_window), or a fixed size of the
+    // chosen aspect; sizes larger than the work area cannot be chosen
+    void window_list(float x, float y, float right)
+    {
+        bool wide = black_ini("widescreen") != "0";
+        const int(*sizes)[2] = wide ? kWin169 : kWin43;
+        const int aw = wide ? 16 : 4, ah = wide ? 9 : 3;
+        RECT work;
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+        int avail_w = (work.right - work.left) * 9 / 10, avail_h = (work.bottom - work.top) * 9 / 10;
+        int auto_h = avail_h / (ah * 2) * (ah * 2), auto_w = auto_h * aw / ah;
+        if (auto_w > avail_w) {
+            auto_w = avail_w / (aw * 2) * (aw * 2);
+            auto_h = auto_w * ah / aw;
+        }
+        auto dims = [](int w, int h) { return std::to_wstring(w) + L"\u00D7" + std::to_wstring(h); };
+        std::string cur = black_ini("window");
+        std::vector<ListRow> rows;
+        int sel = 0;
+        for (int i = 0; i < 5; i++) {
+            if (!i) {
+                rows.push_back({S(Str::SizeAuto), S(Str::SizeAutoNote), dims(auto_w, auto_h)});
+                continue;
+            }
+            bool fits = sizes[i][0] <= work.right - work.left && sizes[i][1] <= work.bottom - work.top;
+            ListRow r = {dims(sizes[i][0], sizes[i][1]), fits ? L"" : S(Str::TooLarge)};
+            r.off = !fits;
+            rows.push_back(r);
+            if (cur == std::to_string(sizes[i][0]) + "x" + std::to_string(sizes[i][1])) sel = i;
+        }
+        ListRow shown = sel ? rows[sel] : ListRow{S(Str::SizeAuto), L"", dims(auto_w, auto_h)};
+        drop_list(kHitWin, x, y, {200, 380, 110, 270}, shown, rows, sel, S(Str::WindowOnly));
     }
 
     // Graphics: how the picture is made
     void graphics_page()
     {
         D2D1_RECT_F c;
-        float y = settings_page(Str::NavGraphics, Str::Rendering, 4, &c);
+        float y = settings_page(Str::NavGraphics, Str::Rendering, 7, &c);
         const float lx = c.left + 26, cx = c.left + 210;
         auto label = [&](Str s) { text(S(s), {lx, y, cx - 10, y + 30}, 13.5f, kAsh); };
         label(Str::Resolution);
         resolution_list(cx, y - 2, c.right - 26);
         y += 40;
+        label(Str::ShadowQuality);
+        shadow_list(cx, y - 2);
+        y += 40;
         label(Str::AntiAlias);
         segmented(kHitAa, cx, y, {S(Str::On), S(Str::Off)}, black_ini("aa") == "0" ? 1 : 0, 72);
+        y += 40;
+        label(Str::VSync); // black.ini vsync: off by default (frames paced by the Xbox vblank alone)
+        segmented(kHitVsync, cx, y, {S(Str::On), S(Str::Off)}, black_ini("vsync") == "1" ? 0 : 1, 72);
+        text(S(Str::VSyncNote), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
         y += 40;
         label(Str::SeamFill);
         segmented(kHitSeam, cx, y, {S(Str::On), S(Str::Off)}, black_ini("seamfill") == "0" ? 1 : 0, 72);
         y += 40;
         label(Str::EffectsNative);
         segmented(kHitFx, cx, y, {S(Str::On), S(Str::Off)}, black_ini("effectsnative") == "1" ? 0 : 1, 72);
+        y += 40;
+        label(Str::PerfHud); // black.ini perfhud: the loader's overlay (d3d/perfhud.cpp)
+        segmented(kHitHud, cx, y, {S(Str::On), S(Str::Off)}, black_ini("perfhud") == "1" ? 0 : 1, 72);
+        text(S(Str::PerfHudNote), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
 
         D2D1_RECT_F c2 = {c.left, c.bottom + 14, c.right, c.bottom + 14 + 92};
         float y2 = card(c2, S(Str::GpuCard));
         gpu_list(cx, y2, c2.right - 26);
+    }
+
+    // Shadow quality: the game's 128x128 shadow map made at 1, 4, 8 or 16 times its size (black.ini shadow; 4 by default)
+    void shadow_list(float x, float y)
+    {
+        std::string v = black_ini("shadow");
+        int cur = v.empty() ? 4 : atoi(v.c_str());
+        std::vector<ListRow> rows = {{S(Str::ShadowLow), S(Str::ShadowXbox), L"128\u00D7128"},
+                                     {S(Str::ShadowMid), S(Str::ShadowDefault), L"512\u00D7512"},
+                                     {S(Str::ShadowHigh), L"", L"1024\u00D71024"},
+                                     {S(Str::ShadowUltra), L"", L"2048\u00D72048"}};
+        int sel = 1;
+        for (int i = 0; i < 4; i++)
+            if (cur == kShadowScales[i]) sel = i;
+        drop_list(kHitShadow, x, y, {200, 340, 90, 0}, {rows[sel].a, L"", rows[sel].c}, rows, sel, S(Str::ShadowNote));
     }
 
     // Render resolution: a list of the window's size and 1x - 10x, each with its size in 16:9 and in 4:3 (the
@@ -1045,7 +1145,7 @@ struct Painter {
             shown = rows[sel];
             if (sel) shown = {shown.a, L"", wide ? shown.b : shown.c, 0}; // the box: the current aspect's size only
         }
-        drop_list(kHitResList, {x, y, right, y + 34}, shown, rows, sel, S(Str::ResFooter));
+        drop_list(kHitResList, x, y, {240, 440, 140, 290}, shown, rows, sel, S(Str::ResFooter));
     }
 
     // The graphics card: the cards that can be chosen (gpu_choices), and what Windows calls each choice
@@ -1055,57 +1155,68 @@ struct Painter {
         for (const GpuChoice &ch : gpu_choices())
             rows.push_back({gpu_label(ch), L"", ch.pref ? S(ch.pref == 2 ? Str::GpuHigh : Str::GpuLow) : L"", 0});
         int sel = gpu_choice_index();
-        drop_list(kHitGpu, {x, y, right, y + 34}, rows[sel], rows, sel, L"");
+        drop_list(kHitGpu, x, y, {380, 380, 0, 0}, rows[sel], rows, sel, L"");
     }
 
     // One row of a list: the choice on the left; b in a column, c on the right (strong: 1 or 2 = that one brighter)
-    void list_row(D2D1_RECT_F r, const ListRow &row, bool on)
+    // One row of an open list: a, then b and c in the shape's columns
+    void list_row(D2D1_RECT_F r, const ListRow &row, bool on, const ListShape &sh)
     {
-        text(row.a, {r.left + 14, r.top, r.right - (row.b.empty() ? 170 : 330), r.bottom}, 13.5f, on ? kBone : kAsh, 1.0f,
+        const float dim = row.off ? 0.4f : 1.0f, l = r.left;
+        float a_end = !row.b.empty() ? l + sh.col_b - 8 : !row.c.empty() && sh.col_c ? l + sh.col_c - 8 : r.right - 14;
+        text(row.a, {l + 14, r.top, a_end, r.bottom}, 13.5f, on ? kBone : kAsh, dim,
              on ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
         if (!row.b.empty())
-            text(row.b, {r.right - 320, r.top, r.right - (row.c.empty() ? 36 : 180), r.bottom}, 12.5f, row.strong == 1 ? kBone : kAsh,
-                 row.strong == 1 ? 1.0f : 0.7f, DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+            text(row.b, {l + sh.col_b, r.top, !row.c.empty() && sh.col_c ? l + sh.col_c - 8 : r.right - 14, r.bottom}, 12.5f,
+                 row.strong == 1 ? kBone : kAsh, (row.strong == 1 ? 1.0f : 0.7f) * dim, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
         if (!row.c.empty())
-            text(row.c, {r.right - (row.b.empty() ? 180 : 160), r.top, r.right - 36, r.bottom}, 12.5f, row.strong == 2 || !row.strong ? kBone : kAsh,
-                 row.strong == 2 ? 1.0f : 0.7f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
-                 row.b.empty() ? DWRITE_TEXT_ALIGNMENT_TRAILING : DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+            text(row.c, {sh.col_c ? l + sh.col_c : l + 14, r.top, r.right - 14, r.bottom}, 12.5f,
+                 row.strong == 2 || !row.strong ? kBone : kAsh, (row.strong == 2 ? 1.0f : 0.7f) * dim, DWRITE_FONT_WEIGHT_NORMAL,
+                 nullptr, sh.col_c ? DWRITE_TEXT_ALIGNMENT_LEADING : DWRITE_TEXT_ALIGNMENT_TRAILING, 0.0f, true);
     }
 
     // A drop-down list: the box shows `shown`; a click opens the rows (hit id + 1 + row) under it, over the rest of
     // the page (drawn last, see draw), with an optional note at the bottom. A click anywhere else closes it.
-    void drop_list(int id, D2D1_RECT_F box, const ListRow &shown, const std::vector<ListRow> &rows, int sel,
-                   const std::wstring &note)
+    // The box shows the choice (`shown.a`, and `shown.c` dimmer on the right); the open list is as wide as its rows need
+    void drop_list(int id, float x, float y, const ListShape &sh, const ListRow &shown, const std::vector<ListRow> &rows,
+                   int sel, const std::wstring &note)
     {
+        D2D1_RECT_F box = {x, y, x + sh.box_w, y + 32};
         bool open = g.list_open == id, hov = g.hover == id || open;
         fill(box, hov ? kInk3 : kInk, 0.9f, 3);
         stroke(box, hov ? kGold : kInk3, 1.0f, 3);
-        list_row(box, shown, true);
-        text(L"\xE70D", {box.right - 34, box.top, box.right - 10, box.bottom}, 12, hov ? kGold : kAsh, 1.0f,
+        text(shown.a, {box.left + 12, box.top, box.right - 34, box.bottom}, 13.5f, kBone, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+             nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+        if (!shown.c.empty())
+            text(shown.c, {box.left + 12, box.top, box.right - 32, box.bottom}, 12.5f, kAsh, 0.85f, DWRITE_FONT_WEIGHT_NORMAL,
+                 nullptr, DWRITE_TEXT_ALIGNMENT_TRAILING, 0.0f, true);
+        text(L"\xE70D", {box.right - 28, box.top, box.right - 8, box.bottom}, 11, hov ? kGold : kAsh, 1.0f,
              DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons", DWRITE_TEXT_ALIGNMENT_CENTER);
         g_hits.push_back({id, box});
         if (!open) return;
-        overlay = [this, id, box, rows, sel, note] {
+        overlay = [this, id, box, sh, rows, sel, note] {
             g_hits.push_back({kHitListClose, {0, 0, kW, kH}}); // outside the list: close it
             g_hits.push_back({id, box});                       // the box again: close it
-            const float rh = 32, note_h = note.empty() ? 0.0f : 30.0f;
-            D2D1_RECT_F list = {box.left, box.bottom + 4, box.right, box.bottom + 4 + rows.size() * rh + 8 + note_h};
+            const float rh = 30, note_h = note.empty() ? 0.0f : 40.0f;
+            float w = std::max(sh.list_w, sh.box_w);
+            D2D1_RECT_F list = {box.left, box.bottom + 4, box.left + w, box.bottom + 4 + rows.size() * rh + 8 + note_h};
             fill(list, 0x16141a, 1.0f, 4);
             stroke(list, kGold, 0.8f, 4);
             for (size_t i = 0; i < rows.size(); i++) {
                 D2D1_RECT_F r = {list.left + 4, list.top + 4 + i * rh, list.right - 4, list.top + 4 + (i + 1) * rh};
                 int rid = id + 1 + (int)i;
-                bool on = (int)i == sel, over = g.hover == rid;
-                g_hits.push_back({rid, r});
+                bool on = (int)i == sel, over = !rows[i].off && g.hover == rid;
+                g_hits.push_back({rows[i].off ? 0x7fff : rid, r});
                 if (on) fill({r.left, r.top + 7, r.left + 3, r.bottom - 7}, kBlood);
                 if (over) fill(r, kBone, 0.06f, 3);
-                list_row(r, rows[i], on || over);
+                list_row(r, rows[i], on || over, sh);
             }
             if (!note.empty()) {
                 float ny = list.bottom - 4 - note_h;
                 fill({list.left + 14, ny, list.right - 14, ny + 1}, kInk3);
                 g_hits.push_back({0x7fff, {list.left, ny, list.right, list.bottom}});
-                text(note, {list.left + 18, ny, list.right - 14, list.bottom - 4}, 11.5f, kAsh, 0.85f);
+                text(note, {list.left + 14, ny + 6, list.right - 14, list.bottom - 2}, 11.5f, kAsh, 0.85f); // up to two lines
             }
         };
     }
@@ -1186,6 +1297,42 @@ void set_lang(Lang l)
     ini_set(L"lang", l == Lang::Zh ? L"zh" : L"en");
 }
 
+// A dragged slider follows the mouse: x (in DIPs) over its track, in 0.05 steps
+void drag_to(float x)
+{
+    for (const Hit &hit : g_hits)
+        if (hit.id == g.drag) {
+            float left = hit.r.left + 10, t = (x - left) / kSliderW;
+            float v = kSliderMin + std::min(1.0f, std::max(0.0f, t)) * (kSliderMax - kSliderMin);
+            g.drag_value = std::round(v * 20.0f) / 20.0f;
+            InvalidateRect(g.hwnd, nullptr, FALSE);
+            return;
+        }
+}
+
+// "Restore defaults" on a settings page: that page's settings only, back to what the game uses with no black.ini
+// (loader common.h Config) and, for the graphics card, what the game sets on its first run (high performance)
+void reset_page(Page p)
+{
+    if (p == kDisplay) {
+        black_ini_set("fullscreen", "0");
+        black_ini_set("widescreen", "1");
+        black_ini_set("window", "auto");
+        black_ini_set("gain", "1.00");
+        black_ini_set("gamma", "1.00");
+    } else if (p == kGraphics) {
+        black_ini_set("render", "scale");
+        black_ini_set("scale", "3");
+        black_ini_set("shadow", "4");
+        black_ini_set("aa", "1");
+        black_ini_set("vsync", "0");
+        black_ini_set("seamfill", "1");
+        black_ini_set("effectsnative", "0");
+        black_ini_set("perfhud", "0");
+        set_gpu_preference(2);
+    }
+}
+
 LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     float scale = 96.0f / (float)GetDpiForWindow(h);
@@ -1207,7 +1354,20 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         InvalidateRect(h, nullptr, FALSE);
         return 0;
     }
+    case WM_LBUTTONDOWN: { // a slider: dragged until the button is released
+        int id = hit_at(GET_X_LPARAM(lp) * scale, GET_Y_LPARAM(lp) * scale);
+        if ((id == kHitGain || id == kHitGamma) && !g.list_open && !g.help && !g.ask) {
+            g.drag = id;
+            SetCapture(h);
+            drag_to(GET_X_LPARAM(lp) * scale);
+        }
+        return 0;
+    }
     case WM_MOUSEMOVE: {
+        if (g.drag) {
+            drag_to(GET_X_LPARAM(lp) * scale);
+            return 0;
+        }
         int id = hit_at(GET_X_LPARAM(lp) * scale, GET_Y_LPARAM(lp) * scale);
         if (id != g.hover) {
             g.hover = id;
@@ -1229,6 +1389,15 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
         break;
     case WM_LBUTTONUP: {
+        if (g.drag) { // the slider's value is saved once it is let go
+            char b[16];
+            sprintf_s(b, "%.2f", g.drag_value);
+            black_ini_set(g.drag == kHitGain ? "gain" : "gamma", b);
+            g.drag = 0;
+            ReleaseCapture();
+            InvalidateRect(h, nullptr, FALSE);
+            return 0;
+        }
         int id = hit_at(GET_X_LPARAM(lp) * scale, GET_Y_LPARAM(lp) * scale);
         if (g.help) { // the panel is modal: it only closes
             if (id == kHitHelpClose) g.help = 0;
@@ -1239,6 +1408,16 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             int row = id - g.list_open - 1;
             if (g.list_open == kHitGpu && row >= 0 && row < (int)gpu_choices().size())
                 set_gpu_preference(gpu_choices()[row].pref);
+            if (g.list_open == kHitMode && row >= 0 && row < 3) black_ini_set("fullscreen", row == 0 ? "0" : row == 1 ? "2" : "1");
+            if (g.list_open == kHitAspect && row >= 0 && row < 2 && (row == 0) != (black_ini("widescreen") != "0")) {
+                black_ini_set("widescreen", row == 0 ? "1" : "0");
+                black_ini_set("window", "auto"); // a fixed size belongs to the other aspect
+            }
+            if (g.list_open == kHitWin && row >= 0 && row < 5) {
+                const int(*sizes)[2] = black_ini("widescreen") == "0" ? kWin43 : kWin169;
+                black_ini_set("window", row ? std::to_string(sizes[row][0]) + "x" + std::to_string(sizes[row][1]) : std::string("auto"));
+            }
+            if (g.list_open == kHitShadow && row >= 0 && row < 4) black_ini_set("shadow", std::to_string(kShadowScales[row]));
             if (g.list_open == kHitResList && row == 0) black_ini_set("render", "native");
             if (g.list_open == kHitResList && row >= 1 && row <= kMaxScale) {
                 black_ini_set("render", "scale");
@@ -1253,6 +1432,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (id == kHitAskYes || id == kHitAskNo) g.ask = 0;
             if (id == kHitAskYes) {
                 if (ask == kAskDelete) delete_image();
+                else if (ask == kAskReset) reset_page(g.page);
                 else start_install();
             }
             InvalidateRect(h, nullptr, FALSE);
@@ -1269,29 +1449,14 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id == kHitDeleteIso && g.offer_delete) g.ask = kAskDelete;
         else if (id == kHitPickGame) choose_existing();
         else if (id == kHitDefaultPath && !installing()) set_game_folder(default_game_folder());
-        else if (id >= kHitMode && id < kHitMode + 3) black_ini_set("fullscreen", id == kHitMode ? "0" : id == kHitMode + 1 ? "2" : "1");
-        else if (id >= kHitWin && id < kHitWin + 5) {
-            const int(*sizes)[2] = black_ini("widescreen") == "0" ? kWin43 : kWin169;
-            int i = id - kHitWin;
-            black_ini_set("window", i ? std::to_string(sizes[i][0]) + "x" + std::to_string(sizes[i][1]) : std::string("auto"));
-        }
-        else if (id >= kHitAspect && id < kHitAspect + 2) {
-            black_ini_set("widescreen", id == kHitAspect ? "1" : "0");
-            black_ini_set("window", "auto"); // a fixed size belongs to the other aspect
-        }
+        else if (id == kHitResetPage) g.ask = kAskReset;
         else if (id >= kHitAa && id < kHitAa + 2) black_ini_set("aa", id == kHitAa ? "1" : "0");
         else if (id >= kHitSeam && id < kHitSeam + 2) black_ini_set("seamfill", id == kHitSeam ? "1" : "0");
         else if (id >= kHitFx && id < kHitFx + 2) black_ini_set("effectsnative", id == kHitFx ? "1" : "0");
-        else if (id == kHitGpu || id == kHitResList) g.list_open = id;
-        else if (id >= kHitGainDown && id <= kHitGammaUp) { // 0.05 steps in the loader's range 0.5 - 3.0
-            const char *key = id <= kHitGainUp ? "gain" : "gamma";
-            std::string cur = black_ini(key);
-            double v = (cur.empty() ? 1.0 : atof(cur.c_str())) + ((id == kHitGainUp || id == kHitGammaUp) ? 0.05 : -0.05);
-            v = std::min(3.0, std::max(0.5, v));
-            char b[16];
-            sprintf_s(b, "%.2f", v);
-            black_ini_set(key, b);
-        }
+        else if (id >= kHitVsync && id < kHitVsync + 2) black_ini_set("vsync", id == kHitVsync ? "1" : "0");
+        else if (id >= kHitHud && id < kHitHud + 2) black_ini_set("perfhud", id == kHitHud ? "1" : "0");
+        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow)
+            g.list_open = id;
         InvalidateRect(h, nullptr, FALSE);
         return 0;
     }
@@ -1391,9 +1556,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
             std::wstring err;
             g.iso_need = install::image_size(g.iso, &err);
         }
-        if (!wcscmp(argv[i], L"--show-ask") && i + 1 < argc) g.ask = _wtoi(argv[i + 1]); // with --snap: a confirmation
-        if (!wcscmp(argv[i], L"--show-list") && i + 1 < argc) // with --snap: a drop-down list open (gpu | res)
-            g.list_open = !wcscmp(argv[i + 1], L"gpu") ? kHitGpu : kHitResList;
+        if (!wcscmp(argv[i], L"--show-ask") && i + 1 < argc) g.ask = _wtoi(argv[i + 1]); // with --snap: a confirmation (4 reset)
+        if (!wcscmp(argv[i], L"--show-list") && i + 1 < argc) // with --snap: a drop-down list open (gpu | res | mode | aspect | window)
+            g.list_open = !wcscmp(argv[i + 1], L"gpu")    ? kHitGpu
+                          : !wcscmp(argv[i + 1], L"mode")   ? kHitMode
+                          : !wcscmp(argv[i + 1], L"aspect") ? kHitAspect
+                          : !wcscmp(argv[i + 1], L"window") ? kHitWin
+                          : !wcscmp(argv[i + 1], L"shadow") ? kHitShadow
+                                                            : kHitResList;
         if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed)
             g.help = !wcscmp(argv[i + 1], L"image") ? kHitHelpImage : kHitHelpInstalled;
         if (!wcscmp(argv[i], L"--game") && i + 1 < argc) { // with --snap: this game folder
