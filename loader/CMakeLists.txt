@@ -86,11 +86,12 @@ target_link_options(blackrt PRIVATE /SAFESEH:NO /MAP) # blackrt.map: port addres
 # blackrt.dll then maps the XBE over this image (headers included) and never returns.
 # A Windows-subsystem program: no console window; started from a command prompt it attaches to that one (main.cpp).
 add_executable(black stub/stub.c)
-# The program is named after the game it runs (the user's name for the x2.1 build, 2026-10-22).
-set_target_properties(black PROPERTIES OUTPUT_NAME "Ninja Gaiden Black HurricaneX21")
-# PORT_ICON: an .ico for the program (icon group 1, also the window's), made locally from the player's own game
-# (for example from the Dragon Sword picture of the weapons page). Never part of the repository or a release.
-set(PORT_ICON "" CACHE FILEPATH "local .ico made from the player's game; empty: no icon")
+# The program is named after the game it runs (the user's names, 2026-10-22: no "X21").
+set_target_properties(black PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Hurricane")
+# PORT_ICON: the programs' icon (icon group 1, also the windows'): the Dragon Sword from the game's weapons page,
+# launcher/art/icon.ico, in the repository and the release at the user's decision (2026-10-22; CLAUDE.md, README
+# Legal). Another .ico can be given; empty builds without an icon.
+set(PORT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/../launcher/art/icon.ico" CACHE FILEPATH "the programs' .ico; empty: no icon")
 if(PORT_ICON AND EXISTS "${PORT_ICON}")
   file(TO_CMAKE_PATH "${PORT_ICON}" _port_icon)
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc" "1 ICON \"${_port_icon}\"\n")
@@ -107,11 +108,11 @@ target_link_options(black PRIVATE
 add_executable(launcher WIN32 ../launcher/src/main.cpp ../launcher/src/strings.cpp ../launcher/src/install.cpp
   ../launcher/src/saves.cpp ../launcher/src/keys.cpp
   ../launcher/src/launcher.rc)
-set_target_properties(launcher PROPERTIES OUTPUT_NAME "Ninja Gaiden Black HurricaneX21 Launcher")
+set_target_properties(launcher PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Hurricane Launcher")
 target_compile_definitions(launcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00 WINVER=0x0A00
   GAME_VERSION="${PROJECT_VERSION}") # the game program's release number, for the About page
 target_compile_options(launcher PRIVATE /W3 /utf-8 /EHsc)
 target_link_libraries(launcher PRIVATE d2d1 dwrite windowscodecs ole32 shell32 user32 advapi32 bcrypt dxgi)
 if(PORT_ICON AND EXISTS "${PORT_ICON}")
-  target_sources(launcher PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc") # the same local icon as the game
+  target_sources(launcher PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc") # the same icon as the game
 endif()

@@ -5,7 +5,7 @@
 An unofficial native Windows port of **vb-zh-x2.1**, the Chinese-localized "Hurricane" edition of *Ninja Gaiden Black*
 (original Xbox).
 
-`Ninja Gaiden Black HurricaneX21.exe` loads your own `default.xbe` and runs the original x86 game code directly on the PC; the Xbox kernel,
+`Ninja Gaiden Black Hurricane.exe` loads your own `default.xbe` and runs the original x86 game code directly on the PC; the Xbox kernel,
 Direct3D 8, DirectSound and the other system parts are reimplemented on the PC by the loader (HLE). The game code is
 not interpreted instruction by instruction, and it is never modified on disk.
 
@@ -78,19 +78,21 @@ XInput come with Windows, and the C++ runtime is built into the programs.
 
 **With the launcher (recommended)**:
 
-1. Extract the release zip. Its `NGB-HurricaneX21\` folder can go anywhere:
+1. Extract the release zip. Its `NGB-Hurricane\` folder can go anywhere:
 
    ```
-   NGB-HurricaneX21\
-     Ninja Gaiden Black HurricaneX21 Launcher.exe   the launcher: start here
-     Ninja Gaiden Black HurricaneX21.exe            the game program, with blackrt.dll
-     game\x21\                                      where the game is installed (by the launcher)
+   NGB-Hurricane\
+     Ninja Gaiden Black Hurricane Launcher.exe   the launcher: start here
+     Ninja Gaiden Black Hurricane.exe            the game program, with blackrt.dll
+     game\                                          where the game is installed (by the launcher)
      savedata\                                      the Xbox hard disk: saves and the game's settings (made on the first run)
    ```
 
 2. Open the launcher; on the Install page choose your x2.1 image (`.iso`) and install it to the game folder (by default
-   `game\x21` beside the launcher). The install checks the game programs and can move the image to the Recycle Bin. A
+   `game` beside the launcher). The install checks the game programs and can move the image to the Recycle Bin. A
    game already extracted: choose its folder on the same page.
+   Once installed, double-clicking `Ninja Gaiden Black Hurricane.exe` starts the game too (it finds what the launcher
+   installed).
 3. Adjust the Display, Graphics and Controls pages if you like (changes apply once saved; each "?" explains its
    setting), then start from the Play page.
 
@@ -102,7 +104,7 @@ from this layout:
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\Ninja Gaiden Black HurricaneX21.exe   the build, with blackrt.dll (see "Building")
+  build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe   the build, with blackrt.dll (see "Building")
   game\x21\default.xbe                                       your own extracted x2.1 image (all of its files)
   savedata\                                                  the Xbox hard disk
   logs\                                                      the log black.log, screenshots shots\, the command file presses.txt
@@ -123,7 +125,7 @@ overrides that choice. The log line
 **Other locations**: drop `default.xbe` onto `run.bat`, or set the paths in a command prompt first:
 
 ```bat
-set EXE=D:\ngb\Ninja Gaiden Black HurricaneX21.exe
+set EXE=D:\ngb\Ninja Gaiden Black Hurricane.exe
 set GAME=D:\ngb\x21\default.xbe
 set HDD=D:\ngb\savedata
 set LOGDIR=D:\ngb\logs
@@ -159,12 +161,12 @@ Deleting the folder does no harm; the shaders are just compiled again.
 The command `run.bat` runs (you can also type it yourself):
 
 ```
-"Ninja Gaiden Black HurricaneX21.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+"Ninja Gaiden Black Hurricane.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
 ```
 
 - `--shot-every 100000000` keeps timed screenshots from ever happening; screenshots are taken only on a `shot:`
   request. The default of 60 is one a second, which makes the game stutter.
-- `"Ninja Gaiden Black HurricaneX21.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
+- `"Ninja Gaiden Black Hurricane.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
   BLACK-only and have no effect on Ninja Gaiden.
 
 ## Building
@@ -176,20 +178,15 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
 cmake --build build --config RelWithDebInfo
 ```
 
-This produces `build\RelWithDebInfo\Ninja Gaiden Black HurricaneX21.exe` and `blackrt.dll`. `loader/CMakePresets.json` also has upstream's
+This produces `build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe` and `blackrt.dll`. `loader/CMakePresets.json` also has upstream's
 Visual Studio 2022 / 2026 presets.
 
-**Icon (optional, local only)**: the program's icon comes from your own game, so neither the repository nor a release
-has one. Make an `.ico` from a picture in the game (for example the Dragon Sword on the pause menu's weapons page,
-dumped with `trace`) and name it when configuring; the program then carries it (file, taskbar and window):
+**Icon**: both programs carry `launcher/art/icon.ico` (the Dragon Sword, see "Legal") by default. For another icon or
+none, configure with `-DPORT_ICON=<path to .ico>` or `-DPORT_ICON=`.
 
-```
-cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32 -DPORT_ICON=D:/ngb/icon.ico
-```
-
-**Release zip**: with a build made without the icon (`-DPORT_ICON=`), run `tools\make_release.ps1 -Bin
-<build folder>\RelWithDebInfo` for `dist\ngb-hurricane-x21-pc-<version>-win32.zip` (the launcher, the game program,
-`blackrt.dll`, both READMEs, LICENSE) and a symbols zip. The script refuses a build that carries the game's icon.
+**Release zip**: run `tools\make_release.ps1 -Bin <build folder>\RelWithDebInfo` for
+`dist\ngb-hurricane-pc-<version>-win32.zip` (the launcher, the game program, `blackrt.dll`, both READMEs, LICENSE) and
+a symbols zip. The script checks that the game program carries its icon.
 
 ## Diagnostics
 
@@ -220,7 +217,7 @@ Decompiler and disassembler output, game files and test-run folders stay local a
 
 ## How it works
 
-`Ninja Gaiden Black HurricaneX21.exe` is a small stub linked at the XBE's base address, so that it holds that address range before Windows can
+`Ninja Gaiden Black Hurricane.exe` is a small stub linked at the XBE's base address, so that it holds that address range before Windows can
 put anything there. `blackrt.dll` maps `default.xbe` into the range, provides the Xbox kernel functions the game
 imports, and patches the entry points of the Xbox libraries (Direct3D 8, DirectSound, XAPI) to go to PC
 implementations.
@@ -236,9 +233,9 @@ This project is not affiliated with or endorsed by Koei Tecmo, Team NINJA or Mic
 of Koei Tecmo; Xbox is a trademark of Microsoft. The repository contains no game code or data and no code from the
 Microsoft Xbox Development Kit. Please use your own legally obtained copy of the game.
 
-The one exception is the launcher's background art (`launcher/art/`), taken from the author's own website: its Ryu
-Hayabusa key art is Koei Tecmo's, used only as the interface of this non-commercial fan port; the sources are in
-`launcher/art/SOURCES.md`.
+The exceptions are the pictures in `launcher/art/`: the launcher's background art, taken from the author's own
+website (its Ryu Hayabusa key art is Koei Tecmo's), and the programs' icon, the game's Dragon Sword texture. Both are
+used only as the interface of this non-commercial fan port; the sources are in `launcher/art/SOURCES.md`.
 
 This project is free software under the GNU General Public License, version 2 or (at your option) any later version.
 See `LICENSE`.

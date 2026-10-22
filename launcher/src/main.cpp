@@ -1,4 +1,4 @@
-// Ninja Gaiden Black HurricaneX21 launcher: starts the game and (in later steps) installs it, sets the display, the
+// Ninja Gaiden Black Hurricane launcher: starts the game and (in later steps) installs it, sets the display, the
 // graphics card, the controls and manages the saves (project/docs/08). The window is drawn with Direct2D and
 // DirectWrite in the colours and art of the project's website (launcher/art/SOURCES.md).
 //
@@ -197,10 +197,11 @@ std::wstring ini_get(const wchar_t *key, const wchar_t *def = L"")
 
 void ini_set(const wchar_t *key, const std::wstring &v) { WritePrivateProfileStringW(L"launcher", key, v.c_str(), g.ini.c_str()); }
 
-std::wstring game_exe() { return g.dir + L"\\Ninja Gaiden Black HurricaneX21.exe"; }
+std::wstring game_exe() { return g.dir + L"\\Ninja Gaiden Black Hurricane.exe"; }
 
-// The default game folder: game\x21 next to the launcher (the layout run.bat and the README describe)
-std::wstring default_game_folder() { return g.dir + L"\\game\\x21"; }
+// The default game folder: game next to the launcher (the release layout; the game program looks there too when
+// double-clicked). 0.1.0 used game\x21: a launcher.ini from then keeps its path.
+std::wstring default_game_folder() { return g.dir + L"\\game"; }
 
 bool exists(const std::wstring &p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; }
 
@@ -786,7 +787,7 @@ struct Painter {
     void start_page()
     {
         const float x = kNavW + 56;
-        text(L"NINJA GAIDEN BLACK  \x00B7  HURRICANE X21", {x, 104, x + 600, 126}, 12.5f, kGold, 1.0f,
+        text(L"NINJA GAIDEN BLACK  \x00B7  HURRICANE", {x, 104, x + 600, 126}, 12.5f, kGold, 1.0f,
              DWRITE_FONT_WEIGHT_SEMI_BOLD, L"Segoe UI", DWRITE_TEXT_ALIGNMENT_LEADING, 2.6f);
         // the title with a soft shadow (the website's h1: text-shadow 0 2px 20px #000)
         for (int i = 0; i < 3; i++)

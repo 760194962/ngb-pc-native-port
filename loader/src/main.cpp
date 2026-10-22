@@ -324,12 +324,29 @@ bool parse_args()
         }
     }
     LocalFree(argv);
-    if (target.empty()) target = L"game\\default.xbe";
-    // The port keeps its own files beside black.exe (the release's port folder, next to game).
+    // The port keeps its own files beside the program (the release's folder, with the launcher).
     wchar_t exe[MAX_PATH];
     DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
     std::wstring exe_path(exe, n);
     g_cfg.port_dir = exe_path.substr(0, exe_path.find_last_of(L"\\/"));
+    // No game given (the program double-clicked rather than started by the launcher, which failed: the user's
+    // friend, 2026-10-22): the game the launcher installed (launcher.ini beside the program: game, and hdd for the
+    // saves), else game\default.xbe (the release layout), else game\x21\default.xbe (run.bat's and 0.1.0's).
+    if (target.empty()) {
+        std::wstring ini = g_cfg.port_dir + L"\\launcher.ini";
+        wchar_t v[MAX_PATH] = L"";
+        GetPrivateProfileStringW(L"launcher", L"game", L"", v, MAX_PATH, ini.c_str());
+        if (v[0] && GetFileAttributesW(v) != INVALID_FILE_ATTRIBUTES) target = v;
+        if (g_cfg.hdd_dir.empty()) {
+            v[0] = 0;
+            GetPrivateProfileStringW(L"launcher", L"hdd", L"", v, MAX_PATH, ini.c_str());
+            if (v[0]) g_cfg.hdd_dir = (v[1] == L':' || v[0] == L'\\') ? std::wstring(v) : g_cfg.port_dir + L"\\" + v;
+        }
+        for (const wchar_t *rel : {L"game\\default.xbe", L"game\\x21\\default.xbe"})
+            if (target.empty() && GetFileAttributesW((g_cfg.port_dir + L"\\" + rel).c_str()) != INVALID_FILE_ATTRIBUTES)
+                target = g_cfg.port_dir + L"\\" + rel;
+        if (target.empty()) target = L"game\\default.xbe";
+    }
     // Started from a shortcut or another folder: if a relative game path is not found here, look for it
     // from black.exe's own folder upwards (port -> the folder with game; work\run -> work -> project root) and make
     // that folder current, so relative paths given on the command line (--hdd, --log) and notes\ resolve against it.
@@ -453,7 +470,7 @@ void prefer_dedicated_gpu()
 void startup_error(const std::string &text)
 {
     logc("%s", text.c_str());
-    if (!g_cfg.background) MessageBoxW(nullptr, widen(text).c_str(), L"BLACK can't start", MB_OK | MB_ICONERROR);
+    if (!g_cfg.background) MessageBoxW(nullptr, widen(text).c_str(), L"Ninja Gaiden Black Hurricane", MB_OK | MB_ICONERROR);
 }
 
 int run(void *reserve, unsigned reserve_size)
@@ -489,8 +506,10 @@ int run(void *reserve, unsigned reserve_size)
     if (!g_xbe.load(g_cfg.xbe_path, err)) {
         wchar_t full[MAX_PATH];
         if (!GetFullPathNameW(g_cfg.xbe_path.c_str(), MAX_PATH, full, nullptr)) wcscpy_s(full, g_cfg.xbe_path.c_str());
-        startup_error("cannot load " + narrow(full) + ": " + err + "\n\nPut black.exe and blackrt.dll next to the folder that "
-                      "holds the game's files (game\\default.xbe), or give that folder on the command line.");
+        startup_error("The game was not found (" + narrow(full) + ": " + err + ").\n\n"
+                      "Install it with Ninja Gaiden Black Hurricane Launcher.exe (Install page), or give the folder with "
+                      "the game's files on the command line.\n\n"
+                      "找不到游戏。请先用启动器（Ninja Gaiden Black Hurricane Launcher.exe）的「安装」页安装游戏。");
         return 1;
     }
     std::string title = narrow(g_xbe.title);

@@ -312,7 +312,7 @@ DWORD WINAPI ui_thread(void *)
     wc.hIcon = g_icon;
     wc.hIconSm = g_icon_sm;
     RegisterClassExW(&wc);
-    logf("host: window icon %s", wc.hIcon ? "from the program" : "none (no icon group 1: built without PORT_ICON)");
+    logf("host: window icon %s", wc.hIcon ? "from the program" : "none (no icon group 1: built with PORT_ICON empty)");
     RECT r = {0, 0, g_win_w, g_win_h};
     DWORD style = WS_OVERLAPPEDWINDOW;
     AdjustWindowRect(&r, style, FALSE);
@@ -412,8 +412,8 @@ void set_title(const wchar_t *text)
 
 const wchar_t *game_title()
 {
-    // "Ninja Gaiden Black·HurricaneX21[中英文版]" (the user's name for the x2.1 build, 2026-10-22)
-    if (g_cfg.profile && !g_cfg.profile->black) return L"Ninja Gaiden Black\u00B7HurricaneX21[\u4E2D\u82F1\u6587\u7248]";
+    // "Ninja Gaiden Black·Hurricane[中英文版]" (the user's name, 2026-10-22: no "X21" in the names)
+    if (g_cfg.profile && !g_cfg.profile->black) return L"Ninja Gaiden Black\u00B7Hurricane[\u4E2D\u82F1\u6587\u7248]";
     return L"BLACK";
 }
 

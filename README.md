@@ -4,7 +4,7 @@
 
 《忍者龙剑传 黑之章》飓风版中文汉化 **vb-zh-x2.1**（初代 Xbox）的非官方 Windows 原生移植。
 
-`Ninja Gaiden Black HurricaneX21.exe` 读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
+`Ninja Gaiden Black Hurricane.exe` 读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
 等系统部分由加载器在 PC 上重新实现（HLE）。游戏代码不经模拟器逐条解释，也不在磁盘上修改。
 
 本项目从 [black-pc](https://github.com/Spark198rus/black-pc)（BLACK 的原生移植）分支而来，在它的加载器上加入了
@@ -65,18 +65,19 @@ vb-zh-x2.1 游戏镜像。不需要另外安装任何运行环境：用到的 Di
 
 **用启动器（推荐）**：
 
-1. 解压发布包。里面的 `NGB-HurricaneX21\` 文件夹放在哪里都可以：
+1. 解压发布包。里面的 `NGB-Hurricane\` 文件夹放在哪里都可以：
 
    ```
-   NGB-HurricaneX21\
-     Ninja Gaiden Black HurricaneX21 Launcher.exe   启动器：从这里进
-     Ninja Gaiden Black HurricaneX21.exe            游戏程序，连同 blackrt.dll
-     game\x21\                                      游戏安装位置（启动器装进来）
+   NGB-Hurricane\
+     Ninja Gaiden Black Hurricane Launcher.exe   启动器：从这里进
+     Ninja Gaiden Black Hurricane.exe            游戏程序，连同 blackrt.dll
+     game\                                          游戏安装位置（启动器装进来）
      savedata\                                      Xbox 硬盘：存档与游戏设定（第一次运行时自动建立）
    ```
 
-2. 打开启动器，在「安装」页选你的 x2.1 镜像（`.iso`），装到「游戏安装路径」（默认是启动器旁的 `game\x21`）。装完会逐个核对游戏
+2. 打开启动器，在「安装」页选你的 x2.1 镜像（`.iso`），装到「游戏安装路径」（默认是启动器旁的 `game`）。装完会逐个核对游戏
    程序，也可以选择把镜像移到回收站。已经解包过的游戏，在同一页选那个文件夹即可。
+   装好后直接双击 `Ninja Gaiden Black Hurricane.exe` 也能开始游戏（它会找启动器装好的游戏）。
 3. 在「显示」「图形」「控制」页按需要调整（按「保存」才生效，每项旁的「?」有说明），回到「开始游戏」页开始。
 
 「存档」页可以备份 / 还原存档、与 xRevive 互相导入导出；「关于」页有版本与法律声明。
@@ -86,7 +87,7 @@ vb-zh-x2.1 游戏镜像。不需要另外安装任何运行环境：用到的 Di
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\Ninja Gaiden Black HurricaneX21.exe   构建产物，连同 blackrt.dll（见"构建"）
+  build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe   构建产物，连同 blackrt.dll（见"构建"）
   game\x21\default.xbe                                       你自己解包的 x2.1 镜像（整个镜像的文件）
   savedata\                                                  Xbox 硬盘
   logs\                                                      日志 black.log、截图 shots\、命令文件 presses.txt
@@ -105,7 +106,7 @@ device ... on '显卡名'` 一行记着实际用的是哪张卡。
 **放在别的位置**：把 `default.xbe` 拖到 `run.bat` 上启动；或者在命令行里先设好路径再运行：
 
 ```bat
-set EXE=D:\ngb\Ninja Gaiden Black HurricaneX21.exe
+set EXE=D:\ngb\Ninja Gaiden Black Hurricane.exe
 set GAME=D:\ngb\x21\default.xbe
 set HDD=D:\ngb\savedata
 set LOGDIR=D:\ngb\logs
@@ -136,11 +137,11 @@ Esc 为 Start……），在启动器的「控制」页可改，也可把手柄�
 `run.bat` 实际执行的命令（也可以自己手动输入）：
 
 ```
-"Ninja Gaiden Black HurricaneX21.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+"Ninja Gaiden Black Hurricane.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
 ```
 
 - `--shot-every 100000000` 让定时截图实际上不发生，只在你用 `shot:` 要求时才截。默认值 60 是每秒截一张，会造成卡顿。
-- `"Ninja Gaiden Black HurricaneX21.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
+- `"Ninja Gaiden Black Hurricane.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
 
 ## 构建
 
@@ -151,19 +152,14 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
 cmake --build build --config RelWithDebInfo
 ```
 
-得到 `build\RelWithDebInfo\Ninja Gaiden Black HurricaneX21.exe` 与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
+得到 `build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe` 与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
 2022 / 2026 预设。
 
-**图标（可选，只在本地）**：程序图标取自你自己的游戏，所以仓库与发布包里都没有。用游戏里的图（例如暂停菜单武器页的
-龙剑，用 `trace` 转储贴图）做一个 `.ico`，配置时指定它，构建出的程序就带这个图标（文件、任务栏与窗口）：
+**图标**：两个程序默认带 `launcher/art/icon.ico`（龙剑，见"法律声明"）。要换别的图标或不要图标，配置时用
+`-DPORT_ICON=<.ico 路径>` 或 `-DPORT_ICON=`。
 
-```
-cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32 -DPORT_ICON=D:/ngb/icon.ico
-```
-
-**发布包**：用不带图标的构建（`-DPORT_ICON=`）运行 `tools\make_release.ps1 -Bin <构建目录>\RelWithDebInfo`，得到
-`dist\ngb-hurricane-x21-pc-<版本>-win32.zip`（启动器、游戏程序、`blackrt.dll`、中英文 README、LICENSE）与符号包。
-脚本会拒绝带游戏图标的构建。
+**发布包**：运行 `tools\make_release.ps1 -Bin <构建目录>\RelWithDebInfo`，得到 `dist\ngb-hurricane-pc-<版本>-win32.zip`
+（启动器、游戏程序、`blackrt.dll`、中英文 README、LICENSE）与符号包。脚本会检查游戏程序带有图标。
 
 ## 诊断工具
 
@@ -194,7 +190,7 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32 -DPORT_ICON=D:/ngb/
 
 ## 原理
 
-`Ninja Gaiden Black HurricaneX21.exe` 是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
+`Ninja Gaiden Black Hurricane.exe` 是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
 `default.xbe` 映射进这段地址，提供游戏导入的 Xbox 内核函数，并在 Xbox 库（Direct3D 8、DirectSound、XAPI）的入口
 打补丁，转到 PC 上的实现。
 
@@ -207,8 +203,8 @@ XbSymbolDatabase 的识别结果生成。每一条模拟规则都要有依据：
 本项目与 Koei Tecmo、Team NINJA 及 Microsoft 无关，也未获其认可。Ninja Gaiden 是 Koei Tecmo 的商标，Xbox 是
 Microsoft 的商标。仓库不含游戏代码或数据，也不含 Microsoft Xbox 开发包的代码。请使用自己合法取得的游戏。
 
-唯一的例外是启动器的背景图（`launcher/art/`）：取自作者自己的网站，其中隼龙的主视觉版权属于 Koei Tecmo，仅作为本非商业
-粉丝移植的界面使用，出处见 `launcher/art/SOURCES.md`。
+例外是 `launcher/art/` 里的图：启动器的背景图取自作者自己的网站，其中隼龙的主视觉版权属于 Koei Tecmo；程序图标是游戏里
+龙剑的贴图。两者都只作为本非商业粉丝移植的界面使用，出处见 `launcher/art/SOURCES.md`。
 
 本项目是自由软件，以 GNU 通用公共许可证第 2 版或（由你选择）任何更新的版本发布，见 `LICENSE`。
 

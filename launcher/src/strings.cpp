@@ -9,8 +9,8 @@ struct Pair {
 };
 
 const Pair kText[(int)Str::Count] = {
-    {L"Ninja Gaiden Black·HurricaneX21[中英文版] 启动器", L"Ninja Gaiden Black·HurricaneX21 Launcher"},
-    {L"飓风版 X21 · 中英文版", L"Hurricane X21 · Chinese / English"},
+    {L"Ninja Gaiden Black·Hurricane[中英文版] 启动器", L"Ninja Gaiden Black·Hurricane Launcher"},
+    {L"飓风版 · 中英文版", L"Hurricane \u00B7 Chinese / English"},
     {L"开始游戏", L"Play"},
     {L"安装", L"Install"},
     {L"显示", L"Display"},
@@ -70,14 +70,14 @@ const Pair kText[(int)Str::Count] = {
      L"Once the check passes you can move the image to the Recycle Bin to save space, and restore it from there later."},
     {L"这里是游戏所在的文件夹：从镜像安装时装到这里，开始游戏时也从这里启动。\n\n"
      L"点「更改…」选一个文件夹：如果里面已经有解包好的游戏（有 default.xbe），就直接使用，不需要重新安装；"
-     L"如果是空文件夹，就可以从上方的镜像安装到这里。「默认路径」会改回启动器旁边的 game\\x21 文件夹。\n\n"
+     L"如果是空文件夹，就可以从上方的镜像安装到这里。「默认路径」会改回启动器旁边的 game 文件夹。\n\n"
      L"核对会计算 default.xbe 与 4 个附带程序的 SHA-256：金色的「已核对」表示是支持的 x2.1 版本；红色表示缺少文件或是别的版本，"
      L"游戏可能无法启动。\n\n"
      L"存档不在游戏文件夹里，更换路径不会影响存档。",
      L"This is the game's folder: an install from an image goes here, and the game starts from here.\n\n"
      L"Choose a folder with \"Change\": if the game is already extracted there (a folder with default.xbe in it), it "
      L"is used as it is, with no need to install again; if the folder is empty, install into it from an image above. "
-     L"\"Default\" goes back to the game\\x21 folder next to the launcher.\n\n"
+     L"\"Default\" goes back to the game folder next to the launcher.\n\n"
      L"The check computes the SHA-256 of default.xbe and the 4 bundled programs: a gold \"Checked\" line means the "
      L"supported x2.1 build; red means a file is missing or another build, and the game may not start.\n\n"
      L"Saved games are not kept in the game folder, so changing it does not touch them."},
@@ -200,7 +200,7 @@ const Pair kText[(int)Str::Count] = {
      L"The game writes its saves to the emulated Xbox hard disk: Partition1\\UDATA\\5443000d under the location (one folder "
      L"per slot) and TDATA\\5443000d (the system save). The location is launcher.ini\u2019s hdd, by default the savedata "
      L"folder beside the launcher.\n\nThe saves are in the standard Xbox format; a copy of the whole savedata folder is a full backup."},
-    {L"忍者龙剑传 黑之章 · 飓风版 X21", L"Ninja Gaiden Black \u00B7 Hurricane X21"},
+    {L"忍者龙剑传 黑之章 · 飓风版", L"Ninja Gaiden Black \u00B7 Hurricane"},
     {L"《忍者龙剑传 黑之章》飓风版中文汉化 vb-zh-x2.1（初代 Xbox）的非官方 Windows 原生移植，中英文版。需要你自己合法取得的游戏镜像。",
      L"An unofficial native Windows port of Ninja Gaiden Black\u2019s Hurricane Chinese translation vb-zh-x2.1 (the original Xbox), in Chinese and English. Your own legally obtained game image is required."},
     {L"版本", L"Version"},
@@ -212,12 +212,13 @@ const Pair kText[(int)Str::Count] = {
     {L"法律声明", L"Legal"},
     {L"本项目与 Koei Tecmo、Team NINJA 及 Microsoft 无关，也未获其认可。Ninja Gaiden 是 Koei Tecmo 的商标，Xbox 是 Microsoft 的商标。"
      L"本程序不含游戏代码或数据，也不含 Microsoft Xbox 开发包的代码。请使用自己合法取得的游戏。\n\n"
-     L"唯一的例外是启动器的背景图：取自作者自己的网站，其中隼龙的主视觉版权属于 Koei Tecmo，仅作为本非商业粉丝移植的界面使用。",
+     L"例外是启动器的背景图（取自作者自己的网站，其中隼龙的主视觉版权属于 Koei Tecmo）与程序图标（游戏里龙剑的贴图），仅作为本非商业粉丝移植的界面使用。",
      L"This project is not affiliated with or endorsed by Koei Tecmo, Team NINJA or Microsoft. Ninja Gaiden is a trademark of Koei Tecmo; "
      L"Xbox is a trademark of Microsoft. This program contains no game code or data and no code from the Microsoft Xbox Development Kit. "
      L"Please use your own legally obtained copy of the game.\n\n"
-     L"The one exception is the launcher\u2019s background art, taken from the author\u2019s own website: its Ryu Hayabusa key art is "
-     L"Koei Tecmo\u2019s, used only as the interface of this non-commercial fan port."},
+     L"The exceptions are the launcher\u2019s background art, taken from the author\u2019s own website (its Ryu Hayabusa key art is "
+     L"Koei Tecmo\u2019s), and the programs\u2019 icon, the game\u2019s Dragon Sword texture, used only as the interface of this "
+     L"non-commercial fan port."},
     {L"纹理过滤", L"Texture filtering"},
     {L"关", L"Off"},
     {L"各向异性", L"Anisotropic"},
