@@ -123,6 +123,11 @@ frames; off by default); `perfhud = 1` shows frame rate, GPU, CPU, memory and di
 corner (off by default); `aniso` anisotropic texture filtering (1 = off, 2-16). On the command line: `--vsync`,
 `--perfhud`, `--aniso N`; command-line values hold for that run only and are not written back to `black.ini`.
 
+**Picture shape**: with `widescreen = 1`, `aspect = 16:9` (default), `16:10` or `21:9` (experimental), on the command
+line `--aspect W:H`; `widescreen = 0` is 4:3. At 16:10 / 21:9 the 3D view widens (the height stays) and the HUD, text,
+menus and the intro movie keep a 16:9 shape in the centre; the title screen's background art is stretched. Ninja
+Gaiden Black itself only: the bundled SNES / arcade programs stay 16:9.
+
 **Keyboard and controller**: the game itself reads only its controller; each key presses one controller input (by
 default WASD to move, arrows for the camera, J / K to attack, Space to jump, Esc for Start...). The launcher's Controls
 page changes them and can remap the controller's buttons. In `black.ini`: `kb_<input> = Key[,Key]` and
