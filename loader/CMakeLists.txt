@@ -35,6 +35,7 @@ add_library(blackrt SHARED
   src/input/mouselook.cpp
   src/input/autoaim.cpp
   src/input/bindings.cpp
+  src/input/padkeys.cpp
   src/input/movies.cpp
   src/audio/reverb.cpp
   src/settings.cpp
@@ -103,9 +104,11 @@ target_link_options(black PRIVATE
 
 # The launcher (project/docs/08): installs and starts the game, display / graphics card / controls / saves.
 add_executable(launcher WIN32 ../launcher/src/main.cpp ../launcher/src/strings.cpp ../launcher/src/install.cpp
+  ../launcher/src/saves.cpp ../launcher/src/keys.cpp
   ../launcher/src/launcher.rc)
 set_target_properties(launcher PROPERTIES OUTPUT_NAME "Ninja Gaiden Black HurricaneX21 Launcher")
-target_compile_definitions(launcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+target_compile_definitions(launcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00 WINVER=0x0A00
+  GAME_VERSION="${PROJECT_VERSION}") # the game program's release number, for the About page
 target_compile_options(launcher PRIVATE /W3 /utf-8 /EHsc)
 target_link_libraries(launcher PRIVATE d2d1 dwrite windowscodecs ole32 shell32 user32 advapi32 bcrypt dxgi)
 if(PORT_ICON AND EXISTS "${PORT_ICON}")

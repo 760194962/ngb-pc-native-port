@@ -26,6 +26,8 @@ bool fixed(int action, int slot); // Esc is always the first pause key (it also 
 std::wstring key_name(uint16_t k);
 
 bool load_ini(const char *key, const char *value); // black.ini lines key_<ini>; false if not one of ours
+std::string key_ini(uint16_t k);                    // a key's black.ini spelling ("Space", "J", "F5", "0xBA")
+uint16_t key_from_ini(const std::string &s);       // and back (0: none or unknown)
 void save_ini(FILE *f);
 
 // Once per pad poll (input/xinput.cpp): in play, the bound keys and mouse buttons pressed into the Xbox pad, through

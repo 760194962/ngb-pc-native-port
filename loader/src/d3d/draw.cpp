@@ -507,7 +507,13 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
                 g_ffp_edge_stages |= 1u << s;
         }
         ts_on_change(s, 3, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MAGFILTER, v > 3 ? D3DTEXF_LINEAR : v); });
-        ts_on_change(s, 4, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MINFILTER, v > 3 ? D3DTEXF_LINEAR : v); });
+        // Anisotropic filtering (black.ini aniso, an addition: the game asks for LINEAR): where the game filters linearly
+        // when minifying, anisotropically up to g_cfg.aniso; point sampling stays as the game set it
+        ts_on_change(s, 4, [&](uint32_t v) {
+            DWORD f = v > 3 ? D3DTEXF_LINEAR : v;
+            if (g_cfg.aniso > 1 && (f == D3DTEXF_LINEAR || f == D3DTEXF_ANISOTROPIC)) f = D3DTEXF_ANISOTROPIC;
+            d->SetSamplerState(s, D3DSAMP_MINFILTER, f);
+        });
         ts_on_change(s, 5, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MIPFILTER, v > 2 ? D3DTEXF_LINEAR : v); });
         // LOD bias: Ninja Gaiden Black writes 0xFFFFFFFF (a NaN) into stage 0's (0x12A4CD). The NV2A field is a
         // signed 5.8 fixed-point value converted with an x86 float-to-int, which turns a NaN into 0x80000000 and so
@@ -518,7 +524,7 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
             d->SetSamplerState(s, D3DSAMP_MIPMAPLODBIAS, f2u(b));
         });
         ts_on_change(s, 7, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MAXMIPLEVEL, v); });
-        ts_on_change(s, 8, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MAXANISOTROPY, v ? v : 1); });
+        ts_on_change(s, 8, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MAXANISOTROPY, std::max<DWORD>(v ? v : 1, g_cfg.aniso)); });
         ts_on_change(s, 29, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_BORDERCOLOR, v); });
         // Texture coordinate source and transform belong to the vertex pipeline: they apply to pixel-shader draws with
         // fixed-function vertices too (the glow / blur chain), not only to fixed-function pixels.

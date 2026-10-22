@@ -12,6 +12,7 @@
 #include "d3d/draw.h"
 #include "d3d/host.h"
 #include "input/bindings.h"
+#include "input/padkeys.h"
 #include "input/mouselook.h"
 #include "input/movies.h"
 
@@ -233,6 +234,10 @@ void read_press_file(uint32_t now_ms)
                     if (k == "aa") g_cfg.aa = v;
                     else if (k == "seamfill") g_cfg.seam_fill = v;
                     else if (k == "perfhud") g_cfg.perfhud = v; // the performance overlay (black.ini perfhud)
+                    else if (k == "aniso") { // anisotropic filtering N (black.ini aniso), sent again with every sampler state
+                        g_cfg.aniso = std::clamp(atoi(line.c_str() + c + 1), 1, 16);
+                        xd3d::forget_sent_state();
+                    }
                     else if (k == "shadow") { // shadow maps at N x their Xbox size (black.ini shadow)
                         g_cfg.shadow_scale = std::clamp(atoi(line.c_str() + c + 1), 1, 16);
                         xd3d::request_render_rebuild();
@@ -414,8 +419,17 @@ void read_pad(uint32_t port, XGamepad &g)
     }
     apply_presses(g);
     // Mouse look, the key bindings and the movie skip read BLACK's game objects (binding table 0x2F3BD4, the
-    // movie player at *0x2D45F0): BLACK only. Another build gets the pads and scripted presses until it has its own.
-    if (!g_cfg.profile || !g_cfg.profile->black) return;
+    // movie player at *0x2D45F0): BLACK only. Ninja Gaiden Black and its bundled programs: keys pressed into the pad
+    // and the PC pad's buttons remapped (input/padkeys.cpp).
+    if (!g_cfg.profile || !g_cfg.profile->black) {
+        padkeys::Pad p = {g.wButtons, {}, g.sThumbLX, g.sThumbLY, g.sThumbRX, g.sThumbRY};
+        memcpy(p.analog, g.bAnalogButtons, 8);
+        padkeys::apply(p, GetForegroundWindow() == host3d::window());
+        g.wButtons = p.buttons;
+        memcpy(g.bAnalogButtons, p.analog, 8);
+        g.sThumbLX = p.lx, g.sThumbLY = p.ly, g.sThumbRX = p.rx, g.sThumbRY = p.ry;
+        return;
+    }
     bool focus = GetForegroundWindow() == host3d::window();
     bool live = focus && host3d::mouse_captured();
     int raw_wheel;

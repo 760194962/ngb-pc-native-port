@@ -525,6 +525,14 @@ bool create_device_here()
     D3DADAPTER_IDENTIFIER9 id = {};
     g_d3d->GetAdapterIdentifier(D3DADAPTER_DEFAULT, 0, &id);
     perfhud::start(id.Description, id.VendorId, id.DeviceId); // black.ini perfhud
+    if (g_cfg.aniso > 1) { // the card's limit
+        D3DCAPS9 caps = {};
+        g_dev->GetDeviceCaps(&caps);
+        int top = (caps.TextureFilterCaps & D3DPTFILTERCAPS_MINFANISOTROPIC) ? (int)caps.MaxAnisotropy : 1;
+        if (g_cfg.aniso > top) logf("host: anisotropic filtering %dx asked, the card allows %dx", g_cfg.aniso, top);
+        g_cfg.aniso = std::max(1, std::min(g_cfg.aniso, top));
+        logf("host: anisotropic texture filtering %dx", g_cfg.aniso);
+    }
     g_intz = SUCCEEDED(g_d3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DUSAGE_DEPTHSTENCIL,
                                                 D3DRTYPE_TEXTURE, FMT_INTZ));
     // Depth views (d3d/device.cpp depth_view): R32F keeps the 24-bit depth the shadow compare needs, where an

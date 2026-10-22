@@ -120,7 +120,13 @@ More commands under "Diagnostics".
 **Graphics settings** (the launcher's Graphics page, or `black.ini`): `shadow` scales the shadow map (1 = the Xbox's
 128x128, default 4 = 512x512, up to 16); `vsync = 1` waits for the display's refresh (no tearing, a few more late
 frames; off by default); `perfhud = 1` shows frame rate, GPU, CPU, memory and disk use in the picture's top-right
-corner (off by default). On the command line: `--vsync`, `--perfhud`.
+corner (off by default); `aniso` anisotropic texture filtering (1 = off, 2-16). On the command line: `--vsync`,
+`--perfhud`, `--aniso N`; command-line values hold for that run only and are not written back to `black.ini`.
+
+**Keyboard and controller**: the game itself reads only its controller; each key presses one controller input (by
+default WASD to move, arrows for the camera, J / K to attack, Space to jump, Esc for Start...). The launcher's Controls
+page changes them and can remap the controller's buttons. In `black.ini`: `kb_<input> = Key[,Key]` and
+`padmap_<input> = <input>`. Keys do not reach the game while Alt is held.
 
 **Shader cache**: the first time the program meets a shader it compiles it on the spot, which can stutter; the result
 is kept in `cache\shaders\` next to the program and read into memory at the next start, so it stutters no more.

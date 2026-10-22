@@ -276,6 +276,9 @@ std::wstring key_name(uint16_t k)
     return widen(ini_name(k));
 }
 
+std::string key_ini(uint16_t k) { return ini_name(k); }
+uint16_t key_from_ini(const std::string &s) { return parse_key(s); }
+
 bool load_ini(const char *k, const char *value)
 {
     if (strncmp(k, "key_", 4) != 0) return false;

@@ -82,6 +82,7 @@ struct Config {
     int shadow_scale = 4;        // shadow maps at this many times their Xbox size (black.ini shadow: 1, 2, 4, 8, 16)
     bool vsync = false;          // present on the display's refresh (black.ini vsync); off: frames paced by the Xbox vblank only
     bool perfhud = false;        // the performance overlay (black.ini perfhud; d3d/perfhud.cpp)
+    int aniso = 1;               // anisotropic texture filtering (black.ini aniso: 1 off = as the game sets, 2-16; d3d/draw.cpp)
     bool seam_fill = true;     // fill hairline cracks between geometry pieces (PC SETTINGS, --no-seamfill)
     bool autoaim = false;      // the game's view pull toward targets, off by default (input/autoaim.cpp; --autoaim, PC SETTINGS)
     float fov = 70.0f;         // horizontal field of view in play, degrees (fov.cpp; --fov, PC SETTINGS; the game's is 70)
