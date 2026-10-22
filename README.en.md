@@ -93,7 +93,8 @@ ngb-pc-native-port\
 
 3. Double-click `run.bat`. If the program or the game is missing, the window says what is missing.
 
-In the game, **Alt+Enter** switches between window and fullscreen, and the setting is saved.
+In the game, **Alt+Enter** switches between window and fullscreen, and the setting is saved. Fullscreen is either
+exclusive (`fullscreen = 2` in `black.ini`) or borderless (`fullscreen = 1`); the launcher's Display page chooses.
 
 **Graphics card**: the dedicated one by default, the integrated one where there is none. On its first run, if Windows'
 graphics settings have no preference for the program yet, it registers "high performance" for itself; to change it

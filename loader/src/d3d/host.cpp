@@ -1,4 +1,5 @@
 #include "d3d/apicount.h"
+#include "d3d/draw.h"
 #include "d3d/host.h"
 #include "d3d/shader_cache.h"
 
@@ -32,6 +33,9 @@ bool g_in_scene;
 std::atomic<int> g_win_w, g_win_h; // client area, follows WM_SIZE
 int g_aspect_w = 4, g_aspect_h = 3; // the picture's shape; the window keeps it when resized
 int g_bb_w, g_bb_h;                 // host back buffer: the largest monitor, so any window size is drawn 1:1
+// Exclusive fullscreen (black.ini fullscreen = 2): the device runs with Windowed = FALSE at the desktop's display mode
+// while the window is fullscreen. Alt+Enter switches by a Reset at the next Swap (d3d/device.cpp recover_device).
+std::atomic<bool> g_exclusive_now{false};
 int g_frame_w, g_frame_h;           // the part of the back buffer the current frame uses
 WINDOWPLACEMENT g_windowed_place = {sizeof(WINDOWPLACEMENT)};
 
@@ -42,6 +46,19 @@ std::atomic<int> g_mouse_dx, g_mouse_dy, g_wheel, g_buttons;
 bool g_hold_left; // the capturing click: masked until released
 constexpr UINT WM_APP_CAPTURE = WM_APP + 0x52; // wParam: 1 = capture, 0 = release (request_capture)
 constexpr UINT WM_APP_FULLSCREEN = WM_APP + 0x53; // wParam: 1 = fullscreen, 0 = windowed (set_fullscreen)
+
+void restyle_windowed();
+std::atomic<bool> g_restyle_pending{false}; // out of exclusive fullscreen: restyle the window once the device is windowed
+
+// The device is created, tested and Reset on the window's thread (WM_APP_DEVICE; the game's render thread draws).
+// Created on the render thread, the device stayed lost after Alt+Tab in exclusive fullscreen: the window did not even
+// come back. Created on the window thread but tested and Reset from the render thread, TestCooperativeLevel said
+// DEVICELOST for ever. Only with both on the window thread did it say DEVICENOTRESET and Reset succeed (a minimal
+// D3D9 program, 2 runs each on the Iris Xe, 2026-10-22; the loader itself r282/r283).
+constexpr UINT WM_APP_DEVICE = WM_APP + 0x54; // wParam: kDeviceCreate / kDeviceReset / kDeviceTest
+enum { kDeviceCreate, kDeviceReset, kDeviceTest };
+bool create_device_here();
+bool reset_device_here();
 
 // Borderless window over the whole monitor, or back to the window it was.
 void toggle_fullscreen()
@@ -56,15 +73,36 @@ void toggle_fullscreen()
         g_cfg.fullscreen = true;
         SetWindowPos(g_hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
                      mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-        logf("host: fullscreen %ldx%ld", mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top);
+        logf("host: fullscreen %ldx%ld%s", mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+             g_cfg.exclusive ? " (exclusive)" : "");
+        if (g_cfg.exclusive) {
+            g_exclusive_now = true;
+            if (g_dev) xd3d::request_device_reset(); // at start the device is made exclusive directly (create_device)
+        }
     } else {
-        SetWindowLongW(g_hwnd, GWL_STYLE, (style & ~WS_POPUP) | WS_OVERLAPPEDWINDOW);
-        g_cfg.fullscreen = false;
-        SetWindowPlacement(g_hwnd, &g_windowed_place);
-        SetWindowPos(g_hwnd, nullptr, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-        logf("host: windowed");
+        if (g_exclusive_now && g_dev) {
+            // Out of exclusive fullscreen the device goes windowed first (the Reset at the next Swap) and the window is
+            // restyled after that (reset_device_here). Restyled while the device was still exclusive, the runtime's
+            // window hook waited on the device (r277, when the render thread did the Reset).
+            g_exclusive_now = false;
+            g_restyle_pending = true;
+            xd3d::request_device_reset();
+            return;
+        }
+        g_exclusive_now = false;
+        restyle_windowed();
     }
+}
+
+// The window back to its framed size and place (from fullscreen)
+void restyle_windowed()
+{
+    DWORD style = GetWindowLongW(g_hwnd, GWL_STYLE);
+    SetWindowLongW(g_hwnd, GWL_STYLE, (style & ~WS_POPUP) | WS_OVERLAPPEDWINDOW);
+    g_cfg.fullscreen = false;
+    SetWindowPlacement(g_hwnd, &g_windowed_place);
+    SetWindowPos(g_hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    logf("host: windowed");
 }
 
 // Window border sizes (window rect minus client rect).
@@ -228,6 +266,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_ACTIVATE:
         if (LOWORD(wp) == WA_INACTIVE) capture_mouse(false);
         break;
+    case WM_APP_DEVICE: // create_device, reset_device, test_cooperative_level: on this thread
+        if (wp == kDeviceCreate) return create_device_here();
+        if (wp == kDeviceReset) return reset_device_here();
+        return g_dev->TestCooperativeLevel();
     case WM_KILLFOCUS:
         capture_mouse(false);
         break;
@@ -414,7 +456,21 @@ void mouse_take(int *dx, int *dy, int *wheel)
 
 D3DPRESENT_PARAMETERS g_pp; // as created; Reset uses the same
 
-bool create_device()
+// Exclusive fullscreen: the desktop's display mode on the default adapter (if it cannot be read: stays windowed)
+D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp)
+{
+    D3DDISPLAYMODE dm = {};
+    if (FAILED(g_d3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &dm))) return pp;
+    pp.Windowed = FALSE;
+    pp.BackBufferWidth = dm.Width;
+    pp.BackBufferHeight = dm.Height;
+    pp.FullScreen_RefreshRateInHz = dm.RefreshRate;
+    return pp;
+}
+
+namespace {
+
+bool create_device_here()
 {
     g_d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!g_d3d) {
@@ -437,9 +493,12 @@ bool create_device()
     pp.AutoDepthStencilFormat = D3DFMT_D24S8;
     // Frames are paced by the emulated Xbox vblank (D3DDevice_Swap); the host monitor's refresh must not add a second clock.
     pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    g_pp = pp; // the windowed parameters: Reset goes back to them (reset_device)
+    if (g_exclusive_now) pp = exclusive_params(pp);
     // FPU_PRESERVE: the game's x87 math must keep its precision; MULTITHREADED: loader threads may call in.
+    // Not NOWINDOWCHANGES: with it the runtime does not minimise the window and bring it back around Alt+Tab in
+    // exclusive fullscreen (r279). The window is restyled only while the device is windowed instead.
     DWORD flags = D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE | D3DCREATE_MULTITHREADED;
-    g_pp = pp;
     HRESULT hr = g_d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd, flags, &pp, &g_dev);
     if (FAILED(hr)) {
         logf("host: CreateDevice failed 0x%08lx, retrying with software vertex processing", hr);
@@ -450,6 +509,9 @@ bool create_device()
             return false;
         }
     }
+    g_bb_w = (int)pp.BackBufferWidth; // exclusive: the display mode's size
+    g_bb_h = (int)pp.BackBufferHeight;
+    if (!pp.Windowed) logf("host: exclusive fullscreen %ux%u at %u Hz", pp.BackBufferWidth, pp.BackBufferHeight, pp.FullScreen_RefreshRateInHz);
     if (g_cfg.api_count) apicount::install(g_dev);
     D3DADAPTER_IDENTIFIER9 id = {};
     g_d3d->GetAdapterIdentifier(D3DADAPTER_DEFAULT, 0, &id);
@@ -467,6 +529,26 @@ bool create_device()
     xd3d::prewarm_shaders(g_dev); // the cached shaders' objects now, not in the frame that first draws with them
     return true;
 }
+
+bool reset_device_here()
+{
+    D3DPRESENT_PARAMETERS pp = g_exclusive_now ? exclusive_params(g_pp) : g_pp;
+    HRESULT hr = g_dev->Reset(&pp);
+    if (FAILED(hr)) {
+        logf("host: Reset failed 0x%08lx", hr);
+        return false;
+    }
+    g_bb_w = (int)pp.BackBufferWidth; // the exclusive mode's size can differ from the largest monitor's
+    g_bb_h = (int)pp.BackBufferHeight;
+    logf("host: device reset, %s %ux%u", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth, pp.BackBufferHeight);
+    if (pp.Windowed && g_restyle_pending.exchange(false)) restyle_windowed(); // now the window can change
+    return true;
+}
+
+} // namespace
+
+bool create_device() { return SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceCreate, 0) != 0; }
+HRESULT test_cooperative_level() { return (HRESULT)SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceTest, 0); }
 
 IDirect3DDevice9 *dev() { return g_dev; }
 bool intz() { return g_intz; }
@@ -501,10 +583,7 @@ HRESULT present()
 bool reset_device()
 {
     end_scene();
-    D3DPRESENT_PARAMETERS pp = g_pp;
-    HRESULT hr = g_dev->Reset(&pp);
-    if (FAILED(hr)) logf("host: Reset failed 0x%08lx", hr);
-    return SUCCEEDED(hr);
+    return SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceReset, 0) != 0;
 }
 
 } // namespace host3d

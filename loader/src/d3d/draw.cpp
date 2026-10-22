@@ -1261,6 +1261,16 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
     logf("[draw]   viewport scale %g %g %g offset %g %g %g; c58 %g %g %g %g; c59 %g %g %g %g", vp[0], vp[1], vp[2], vp[4], vp[5],
          vp[6], g_st.vs_constants[58][0], g_st.vs_constants[58][1], g_st.vs_constants[58][2], g_st.vs_constants[58][3],
          g_st.vs_constants[59][0], g_st.vs_constants[59][1], g_st.vs_constants[59][2], g_st.vs_constants[59][3]);
+    { // the host's own clip: viewport and scissor in host pixels
+        D3DVIEWPORT9 hv = {};
+        RECT hs = {};
+        DWORD son = 0;
+        host3d::dev()->GetViewport(&hv);
+        host3d::dev()->GetScissorRect(&hs);
+        host3d::dev()->GetRenderState(D3DRS_SCISSORTESTENABLE, &son);
+        logf("[draw]   host viewport %lu,%lu %lux%lu, scissor %s %ld,%ld-%ld,%ld (target scale %g x %g)", hv.X, hv.Y, hv.Width,
+             hv.Height, son ? "on" : "off", hs.left, hs.top, hs.right, hs.bottom, target_scale_x(), target_scale_y());
+    }
     if (ctx.path == Path::Prog) {
         for (int c : {96, 97, 190, 191, 0, 1, 2, 3, 10, 11, 12, 13, 18, 21, 22, 23, 24, 25})
             logf("[draw]   c%d (slot %d) = %g %g %g %g", c - 96, c, g_st.vs_constants[c][0], g_st.vs_constants[c][1],

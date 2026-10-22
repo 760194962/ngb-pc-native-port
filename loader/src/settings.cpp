@@ -41,13 +41,20 @@ void settings_load()
             g_cfg.render_w = 0;
             if (g_cfg.render_h && g_cfg.render_h < 240) g_cfg.render_h = 0;
         } else if (k == "render_factor") g_cfg.render_factor = std::clamp(v, 1.0f, 2.0f);
-        else if (k == "scale") g_cfg.scale = std::clamp(v, 0.5f, 8.0f);
+        else if (k == "scale") g_cfg.scale = std::clamp(v, 0.5f, 10.0f);
         else if (k == "aa") g_cfg.aa = v != 0;
         else if (k == "seamfill") g_cfg.seam_fill = v != 0;
         else if (k == "effectsnative") g_cfg.effects_native = v != 0;
         else if (k == "fps") g_cfg.fps = atoi(val) == 60 ? 60 : 30;
         else if (k == "widescreen") g_cfg.widescreen = v != 0;
-        else if (k == "fullscreen") g_cfg.fullscreen = v != 0;
+        else if (k == "fullscreen") { // 0 window, 1 borderless, 2 exclusive
+            g_cfg.fullscreen = v != 0;
+            g_cfg.exclusive = (int)v == 2;
+        } else if (k == "window") { // the window's client size: "auto" (fit the screen) or WxH
+            int w = 0, h = 0;
+            if (sscanf_s(val, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 240) g_cfg.window_w = w, g_cfg.window_h = h;
+            else g_cfg.window_w = g_cfg.window_h = 0;
+        }
         else if (k == "gain") g_cfg.gain = std::clamp(v, 0.5f, 3.0f);
         else if (k == "gamma") g_cfg.gamma = std::clamp(v, 0.5f, 3.0f);
         else if (k == "mouse_sens") g_cfg.mouse_sens = std::clamp(v, 0.1f, 50.0f);
@@ -75,7 +82,10 @@ void settings_save()
     fprintf(f, "render_factor = %.2f\nscale = %.3f\n", g_cfg.render_factor, g_cfg.scale);
     int fps = g_cfg.fps_next ? g_cfg.fps_next : g_cfg.fps; // a menu choice for the next run wins
     bool wide = g_cfg.widescreen_next >= 0 ? g_cfg.widescreen_next != 0 : g_cfg.widescreen;
-    fprintf(f, "aa = %d\nfps = %d\nwidescreen = %d\nfullscreen = %d\n", g_cfg.aa ? 1 : 0, fps, wide ? 1 : 0, g_cfg.fullscreen ? 1 : 0);
+    fprintf(f, "aa = %d\nfps = %d\nwidescreen = %d\nfullscreen = %d\n", g_cfg.aa ? 1 : 0, fps, wide ? 1 : 0,
+            g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0);
+    if (g_cfg.window_w > 0 && g_cfg.window_h > 0) fprintf(f, "window = %dx%d\n", g_cfg.window_w, g_cfg.window_h);
+    else fprintf(f, "window = auto\n");
     fprintf(f, "gain = %.2f\ngamma = %.2f\n", g_cfg.gain, g_cfg.gamma);
     fprintf(f, "mouse_sens = %.3f\nmouse_invert = %d\n", g_cfg.mouse_sens, g_cfg.mouse_invert ? 1 : 0);
     fprintf(f, "reverb = %d\nreverb_gain = %.2f\n", g_cfg.reverb ? 1 : 0, g_cfg.reverb_gain);

@@ -16,7 +16,7 @@ void set_title(const wchar_t *text);
 void load_program_icons();
 // The game's name for the window title: Ninja Gaiden Black x2.1 and the programs it launches, or BLACK.
 const wchar_t *game_title();
-bool create_device(); // on the calling (game render) thread; back buffer = the largest monitor
+bool create_device(); // made on the window's thread (exclusive fullscreen recovers only so); back buffer = the largest monitor
 // The part of the back buffer this frame uses (the client area, shrunk to fit the back buffer if needed) and
 // the picture inside it (the game's aspect, centred; the rest are black bars). present() shows that part.
 void frame_layout(RECT *frame, RECT *picture);
@@ -39,6 +39,7 @@ HRESULT present();                          // EndScene + Present (D3DERR_DEVICE
 // Reset with the creation parameters: every D3DPOOL_DEFAULT resource and reference to the back buffer and depth
 // surface must be released first; afterwards Direct3D is back at its default states.
 bool reset_device();
+HRESULT test_cooperative_level(); // TestCooperativeLevel on the window's thread (as reset_device)
 bool window_closed();
 
 } // namespace host3d

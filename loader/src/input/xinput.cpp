@@ -232,6 +232,10 @@ void read_press_file(uint32_t now_ms)
                     bool v = c != std::string::npos && line[c + 1] == '1';
                     if (k == "aa") g_cfg.aa = v;
                     else if (k == "seamfill") g_cfg.seam_fill = v;
+                    else if (k == "effectsnative") { // as PC SETTINGS > EFFECTS AT XBOX SIZE
+                        g_cfg.effects_native = v;
+                        xd3d::request_render_rebuild();
+                    }
                     else if (k == "hostffp") g_cfg.host_ffp = !v ? false : true;
                     else if (k == "ffpdebug") g_cfg.ffp_debug = (unsigned)atoi(line.c_str() + c + 1);
                     else if (k == "zmode") g_cfg.zmode = atoi(line.c_str() + c + 1);

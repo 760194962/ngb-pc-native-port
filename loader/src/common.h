@@ -71,6 +71,7 @@ struct Config {
     // buffer (anamorphic), and the loader renders and shows that buffer at 16:9. --normal-aspect turns it off.
     bool widescreen = true;
     bool fullscreen = false;   // --fullscreen: start borderless fullscreen
+    bool exclusive = false;    // black.ini "fullscreen = 2": fullscreen is exclusive (D3D9 Windowed = FALSE), not borderless
     // Mouse look rotates the player directly (input/mouselook.cpp): mouse_sens x 0.022 degrees per count, the
     // scale most PC shooters use.
     float mouse_sens = 2.0f;

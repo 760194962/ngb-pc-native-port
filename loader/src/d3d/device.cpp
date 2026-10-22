@@ -1401,7 +1401,7 @@ std::atomic<bool> g_reset_requested; // tests: press-file "reset" (the same path
 void recover_device(bool force)
 {
     IDirect3DDevice9 *d = host3d::dev();
-    HRESULT hr = d->TestCooperativeLevel();
+    HRESULT hr = host3d::test_cooperative_level();
     if (hr == D3D_OK && force) {
         hr = D3DERR_DEVICENOTRESET;
         logf("[d3d] tests: resetting the device as if it had been lost");
@@ -1551,6 +1551,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
 // ---- render targets ----
 
 void fit_viewport();
+void __stdcall D3DDevice_SetScissors(uint32_t Count, BOOL Exclusive, const D3DRECT *pRects);
 
 HRESULT __stdcall D3DDevice_SetRenderTarget(Surface *pRenderTarget, Surface *pNewZStencil)
 {
@@ -1585,6 +1586,7 @@ HRESULT __stdcall D3DDevice_SetRenderTarget(Surface *pRenderTarget, Surface *pNe
         g_requested_viewport = {0, 0, w, h, 0.0f, 1.0f};
     }
     fit_viewport();
+    D3DDevice_SetScissors(0, FALSE, nullptr); // that SetViewport ends so too (see D3DDevice_SetViewport)
     return D3D_OK;
 }
 
@@ -2024,6 +2026,11 @@ void __stdcall D3DDevice_SetViewport(const Viewport *pViewport)
              pViewport->MinZ, pViewport->MaxZ, g_st.render_target);
     g_requested_viewport = *pViewport;
     fit_viewport();
+    // The library's SetViewport ends with SetScissors(0, FALSE, NULL) (x2.1 0x3C7452-0x3C7458): a viewport, and so
+    // every SetRenderTarget, turns the scissor off. Ninja Gaiden Black sets a 128x128 scissor for its shadow target
+    // and draws the scene after the next SetRenderTarget; kept on and rescaled to the back buffer (a target of
+    // another scale with "effects at Xbox size"), it clipped the scene to the top-left 512x384 (r304).
+    D3DDevice_SetScissors(0, FALSE, nullptr);
 }
 
 // Like the library's SetViewport (0x26ac00), clamp the requested viewport to the current render target

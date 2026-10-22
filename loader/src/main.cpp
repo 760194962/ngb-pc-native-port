@@ -78,7 +78,7 @@ void usage()
            "  --shot-every N    with --screenshot: every N frames (default 60)\n"
            "  --shot-start S    with --screenshot: start the cadence S seconds after the first frame\n"
            "  --gamma G         extra output gamma after the game's ramp (default 1.0; >1 brighter; F7/F8 adjust live)\n"
-           "  --scale K         render at K x the Xbox resolution, any factor 0.5-8 (default 3 = 2560x1440 widescreen)\n"
+           "  --scale K         render at K x the Xbox resolution, any factor 0.5-10 (default 3 = 2880x1440 widescreen)\n"
            "  --resolution R    render size instead of --scale: WxH (e.g. 1920x1080), H (width from the aspect)\n"
            "                    or native (the window's size at start, the screen's with --fullscreen)\n"
            "  --window WxH      window client size (default: largest size of the game's aspect that fits the screen)\n"
@@ -248,10 +248,11 @@ bool parse_args()
             if (g_cfg.gamma < 0.2f || g_cfg.gamma > 5.0f) g_cfg.gamma = 1.0f;
         } else if (a == L"--scale") {
             settings_mark_cli("render");
+            settings_mark_cli("scale"); // else black.ini's scale replaced it (r287)
             std::wstring v;
             if (!next(v)) return false;
             g_cfg.scale = (float)_wtof(v.c_str());
-            if (g_cfg.scale < 0.5f || g_cfg.scale > 8.0f) g_cfg.scale = 3.0f;
+            if (g_cfg.scale < 0.5f || g_cfg.scale > 10.0f) g_cfg.scale = 3.0f;
         } else if (a == L"--resolution") {
             settings_mark_cli("render");
             std::wstring v;
@@ -267,6 +268,7 @@ bool parse_args()
                 if (g_cfg.render_h < 240 || g_cfg.render_h > 8192) g_cfg.render_w = g_cfg.render_h = 0;
             }
         } else if (a == L"--window") {
+            settings_mark_cli("window");
             std::wstring v;
             if (!next(v)) return false;
             g_cfg.window_w = _wtoi(v.c_str());
@@ -458,6 +460,12 @@ int run(void *reserve, unsigned reserve_size)
     logc("BLACK loader " BLACK_VERSION " (blackrt) - XBE %s, hdd %s, log %s%s%s", narrow(g_cfg.xbe_path).c_str(), narrow(g_cfg.hdd_dir).c_str(),
          narrow(g_cfg.log_path).c_str(), g_cfg.trace ? ", trace" : "", g_cfg.strict ? ", strict" : "");
     logf("address-space stub: reserve %p + 0x%x", reserve, reserve_size);
+    // What black.ini (the launcher's pages) and the command line set, as read: the launcher's choices can be checked here
+    logf("settings: render %s, scale %.2f, aa %d, seamfill %d, effectsnative %d, widescreen %d, fullscreen %d, window %dx%d, "
+         "gain %.2f, gamma %.2f",
+         g_cfg.render_native ? "native" : g_cfg.render_h ? std::to_string(g_cfg.render_h).c_str() : "scale", g_cfg.scale,
+         g_cfg.aa, g_cfg.seam_fill, g_cfg.effects_native, g_cfg.widescreen, g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0,
+         g_cfg.window_w, g_cfg.window_h, g_cfg.gain, g_cfg.gamma);
 
     std::string err;
     if (!g_xbe.load(g_cfg.xbe_path, err)) {
