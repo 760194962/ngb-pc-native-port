@@ -188,11 +188,11 @@ RECT host_rect(LONG x1, LONG y1, LONG x2, LONG y2)
     return {lroundf(x1 * sx), lroundf(y1 * sy), lroundf(x2 * sx), lroundf(y2 * sy)};
 }
 
-HostRT &host_rt(const PixelContainer *s)
+// The host render target for Xbox colour memory at `data`, w x h Xbox pixels (made at the render scale, or 1x for
+// the small post-processing buffers with "effects at Xbox size").
+HostRT &host_rt_at(uint32_t data, uint32_t w, uint32_t h)
 {
-    uint32_t w, h;
-    surface_size(s, &w, &h);
-    HostRT &rt = g_rts[mem_key(s->Data, w, h)];
+    HostRT &rt = g_rts[mem_key(data, w, h)];
     if (!rt.tex) {
         rt.xw = w;
         rt.xh = h;
@@ -209,9 +209,16 @@ HostRT &host_rt(const PixelContainer *s)
             host3d::dev()->ColorFill(surf, nullptr, 0);
             surf->Release();
         }
-        logf("[d3d] render target texture %ux%u for surface data 0x%08x", w, h, s->Data);
+        logf("[d3d] render target texture %ux%u for surface data 0x%08x", w, h, data);
     }
     return rt;
+}
+
+HostRT &host_rt(const PixelContainer *s)
+{
+    uint32_t w, h;
+    surface_size(s, &w, &h);
+    return host_rt_at(s->Data, w, h);
 }
 
 // Depth surface for an Xbox depth buffer; at least as large as the render target (a D3D9 rule).
@@ -597,6 +604,16 @@ void present_backbuffer()
             out->GetSurfaceLevel(0, &so);
             float px[4] = {1.0f / bb.w, 1.0f / bb.h, 0, 0};
             fullscreen_pass(g_seam_ps, bb.tex, so, nullptr, bb.w, bb.h, false, px, false, nullptr, hz.tex);
+            if (debug_frame_active() && !g_cfg.screenshot_dir.empty()) { // a trace: the frame before and after the fill
+                IDirect3DSurface9 *si = nullptr;
+                bb.tex->GetSurfaceLevel(0, &si);
+                wchar_t name[64];
+                swprintf(name, 64, L"\\f%u_seam_in.png", g_frame_count.load() + 1);
+                save_surface_png(si, (g_cfg.screenshot_dir + name).c_str(), false);
+                swprintf(name, 64, L"\\f%u_seam_out.png", g_frame_count.load() + 1);
+                save_surface_png(so, (g_cfg.screenshot_dir + name).c_str(), false);
+                si->Release();
+            }
             so->Release();
             src = out;
         }
@@ -1372,7 +1389,25 @@ void change_render_scale(int pic_w, int pic_h)
     float ox = g_scale_x, oy = g_scale_y;
     setup_render_scale(pic_w, pic_h);
     if (fabsf(ox - g_scale_x) < 1e-4f && fabsf(oy - g_scale_y) < 1e-4f && !g_force_rebuild.exchange(false)) return;
+    // The colour targets are made again at the new size with their pictures scaled over: the game does not redraw
+    // all of them every frame (the pause menu's background is a frame it captured once), and new targets are black,
+    // so changing PC SETTINGS > EFFECTS AT XBOX SIZE or the render size behind the menu turned it black.
+    std::vector<std::pair<uint64_t, IDirect3DTexture9 *>> old;
+    for (auto &kv : g_rts)
+        if (kv.second.tex) {
+            kv.second.tex->AddRef();
+            old.push_back({kv.first, kv.second.tex});
+        }
     release_host_targets();
+    for (auto &o : old) {
+        HostRT &n = host_rt_at((uint32_t)(o.first >> 24), (uint32_t)(o.first >> 12) & 0xFFF, (uint32_t)o.first & 0xFFF);
+        IDirect3DSurface9 *a = nullptr, *b = nullptr;
+        if (n.tex && SUCCEEDED(o.second->GetSurfaceLevel(0, &a)) && SUCCEEDED(n.tex->GetSurfaceLevel(0, &b)))
+            host3d::dev()->StretchRect(a, nullptr, b, nullptr, D3DTEXF_LINEAR);
+        if (a) a->Release();
+        if (b) b->Release();
+        o.second->Release();
+    }
     rebind_game_target();
     logf("[d3d] render size changed to %ux%u (x%.4g by x%.4g)", host_w(g_width), host_h(g_height), g_scale_x, g_scale_y);
 }
