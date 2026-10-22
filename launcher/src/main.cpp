@@ -107,11 +107,17 @@ enum {
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
 // texture limit (loader d3d/device.cpp setup_render_scale: 10x widescreen renders 8192x4800, r289).
 constexpr int kMaxScale = 10;
-std::wstring render_size(double scale, bool wide)
+// The picture shapes (black.ini widescreen + aspect): 16:9, 16:10, 21:9 (the game program widens its projection and
+// keeps the HUD and menus 16:9: loader ngb_aspect.cpp, d3d/draw.cpp scale_rhw), 4:3 (widescreen = 0)
+const int kAspects[4][2] = {{16, 9}, {16, 10}, {21, 9}, {4, 3}};
+std::wstring render_size(double scale, int aspect)
 {
-    int w = (int)std::lround(std::min(720.0 * scale * (wide ? 4.0 / 3.0 : 1.0), 8192.0)), h = (int)std::lround(480.0 * scale);
+    // the 720x480 buffer widened to the shape: x 0.75 x aw / ah (16:9: 4/3, 4:3: 1; loader setup_render_scale)
+    double k = 0.75 * kAspects[aspect][0] / kAspects[aspect][1];
+    int w = (int)std::lround(std::min(720.0 * scale * k, 8192.0)), h = (int)std::lround(480.0 * scale);
     return std::to_wstring(w) + L"\u00D7" + std::to_wstring(h);
 }
+std::wstring aspect_name(int aspect) { return std::to_wstring(kAspects[aspect][0]) + L":" + std::to_wstring(kAspects[aspect][1]); }
 // Every setting's "?": its label and the help it opens (what it does and, where it matters, what it costs;
 // the figures are measurements on the Iris Xe in the chapter-1 bench, project/docs/08)
 const struct {
@@ -153,8 +159,10 @@ const wchar_t kSite[] = L"https://akirahayabusa.github.io/ngb-hurricane-patch/";
 // Brightness and gamma sliders: the loader's range (settings.cpp clamps gain and gamma to 0.5 - 3.0), 0.05 steps
 constexpr float kSliderMin = 0.5f, kSliderMax = 3.0f, kSliderW = 260;
 // The window sizes offered (client area) for 16:9 and for 4:3; 0 x 0 = auto (the largest that fits the screen)
-const int kWin169[][2] = {{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
-const int kWin43[][2] = {{0, 0}, {960, 720}, {1280, 960}, {1440, 1080}, {1920, 1440}};
+const int kWins[4][5][2] = {{{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}},
+                            {{0, 0}, {1280, 800}, {1440, 900}, {1680, 1050}, {1920, 1200}},
+                            {{0, 0}, {1680, 720}, {2240, 960}, {2560, 1080}, {3440, 1440}},
+                            {{0, 0}, {960, 720}, {1280, 960}, {1440, 1080}, {1920, 1440}}};
 constexpr UINT_PTR kTimerInstall = 1;
 struct Hit {
     int id;
@@ -168,6 +176,7 @@ bool inside(const D2D1_RECT_F &r, float x, float y) { return x >= r.left && x < 
 
 std::string black_ini(const char *key);
 std::wstring save_hdd();
+int aspect_index(bool saved = false);
 bool game_running();
 uint16_t kb_key(int input, int slot);
 int pad_source(int button);
@@ -771,7 +780,7 @@ struct Painter {
             if (x != std::wstring::npos) w[x] = L'\u00D7';
             s += L" " + w;
         }
-        return s + L"  \x00B7  " + (black_ini_saved("widescreen") == "0" ? L"4:3" : L"16:9");
+        return s + L"  \x00B7  " + aspect_name(aspect_index(true));
     }
 
     void start_page()
@@ -1147,9 +1156,10 @@ struct Painter {
     // Aspect ratio: black.ini widescreen = 1 (16:9) / 0 (4:3); the window sizes below follow it
     void aspect_list(float x, float y, float right)
     {
-        std::vector<ListRow> rows = {{L"16:9", S(Str::Aspect169Note)}, {L"4:3", S(Str::Aspect43Note)}};
-        int sel = black_ini("widescreen") == "0" ? 1 : 0;
-        drop_list(kHitAspect, x, y, {200, 300, 80, 0}, {rows[sel].a, L"", rows[sel].b}, rows, sel, S(Str::AspectSoon));
+        std::vector<ListRow> rows = {{L"16:9", S(Str::Aspect169Note)}, {L"16:10", S(Str::Aspect1610Note)},
+                                     {L"21:9", S(Str::Aspect219Note)}, {L"4:3", S(Str::Aspect43Note)}};
+        int sel = aspect_index();
+        drop_list(kHitAspect, x, y, {200, 340, 80, 0}, {rows[sel].a, L"", rows[sel].b}, rows, sel, S(Str::AspectSoon));
     }
 
     // Window size (the client area, used in window mode): auto = what the game picks, the largest whole multiple of
@@ -1157,9 +1167,10 @@ struct Painter {
     // chosen aspect; sizes larger than the work area cannot be chosen
     void window_list(float x, float y, float right)
     {
-        bool wide = black_ini("widescreen") != "0";
-        const int(*sizes)[2] = wide ? kWin169 : kWin43;
-        const int aw = wide ? 16 : 4, ah = wide ? 9 : 3;
+        int asp = aspect_index();
+        const int(*sizes)[2] = kWins[asp];
+        int aw = kAspects[asp][0], ah = kAspects[asp][1];
+        if (aw == 16 && ah == 10) aw = 8, ah = 5; // the game program steps in whole multiples of the reduced shape
         RECT work;
         SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
         int avail_w = (work.right - work.left) * 9 / 10, avail_h = (work.bottom - work.top) * 9 / 10;
@@ -1258,7 +1269,8 @@ struct Painter {
     // the game's own PC SETTINGS shows as 1080p until a choice here replaces it.
     void resolution_list(float x, float y, float right)
     {
-        bool wide = black_ini("widescreen") != "0";
+        int asp = aspect_index(), wasp = asp == 3 ? 0 : asp; // the widescreen column: the chosen shape (16:9 when 4:3)
+        bool wide = asp != 3;
         std::string rd = black_ini("render"), sc = black_ini("scale");
         double scale = sc.empty() ? 3.0 : atof(sc.c_str());
         std::vector<ListRow> rows;
@@ -1267,7 +1279,7 @@ struct Painter {
             std::wstring a = std::to_wstring(i) + L"\u00D7";
             if (i == 1) a += S(Str::ResOriginal);
             if (i == 3) a += S(Str::ResDefault);
-            rows.push_back({a, L"16:9  " + render_size(i, true), L"4:3  " + render_size(i, false), wide ? 1 : 2});
+            rows.push_back({a, aspect_name(wasp) + L"  " + render_size(i, wasp), L"4:3  " + render_size(i, 3), wide ? 1 : 2});
         }
         int sel = -1;
         ListRow shown;
@@ -1276,7 +1288,7 @@ struct Painter {
             if (scale == std::floor(scale) && scale >= 1 && scale <= kMaxScale) sel = (int)scale;
             wchar_t b[16];
             swprintf(b, 16, L"%g\u00D7", scale);
-            shown = {b, L"", render_size(scale, wide), 0};
+            shown = {b, L"", render_size(scale, asp), 0};
         } else
             shown = {std::wstring(rd.begin(), rd.end()) + L"p", L"", L"", 0};
         if (sel >= 0) {
@@ -1691,6 +1703,15 @@ int pad_source(int button)
     return button;
 }
 
+// The shape chosen: 0 16:9, 1 16:10, 2 21:9, 3 4:3 (black.ini widescreen, aspect)
+int aspect_index(bool saved)
+{
+    std::string wide = saved ? black_ini_saved("widescreen") : black_ini("widescreen");
+    std::string a = saved ? black_ini_saved("aspect") : black_ini("aspect");
+    if (wide == "0") return 3;
+    return a == "16:10" ? 1 : a == "21:9" ? 2 : 0;
+}
+
 // "Restore defaults" on a settings page: that page's settings only, back to what the game uses with no black.ini
 // (loader common.h Config) and, for the graphics card, what the game sets on its first run (high performance)
 void reset_page(Page p)
@@ -1698,6 +1719,7 @@ void reset_page(Page p)
     if (p == kDisplay) {
         black_ini_set("fullscreen", "0");
         black_ini_set("widescreen", "1");
+        black_ini_set("aspect", "16:9");
         black_ini_set("window", "auto");
         black_ini_set("gain", "1.00");
         black_ini_set("gamma", "1.00");
@@ -1808,12 +1830,13 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (g.list_open == kHitGpu && row >= 0 && row < (int)gpu_choices().size())
                 set_gpu_preference(gpu_choices()[row].pref);
             if (g.list_open == kHitMode && row >= 0 && row < 3) black_ini_set("fullscreen", row == 0 ? "0" : row == 1 ? "2" : "1");
-            if (g.list_open == kHitAspect && row >= 0 && row < 2 && (row == 0) != (black_ini("widescreen") != "0")) {
-                black_ini_set("widescreen", row == 0 ? "1" : "0");
-                black_ini_set("window", "auto"); // a fixed size belongs to the other aspect
+            if (g.list_open == kHitAspect && row >= 0 && row < 4 && row != aspect_index()) {
+                black_ini_set("widescreen", row == 3 ? "0" : "1");
+                if (row != 3) black_ini_set("aspect", std::to_string(kAspects[row][0]) + ":" + std::to_string(kAspects[row][1]));
+                black_ini_set("window", "auto"); // a fixed size belongs to the other shape
             }
             if (g.list_open == kHitWin && row >= 0 && row < 5) {
-                const int(*sizes)[2] = black_ini("widescreen") == "0" ? kWin43 : kWin169;
+                const int(*sizes)[2] = kWins[aspect_index()];
                 black_ini_set("window", row ? std::to_string(sizes[row][0]) + "x" + std::to_string(sizes[row][1]) : std::string("auto"));
             }
             if (g.list_open >= kHitPadMap && g.list_open < kHitPadMap + keys::kButtons * 16 && row >= 0 && row < keys::kButtons)

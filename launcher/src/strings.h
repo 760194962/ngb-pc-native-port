@@ -180,6 +180,8 @@ enum class Str {
     PadCard,
     PressKey,
     GameRunningNote,
+    Aspect1610Note,
+    Aspect219Note,
     KeyHint,
     PadHint,
     PadChanged,

@@ -99,7 +99,7 @@ const Pair kText[(int)Str::Count] = {
     {L"窗口", L"Window"},
     {L"无边框", L"Borderless"},
     {L"画面比例", L"Aspect ratio"},
-    {L"21:9 与 16:10 开发中", L"21:9 and 16:10 in progress"},
+    {L"HUD、文字与菜单保持 16:9 比例；21:9 为实验性。", L"The HUD, text and menus keep a 16:9 shape; 21:9 is experimental."},
     {L"渲染分辨率", L"Render resolution"},
     {L"跟随窗口", L"Window size"},
     {L"当前：Xbox 分辨率的 %g 倍", L"Now: %g\u00D7 the Xbox resolution"},
@@ -234,6 +234,8 @@ const Pair kText[(int)Str::Count] = {
     {L"手柄", L"Controller"},
     {L"按下按键…", L"Press a key\u2026"},
     {L"游戏正在运行：保存的设定会在下次启动游戏时生效。", L"The game is running: saved settings take effect the next time it starts."},
+    {L"宽屏（16:10 显示器）", L"Widescreen (16:10 screens)"},
+    {L"超宽屏（实验性）", L"Ultrawide (experimental)"},
     {L"点按键框，再按下新的键；Delete 清除，Esc 取消。一个键只对应一个输入。按住 Alt 时按键不会送进游戏。",
      L"Click a key box, then press the new key; Delete clears, Esc cancels. A key belongs to one input only. Keys do not reach the game while Alt is held."},
     {L"左边是游戏收到的按钮，右边选择由手柄的哪个按钮触发。十字键与摇杆不能重映射。",
@@ -287,8 +289,16 @@ const Pair kText[(int)Str::Count] = {
      L"ways).\n\nWhichever side is replaced is first backed up to savedata_backups here, so nothing is lost."},
     {L"窗口：带边框的窗口，可拖动、改大小。\n全屏：独占屏幕，按桌面的分辨率与刷新率显示。Alt+Tab 切出再切回时，画面要稍等一下才恢复。\n无边框：铺满屏幕的无边框窗口，切换到其他程序是即时的。\n游戏中按 Alt+Enter 可以在窗口与全屏之间切换。\n\n性能：模式本身几乎没有影响。但渲染分辨率选「跟随窗口」时，画面越大（全屏、无边框）要画的像素越多，越吃显卡。",
      L"Window: a framed window you can move and resize.\nFullscreen: takes over the screen at the desktop\u2019s resolution and refresh rate. After Alt+Tab away and back the picture takes a moment to return.\nBorderless: a borderless window over the whole screen; switching to other programs is instant.\nIn the game, Alt+Enter switches between window and fullscreen.\n\nPerformance: the mode itself costs next to nothing. With the render resolution at \u201CWindow size\u201D, a bigger picture (fullscreen, borderless) means more pixels to draw and more GPU time."},
-    {L"16:9 宽屏，或 4:3 原版画面比例。下方「窗口大小」的选项会跟着比例改变。\n21:9 与 16:10 还在开发中。\n\n性能：同样的渲染倍数下，16:9 画面的宽度是 4:3 的 4/3 倍（3× 时 2880×1440 对 2160×1440），像素多约 33%，稍吃显卡。",
-     L"16:9 widescreen, or the original 4:3. The window sizes offered below follow it. 21:9 and 16:10 are in progress.\n\nPerformance: at the same render scale a 16:9 picture is 4/3 as wide as a 4:3 one (2880\u00D71440 against 2160\u00D71440 at 3\u00D7), about 33% more pixels: a little more GPU time."},
+    {L"画面的形状：16:9、16:10、21:9 宽屏，或 4:3 原版。下方「窗口大小」的选项会跟着改变。\n"
+     L"16:10 与 21:9 时游戏的 3D 视野左右变宽（上下不变）；HUD、文字、菜单与片头视频保持 16:9 的比例放在中央，"
+     L"铺满画面的背景与过场图仍铺满。21:9 为实验性：标题画面的背景图会被横向拉宽，部分画面可能还有未处理的地方。\n\n"
+     L"性能：同样的渲染倍数下，画面越宽像素越多（3× 时 16:9 为 2880×1440，21:9 为 3780×1440，多约 31%），稍吃显卡。",
+     L"The picture\u2019s shape: 16:9, 16:10 or 21:9 widescreen, or the original 4:3. The window sizes below follow it.\n"
+     L"At 16:10 and 21:9 the game\u2019s 3D view widens (the height stays); the HUD, text, menus and the intro movie keep a 16:9 "
+     L"shape in the centre, and full-screen backgrounds and cards still fill the screen. 21:9 is experimental: the title "
+     L"screen\u2019s background art is stretched, and some screens may still need work.\n\n"
+     L"Performance: at the same render scale a wider picture has more pixels (at 3\u00D7, 2880\u00D71440 for 16:9 and "
+     L"3780\u00D71440 for 21:9, about 31% more): a little more GPU time."},
     {L"窗口模式下游戏画面的大小。「自动」选能放进屏幕的最大尺寸；超出屏幕的尺寸不能选。全屏与无边框按屏幕大小显示，不使用这一项。\n\n性能：只有渲染分辨率选「跟随窗口」时，窗口越大越吃显卡；其他情况下窗口大小只影响最后的缩放，几乎没有代价。",
      L"The picture\u2019s size in window mode. \u201CAuto\u201D picks the largest that fits the screen; sizes larger than the screen cannot be chosen. Fullscreen and borderless use the screen\u2019s size instead.\n\nPerformance: only with the render resolution at \u201CWindow size\u201D does a bigger window cost more GPU time; otherwise the window size only changes the final scaling, which costs next to nothing."},
     {L"把整个画面按比例调亮或调暗。它在游戏自己的亮度设定之上再调整，1.00 为不调整；调得太高时，亮的地方会过曝变白。\n\n性能：没有影响，这一步每帧本来就会做。",
