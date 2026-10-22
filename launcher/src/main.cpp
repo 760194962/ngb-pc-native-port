@@ -1310,7 +1310,7 @@ struct Painter {
         for (const GpuChoice &ch : gpu_choices())
             rows.push_back({gpu_label(ch), L"", ch.pref ? S(ch.pref == 2 ? Str::GpuHigh : Str::GpuLow) : L"", 0});
         int sel = gpu_choice_index();
-        drop_list(kHitGpu, x, y, {380, 380, 0, 0}, rows[sel], rows, sel, L"");
+        drop_list(kHitGpu, x, y, {440, 440, 0, 0}, rows[sel], rows, sel, L"");
     }
 
     // One row of a list: the choice on the left; b in a column, c on the right (strong: 1 or 2 = that one brighter)
@@ -1318,7 +1318,10 @@ struct Painter {
     void list_row(D2D1_RECT_F r, const ListRow &row, bool on, const ListShape &sh)
     {
         const float dim = row.off ? 0.4f : 1.0f, l = r.left;
-        float a_end = !row.b.empty() ? l + sh.col_b - 8 : !row.c.empty() && sh.col_c ? l + sh.col_c - 8 : r.right - 14;
+        float a_end = !row.b.empty()             ? l + sh.col_b - 8
+                      : !row.c.empty() && sh.col_c ? l + sh.col_c - 8
+                      : !row.c.empty()             ? r.right - 22 - measure(row.c, 12.5f, DWRITE_FONT_WEIGHT_NORMAL) // c on the right
+                                                   : r.right - 14;
         text(row.a, {l + 14, r.top, a_end, r.bottom}, 13.5f, on ? kBone : kAsh, dim,
              on ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
         if (!row.b.empty())
@@ -1341,7 +1344,8 @@ struct Painter {
         bool open = g.list_open == id, hov = g.hover == id || open;
         fill(box, hov ? kInk3 : kInk, 0.9f, 3);
         stroke(box, hov ? kGold : kInk3, 1.0f, 3);
-        text(shown.a, {box.left + 12, box.top, box.right - 34, box.bottom}, 13.5f, kBone, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+        float a_end = shown.c.empty() ? box.right - 34 : box.right - 40 - measure(shown.c, 12.5f, DWRITE_FONT_WEIGHT_NORMAL);
+        text(shown.a, {box.left + 12, box.top, a_end, box.bottom}, 13.5f, kBone, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
              nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
         if (!shown.c.empty())
             text(shown.c, {box.left + 12, box.top, box.right - 32, box.bottom}, 12.5f, kAsh, 0.85f, DWRITE_FONT_WEIGHT_NORMAL,
