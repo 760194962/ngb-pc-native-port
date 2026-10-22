@@ -72,33 +72,52 @@ These also happen on the Xbox; the port fixes them. Each fix can be switched bac
 
 ## Running
 
-`run.bat` in the repository root starts the game. The default layout:
+**Requirements**: Windows 10 or 11 (64-bit is fine; the program itself is 32-bit), a Direct3D 9 graphics card
+(integrated graphics work too), and your own vb-zh-x2.1 game image. Nothing else to install: Direct3D, XAudio2 and
+XInput come with Windows, and the C++ runtime is built into the programs.
+
+**With the launcher (recommended)**:
+
+1. Extract the release zip. Its `NGB-HurricaneX21\` folder can go anywhere:
+
+   ```
+   NGB-HurricaneX21\
+     Ninja Gaiden Black HurricaneX21 Launcher.exe   the launcher: start here
+     Ninja Gaiden Black HurricaneX21.exe            the game program, with blackrt.dll
+     game\x21\                                      where the game is installed (by the launcher)
+     savedata\                                      the Xbox hard disk: saves and the game's settings (made on the first run)
+   ```
+
+2. Open the launcher; on the Install page choose your x2.1 image (`.iso`) and install it to the game folder (by default
+   `game\x21` beside the launcher). The install checks the game programs and can move the image to the Recycle Bin. A
+   game already extracted: choose its folder on the same page.
+3. Adjust the Display, Graphics and Controls pages if you like (changes apply once saved; each "?" explains its
+   setting), then start from the Play page.
+
+The Saves page backs up and restores saves and imports from / exports to xRevive; About has the version and the legal note.
+
+**With run.bat (for development)**: `run.bat` in the repository root starts the game directly, without the launcher,
+from this layout:
 
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\Ninja Gaiden Black HurricaneX21.exe
-                                     the build, with blackrt.dll (see "Building")
-  game\x21\default.xbe               your own extracted x2.1 image (all of its files)
-  savedata\                          the Xbox hard disk: saved games and the game's settings (made on the first run)
-  logs\                              the log black.log, screenshots shots\, the command file presses.txt
+  build\RelWithDebInfo\Ninja Gaiden Black HurricaneX21.exe   the build, with blackrt.dll (see "Building")
+  game\x21\default.xbe                                       your own extracted x2.1 image (all of its files)
+  savedata\                                                  the Xbox hard disk
+  logs\                                                      the log black.log, screenshots shots\, the command file presses.txt
 ```
 
-1. Build `Ninja Gaiden Black HurricaneX21.exe` and `blackrt.dll` (see "Building"); they go in `build\RelWithDebInfo\`.
-2. Extract the x2.1 image to `game\x21\` and check that the hash of `default.xbe` matches the table above:
-
-   ```powershell
-   Get-FileHash game\x21\default.xbe -Algorithm SHA256
-   ```
-
-3. Double-click `run.bat`. If the program or the game is missing, the window says what is missing.
+Check that the hash of `default.xbe` matches the table above: `Get-FileHash game\x21\default.xbe -Algorithm SHA256`.
+If the program or the game is missing, `run.bat`'s window says what is missing.
 
 In the game, **Alt+Enter** switches between window and fullscreen, and the setting is saved. Fullscreen is either
 exclusive (`fullscreen = 2` in `black.ini`) or borderless (`fullscreen = 1`); the launcher's Display page chooses.
 
 **Graphics card**: the dedicated one by default, the integrated one where there is none. On its first run, if Windows'
 graphics settings have no preference for the program yet, it registers "high performance" for itself; to change it
-later, use Windows Settings > System > Display > Graphics, and the program never overrides that choice. The log line
+later, use the launcher's Graphics page or Windows Settings > System > Display > Graphics, and the program never
+overrides that choice. The log line
 `host: Direct3D 9 device ... on '<card>'` names the card in use.
 
 **Other locations**: drop `default.xbe` onto `run.bat`, or set the paths in a command prompt first:
@@ -167,6 +186,10 @@ dumped with `trace`) and name it when configuring; the program then carries it (
 ```
 cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32 -DPORT_ICON=D:/ngb/icon.ico
 ```
+
+**Release zip**: with a build made without the icon (`-DPORT_ICON=`), run `tools\make_release.ps1 -Bin
+<build folder>\RelWithDebInfo` for `dist\ngb-hurricane-x21-pc-<version>-win32.zip` (the launcher, the game program,
+`blackrt.dll`, both READMEs, LICENSE) and a symbols zip. The script refuses a build that carries the game's icon.
 
 ## Diagnostics
 
