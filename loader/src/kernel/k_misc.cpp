@@ -3,6 +3,8 @@
 // log and return values that keep XAPI going.
 #include "hooks.h"
 #include "kernel/kexports.h"
+#include "net/nvnet.h"
+#include "net/online.h"
 #include "sha1.h"
 
 #include <intrin.h>
@@ -131,6 +133,17 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
     case 0x104: dword = 1; break;                  // XC_FACTORY_GAME_REGION: North America
     case 0x0FF: case 0xFFFF: type = 3; size = ValueLength < 256 ? ValueLength : 256; break; // whole sections: zeros
     default: known = false; break;
+    }
+    uint8_t factory[16];
+    uint32_t ftype, fsize;
+    if (online_factory_setting(ValueIndex, &ftype, factory, &fsize)) { // online: the registered console's (net/online.cpp)
+        logf("[k] ExQueryNonVolatileSetting(0x%x, len %u) -> the registered console's factory value (%u bytes)", ValueIndex, ValueLength, fsize);
+        if (ValueLength < fsize) return XSTATUS_BUFFER_TOO_SMALL;
+        if (Type) *Type = ftype;
+        memcpy(Value, factory, fsize);
+        SecureZeroMemory(factory, sizeof factory);
+        if (ResultLength) *ResultLength = fsize;
+        return XSTATUS_SUCCESS;
     }
     logf("[k] ExQueryNonVolatileSetting(0x%x, len %u) -> %s 0x%x", ValueIndex, ValueLength, known ? "" : "UNKNOWN, ", dword);
     if (!known) return XSTATUS_OBJECT_NAME_NOT_FOUND;
@@ -327,6 +340,11 @@ void __stdcall KeInitializeInterrupt(XKINTERRUPT *Interrupt, void *ServiceRoutin
 
 BOOLEAN __stdcall KeConnectInterrupt(XKINTERRUPT *Interrupt)
 {
+    if (nvnet_connect_interrupt(Interrupt)) { // online play: the NIC's interrupt is raised by its model (net/nvnet.cpp)
+        if (Interrupt->Connected) return FALSE;
+        Interrupt->Connected = 1;
+        return TRUE;
+    }
     logf("[k] KeConnectInterrupt(%p, level %u, isr %s): recorded, will never fire", Interrupt, Interrupt->BusInterruptLevel,
          sym_name((uint32_t)(uintptr_t)Interrupt->ServiceRoutine).c_str());
     if (Interrupt->Connected) return FALSE;

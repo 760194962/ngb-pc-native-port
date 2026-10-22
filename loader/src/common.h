@@ -90,6 +90,10 @@ struct Config {
     bool autoaim = false;      // the game's view pull toward targets, off by default (input/autoaim.cpp; --autoaim, PC SETTINGS)
     float fov = 70.0f;         // horizontal field of view in play, degrees (fov.cpp; --fov, PC SETTINGS; the game's is 70)
     bool skip_movies = true;   // A / START skip any movie, also unseen ones (input/movies.cpp; --no-movie-skip, PC SETTINGS)
+    // Online play through Insignia (net/online.cpp, project/docs/09): off unless black.ini online = 1 (or --online-eeprom
+    // and --online-hdd) names the player's registered xemu EEPROM and hard disk image; both are only read.
+    bool online = false;
+    std::wstring online_eeprom, online_hdd, online_dns; // online_dns: Insignia's DNS server (default 46.101.64.175)
     bool known_build = false;  // the XBE is the NTSC-U build the address tables are for (main.cpp)
     std::wstring game_override; // --game-override: files there replace the game's of the same relative path
     std::wstring menu_cache;    // the port's rebuilt front-end files (fe/pages.cpp), served like --game-override after it

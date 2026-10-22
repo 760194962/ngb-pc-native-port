@@ -7,6 +7,7 @@
 // File handles are real Windows handles opened through ntdll, so read/write/APC/event semantics carry over.
 #include "kernel/kexports.h"
 #include "kernel/nt.h"
+#include "net/online.h"
 #include "perf.h"
 namespace xd3d { void texture_note_write(const void *p, uint32_t len); void flash_note_read(uint32_t bytes); } // d3d/texture.cpp, d3d/device.cpp
 
@@ -335,6 +336,7 @@ NTSTATUS __stdcall NtClose(HANDLE Handle)
         if (is_link_handle(Handle)) return g_link_handles.erase(Handle) ? XSTATUS_SUCCESS : XSTATUS_INVALID_HANDLE;
         g_handles.erase(Handle);
     }
+    ksync_handle_closed(Handle); // an event handle's KEVENT (k_sync.cpp)
     return host::NtClose(Handle);
 }
 
@@ -370,6 +372,7 @@ NTSTATUS __stdcall NtReadFile(HANDLE FileHandle, HANDLE Event, void *ApcRoutine,
             s = hio.Status;
         }
         if (s == (NTSTATUS)0xC0000011 /* END_OF_FILE */) s = XSTATUS_SUCCESS;
+        if (hi.mount->partition == 0 && ByteOffset && NT_OK(s)) online_partition0_read(ByteOffset->QuadPart, (uint8_t *)Buffer, Length);
         logf("[k] NtReadFile(raw '%s', len 0x%x, off 0x%llx) -> 0x%08x", hi.xbox_path.c_str(), Length,
              ByteOffset ? ByteOffset->QuadPart : -1LL, s);
         if (ApcRoutine) KNOTE_ONCE("raw-disk NtReadFile with an APC routine: completed synchronously, APC not queued");
@@ -405,6 +408,12 @@ NTSTATUS __stdcall NtReadFile(HANDLE FileHandle, HANDLE Event, void *ApcRoutine,
 NTSTATUS __stdcall NtWriteFile(HANDLE FileHandle, HANDLE Event, void *ApcRoutine, void *ApcContext, XIO_STATUS_BLOCK *IoStatusBlock,
                                void *Buffer, uint32_t Length, LARGE_INTEGER *ByteOffset)
 {
+    HandleInfo hi; // online play: the registered disk's config sectors stay in memory (net/online.cpp)
+    if (ByteOffset && handle_info(FileHandle, hi) && hi.raw_volume && hi.mount->partition == 0 &&
+        online_partition0_write(ByteOffset->QuadPart, (const uint8_t *)Buffer, Length)) {
+        complete(IoStatusBlock, XSTATUS_SUCCESS, Length, Event);
+        return XSTATUS_SUCCESS;
+    }
     NTSTATUS s = host::NtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, (host::IO_STATUS_BLOCK *)IoStatusBlock, Buffer, Length,
                                    ByteOffset, nullptr);
     KTRACE("%p '%s', ev %p, apc %p, %p, len 0x%x, off %lld) -> 0x%08x (", FileHandle, handle_desc(FileHandle).c_str(), Event,

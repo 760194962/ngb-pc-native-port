@@ -2,6 +2,7 @@
 // own code (.text) reaches are real; what XNET / XONLINE / XPP's memory-unit driver call stays a logging stub.
 #include "kernel/kexports.h"
 #include "kernel/nt.h"
+#include "net/nvnet.h"
 
 #include <map>
 #include <mutex>
@@ -95,7 +96,7 @@ BOOLEAN __stdcall HalIsResetOrShutdownPending()
 uint32_t __stdcall PhyGetLinkState(BOOLEAN Verify)
 {
     KTRACE("%u", Verify);
-    return 0;
+    return nvnet_link_state(); // online play (net/nvnet.cpp): up; otherwise no cable
 }
 
 NTSTATUS __stdcall PhyInitialize(BOOLEAN ForceReset, void *Param2)
@@ -118,7 +119,7 @@ void ktick_update()
     KeTickCount = (uint32_t)(now - g_tick_base);
 }
 
-uint8_t XboxLANKey[6];          // MAC address: zero (no network)
+uint8_t XboxLANKey[16];         // the system-link key: zero (no system link here)
 uint8_t XePublicKeyData[284];   // Xbox Live public key: zero (nothing signed by it is verified here)
 static char g_disk_model[] = "ST310211A";
 static char g_disk_serial[] = "0000000000000000";

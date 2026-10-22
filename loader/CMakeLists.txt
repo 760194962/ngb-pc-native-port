@@ -52,6 +52,10 @@ add_library(blackrt SHARED
   src/kernel/k_rtl.cpp
   src/kernel/k_misc.cpp
   src/kernel/k_ngb.cpp
+  src/kernel/k_crypto.cpp
+  src/net/online.cpp
+  src/net/nvnet.cpp
+  src/net/vnet.cpp
   src/fiber.cpp
   src/ngb/d3d_ngb.cpp
   src/d3d/dispatch.cpp
@@ -78,7 +82,7 @@ target_include_directories(blackrt PRIVATE src)
 target_compile_definitions(blackrt PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE
   BLACK_VERSION="${PROJECT_VERSION}")
 target_compile_options(blackrt PRIVATE /W3 /utf-8 /EHsc)
-target_link_libraries(blackrt PRIVATE ntdll bcrypt d3d9 d3dcompiler windowscodecs ole32 user32 gdi32 winmm dbghelp advapi32 shell32 pdh dxgi psapi)
+target_link_libraries(blackrt PRIVATE ntdll bcrypt d3d9 d3dcompiler windowscodecs ole32 user32 gdi32 winmm dbghelp advapi32 shell32 pdh dxgi psapi ws2_32)
 # Xbox SEH handlers run through the same fs:[0] chain; no SafeSEH tables anywhere in the process.
 target_link_options(blackrt PRIVATE /SAFESEH:NO /MAP) # blackrt.map: port addresses in crash logs -> functions
 

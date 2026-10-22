@@ -472,6 +472,17 @@ uint32_t __stdcall XGetDevices(void *DeviceType)
     return gamepad ? 1u : 0u;
 }
 
+// Ninja Gaiden Black 0x3DA598 (unnamed; XONLINE asks it for memory units, where Live accounts can also be kept):
+// the ports with a device of the type, and two more masks the caller may ask for. Gamepad: port 0; others: none.
+uint32_t __stdcall XGetDevicesWithMasks(void *DeviceType, uint32_t *pMask1, uint32_t *pMask2)
+{
+    DTRACE("%p, %p, %p", DeviceType, pMask1, pMask2);
+    uint32_t ports = XGetDevices(DeviceType);
+    if (pMask1) *pMask1 = ports;
+    if (pMask2) *pMask2 = ports;
+    return ports;
+}
+
 uint32_t __stdcall XGetDeviceEnumerationStatus()
 {
     DTRACE("");
@@ -582,6 +593,7 @@ static const xd3d::Hle kTable[] = {
 static const xd3d::Hle kNgbTable[] = {
     H(0x003da5d4, XInitDevices, "s s", false),
     H(0x003da5d9, XGetDevices, "s", true),
+    H(0x003da598, XGetDevicesWithMasks, "s s s", true),
     H(0x003da5fb, XGetDeviceChanges, "s s s", true),
     H(0x003dad86, XGetDeviceEnumerationStatus, "", true),
     H(0x003db931, XInputOpen, "s s s s", true),

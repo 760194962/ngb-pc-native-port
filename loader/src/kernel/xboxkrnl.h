@@ -174,6 +174,8 @@ bool kdpc_insert(XKDPC *dpc, void *arg1, void *arg2);
 // Dispatcher-object waits (k_sync.cpp)
 NTSTATUS ksync_wait_object(void *object, bool alertable, const LARGE_INTEGER *timeout);
 void ksync_signal_object(void *object);
+void *ksync_event_object(HANDLE handle); // ObReferenceObjectByHandle of an event handle: its KEVENT
+void ksync_handle_closed(HANDLE handle);
 
 // Threads (k_thread.cpp)
 NTSTATUS kthread_create(HANDLE *out_handle, DWORD *out_tid, uint32_t stack_size, uint32_t tls_size, uint32_t start_routine,

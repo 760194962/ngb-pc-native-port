@@ -42,6 +42,8 @@ Each item's verdict and evidence are in `project/docs/06_功能验证矩阵.md` 
 - **Launched programs**: the arcade and SNES versions are playable from the main menu.
 - **Exit game**: the main menu has a last row, 退出游戏 (EXIT GAME on the English menus), that asks "Exit the game?" in
   the game's own confirmation box: Ⓐ yes returns to the desktop, Ⓑ no goes back to the menu.
+- **Online leaderboards (optional)**: with your own console and account registered with Insignia in xemu, the game's
+  Ranking menu signs in and shows the real leaderboards (tested). Off by default; see "Online" below.
 - **Saves**: saving, loading and loading back the same slot verified. Saves are in the standard Xbox format; copied
   into xRevive's save folder they load directly (tested).
 - **Sound**: a software DirectSound mixer on XAudio2, with reverb.
@@ -171,6 +173,25 @@ The command `run.bat` runs (you can also type it yourself):
   request. The default of 60 is one a second, which makes the game stutter.
 - `"Ninja Gaiden Black Hurricane.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
   BLACK-only and have no effect on Ninja Gaiden.
+
+**Online (Insignia leaderboards, optional)**: needs the EEPROM and hard disk image you already registered with Insignia
+in xemu. In `black.ini`:
+
+```
+online = 1
+online_eeprom = D:\xemu\eeprom.bin
+online_hdd = D:\xemu\xbox_hdd.qcow2
+```
+
+Both files are only read. Open Ranking and pick your gamertag to sign in. Notes:
+
+- Do not be online in xemu at the same time (one console cannot sign in twice; the port stays offline while xemu runs).
+- If the console's network settings use manual DNS (common after registering: the primary is the PC that ran
+  InsigniaDNS), keep InsigniaDNS.exe running on that PC.
+- A proxy's TUN / fake-ip mode captures DNS; turn TUN off if it cannot connect.
+- At "cannot connect to Xbox Live" press Ⓑ (Ⓐ looks for the online dashboard, and the port can only restart the game).
+
+Details and evidence: `project/docs/09_联网_Insignia.md`.
 
 ## Building
 

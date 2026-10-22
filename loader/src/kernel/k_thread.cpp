@@ -188,6 +188,12 @@ NTSTATUS __stdcall ObReferenceObjectByHandle(HANDLE Handle, void *ObjectType, vo
             return XSTATUS_INVALID_HANDLE;
         }
     }
+    if (ObjectType == ExEventObjectType) {
+        if (void *e = ksync_event_object(Handle)) {
+            *ReturnedObject = e;
+            return XSTATUS_SUCCESS;
+        }
+    }
     logf("[k] ObReferenceObjectByHandle(%p, type %p): object type not supported yet", Handle, ObjectType);
     *ReturnedObject = nullptr;
     return XSTATUS_OBJECT_TYPE_MISMATCH;

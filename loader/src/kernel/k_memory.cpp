@@ -6,6 +6,9 @@
 // physical address = virtual - 0x80000000.
 #include "kernel/kexports.h"
 #include "kernel/nt.h"
+#include "net/online.h"
+
+#include <intrin.h>
 
 #include <map>
 #include <mutex>
@@ -172,8 +175,33 @@ uint32_t __stdcall MmGetPhysicalAddress(void *BaseAddress)
     KTRACE("%p", BaseAddress);
     uint8_t *p = (uint8_t *)BaseAddress;
     if (p >= g_contig_base && p < g_contig_base + CONTIGUOUS_SIZE + 1) return (uint32_t)(p - g_contig_base);
+    // Online play: XNET hands the NIC pool buffers by these addresses. "& 0x7FFFFFFF" of an address below 64 MB would
+    // read as contiguous memory (a frame of zeros on the wire, run user_online), so XNET gets the address with the top
+    // bit set, which the NIC model (net/nvnet.cpp) maps back; real physical addresses are all below 64 MB.
+    uint32_t caller = (uint32_t)(uintptr_t)_ReturnAddress();
+    if (online_enabled() && caller >= 0x003AF7C0 && caller < 0x003C1558) return (uint32_t)(uintptr_t)p | 0x80000000u;
     KNOTE_ONCE("MmGetPhysicalAddress(%p) on non-contiguous memory; returning address & 0x7FFFFFFF", BaseAddress);
     return (uint32_t)(uintptr_t)p & 0x7FFFFFFF;
+}
+
+// MM_STATISTICS {Length = 36, TotalPhysicalPages, AvailablePages, VirtualMemoryBytesCommitted, ...Reserved,
+// CachePagesCommitted, PoolPagesCommitted, StackPagesCommitted, ImagePagesCommitted}. XNET mixes it into its random
+// seed (Ninja Gaiden Black 0x3BE1D5); the contiguous block's use stands in for the console's.
+NTSTATUS __stdcall MmQueryStatistics(uint32_t *Statistics)
+{
+    KTRACE("%p", Statistics);
+    if (!Statistics || Statistics[0] != 36) return XSTATUS_INVALID_PARAMETER;
+    uint32_t used = 0;
+    {
+        std::lock_guard<std::mutex> g(g_contig_mutex);
+        for (auto &kv : g_contig_used) used += kv.second;
+    }
+    Statistics[1] = CONTIGUOUS_SIZE / PAGE;
+    Statistics[2] = (CONTIGUOUS_SIZE - used) / PAGE;
+    Statistics[3] = used;
+    Statistics[4] = used;
+    for (int i = 5; i < 9; i++) Statistics[i] = 0;
+    return XSTATUS_SUCCESS;
 }
 
 void __stdcall MmLockUnlockBufferPages(void *BaseAddress, uint32_t NumberOfBytes, BOOLEAN UnlockPages)

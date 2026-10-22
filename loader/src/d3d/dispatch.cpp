@@ -6,6 +6,7 @@
 #include "d3d/xd3d.h"
 #include "hooks.h"
 #include "image.h"
+#include "net/online.h"
 #include "xbe.h"
 #include "xthread.h"
 
@@ -339,6 +340,10 @@ bool install_d3d_hooks(const BuildProfile &profile)
     for (const Hle &r : all) {
         bool found = false;
         for (const LibFunc &f : g_funcs) found |= f.addr == r.addr;
+        if (!found && r.impl && online_enabled() && !strcmp(r.name, "XNetStartup")) { // online play: the game's own
+            logf("hooks: online play: XNetStartup runs as the game has it (net/nvnet.cpp)");
+            continue;
+        }
         if (!found && r.impl) { // replacement outside the library sections (BLACK: InsertFence-style LTCG strays)
             write_jmp((uint8_t *)(uintptr_t)r.addr, make_thunk(r));
             replaced++;

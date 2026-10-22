@@ -169,13 +169,19 @@ void __stdcall KeInitializeTimerEx(XKTIMER *Timer, uint32_t Type)
 
 BOOLEAN __stdcall KeSetTimer(XKTIMER *Timer, LARGE_INTEGER DueTime, XKDPC *Dpc)
 {
-    KTRACE("%p, %lld, %p", Timer, DueTime.QuadPart, Dpc);
+    return KeSetTimerEx(Timer, DueTime, 0, Dpc);
+}
+
+// Period (ms) > 0: fires again every Period (the worker re-arms it). XNET's NIC driver runs a 200 ms DPC this way.
+BOOLEAN __stdcall KeSetTimerEx(XKTIMER *Timer, LARGE_INTEGER DueTime, int32_t Period, XKDPC *Dpc)
+{
+    KTRACE("%p, %lld, %d, %p", Timer, DueTime.QuadPart, Period, Dpc);
     EnterCriticalSection(&g_q);
     bool was = Timer->Header.Inserted != 0;
     if (was) remove_timer(Timer);
     Timer->Header.SignalState = 0;
     Timer->Dpc = Dpc;
-    Timer->Period = 0;
+    Timer->Period = Period > 0 ? Period : 0;
     int64_t now = ktime_now_100ns();
     Timer->DueTime.QuadPart = DueTime.QuadPart < 0 ? now - DueTime.QuadPart : DueTime.QuadPart;
     Timer->Header.Inserted = 1;

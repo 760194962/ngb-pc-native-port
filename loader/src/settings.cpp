@@ -47,6 +47,14 @@ void load_file()
         if (line[0] == '#' || sscanf_s(line, " %63[^= ] = %127s", key, (unsigned)sizeof key, val, (unsigned)sizeof val) != 2) continue;
         std::string k = key;
         if (cli(k.c_str())) continue; // the command line wins for this run; the file keeps its value (settings_save)
+        if (k == "online_eeprom" || k == "online_hdd" || k == "online_dns") { // paths: the rest of the line, spaces included
+            std::string rest = strchr(line, '=') + 1;
+            while (!rest.empty() && strchr(" \t\r\n\"", rest.back())) rest.pop_back();
+            size_t b = rest.find_first_not_of(" \t\"");
+            std::wstring w = widen(b == std::string::npos ? "" : rest.substr(b));
+            (k == "online_eeprom" ? g_cfg.online_eeprom : k == "online_hdd" ? g_cfg.online_hdd : g_cfg.online_dns) = w;
+            continue;
+        }
         float v = (float)atof(val); // the C runtime's default "C" locale: '.' decimals
         if (k == "render") {
             g_cfg.render_native = !strcmp(val, "native");
@@ -84,6 +92,7 @@ void load_file()
         else if (k == "autoaim") g_cfg.autoaim = v != 0;
         else if (k == "fov") g_cfg.fov = std::clamp(v, 50.0f, 120.0f);
         else if (k == "skipanymovie") g_cfg.skip_movies = v != 0;
+        else if (k == "online") g_cfg.online = v != 0;
         else if (k == "reverb") g_cfg.reverb = v != 0;
         else if (k == "reverb_gain") g_cfg.reverb_gain = std::clamp(v, 0.0f, 8.0f);
         else if (padkeys::load_ini(k.c_str(), val)) {} // kb_<input> = Key[,Key], padmap_<input> = <input> (Ninja Gaiden Black)
@@ -170,6 +179,10 @@ void write_all(FILE *f)
     fprintf(f, "autoaim = %d\n", g_cfg.autoaim ? 1 : 0);
     fprintf(f, "fov = %.1f\n", g_cfg.fov);
     fprintf(f, "skipanymovie = %d\n", g_cfg.skip_movies ? 1 : 0);
+    fprintf(f, "online = %d\n", g_cfg.online ? 1 : 0); // Insignia (project/docs/09); the paths only once given
+    if (!g_cfg.online_eeprom.empty()) fprintf(f, "online_eeprom = %s\n", narrow(g_cfg.online_eeprom).c_str());
+    if (!g_cfg.online_hdd.empty()) fprintf(f, "online_hdd = %s\n", narrow(g_cfg.online_hdd).c_str());
+    if (!g_cfg.online_dns.empty()) fprintf(f, "online_dns = %s\n", narrow(g_cfg.online_dns).c_str());
     fprintf(f, "seamfill = %d\n", g_cfg.seam_fill ? 1 : 0);
     fprintf(f, "effectsnative = %d\n", g_cfg.effects_native ? 1 : 0);
     fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\naniso = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0,

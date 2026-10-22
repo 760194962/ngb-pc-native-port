@@ -19,6 +19,8 @@
 #include "input/mouselook.h"
 #include "kernel/ktable.h"
 #include "kernel/xboxkrnl.h"
+#include "net/nvnet.h"
+#include "net/online.h"
 #include "xbe.h"
 #include "xthread.h"
 
@@ -95,6 +97,8 @@ void usage()
            "  --autoaim         the game's auto-aim (the view pulling toward enemies), off by default; --no-autoaim\n"
            "  --fov D           horizontal field of view in play, 50-120 degrees (default 70, the game's; PC SETTINGS > VIDEO)\n"
            "  --no-movie-skip   movies skip only as in the original (default: A / START skip every movie)\n"
+           "  --online-eeprom F --online-hdd F  online play through Insignia with this registered EEPROM and xemu disk\n"
+           "                    image (both only read; black.ini online = 1, online_eeprom, online_hdd); --offline: off\n"
            "  --no-pc-menus     no PC SETTINGS pages in the game's Options menu (built at start into cache\\menus\n"
            "                    next to black.exe)\n"
            "  --gain K          output gain after the game's gamma ramp (default 1.0; F5/F6 adjust live)\n"
@@ -168,6 +172,14 @@ bool parse_args()
             g_cfg.probe[g_cfg.probe_count++] = (uint32_t)wcstoul(v.c_str(), nullptr, 16);
         }
         else if (a == L"--strict") g_cfg.strict = true;
+        else if (a == L"--online-eeprom" || a == L"--online-hdd" || a == L"--online-dns") { // Insignia (project/docs/09)
+            std::wstring &dst = a == L"--online-eeprom" ? g_cfg.online_eeprom : a == L"--online-hdd" ? g_cfg.online_hdd : g_cfg.online_dns;
+            if (!next(dst)) return false;
+            g_cfg.online = true;
+            settings_mark_cli("online");
+            settings_mark_cli(a == L"--online-eeprom" ? "online_eeprom" : a == L"--online-hdd" ? "online_hdd" : "online_dns");
+        }
+        else if (a == L"--offline") { g_cfg.online = false; settings_mark_cli("online"); }
         else if (a == L"--multicore") g_cfg.multicore = true;
         else if (a == L"--game-cpu") {
             std::wstring v;
@@ -544,6 +556,7 @@ int run(void *reserve, unsigned reserve_size)
         logf("warning: expected %d fs patches for this build, made %d", profile->fs_patch_count, patched);
     if (!kernel_resolve_thunks(g_xbe)) return 1;
     if (!kfile_init()) return 1;
+    online_init(); // before the hooks: online play keeps the game's own XNetStartup (d3d/dispatch.cpp)
     install_crash_handlers();
     install_probes();
     install_coverage();
@@ -566,6 +579,7 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && !black && !profile->aux) install_ngb_aspect();
     else g_cfg.aspect_w = 16, g_cfg.aspect_h = 9;
     if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
+    nvnet_install_trap(); // online play: the NIC's registers (net/nvnet.cpp), after every other exception handler
     if (!profile) g_cfg.fps = 30;
     if (!kdpc_init()) {
         logf("could not start the kernel DPC/timer thread");

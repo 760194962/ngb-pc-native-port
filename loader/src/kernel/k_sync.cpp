@@ -24,6 +24,11 @@ std::unordered_map<const void *, HANDLE> g_cs_event; // auto-reset events for cr
 struct InitDisp {
     InitDisp() { InitializeCriticalSection(&g_disp); }
 } g_init_disp;
+// Event handles handed to kernel-mode code as KEVENTs (ObReferenceObjectByHandle with ExEventObjectType: XOnline signals
+// a task's event with KeSetEvent): a KEVENT standing for each host event, set / waited through the handle
+std::unordered_map<HANDLE, uint32_t> g_event_type;   // NtCreateEvent's EventType per handle
+std::unordered_map<HANDLE, XKEVENT *> g_event_proxy;
+std::unordered_map<const void *, HANDLE> g_proxy_handle;
 
 HANDLE wake_event(const void *obj) // caller holds g_disp
 {
@@ -97,9 +102,52 @@ NTSTATUS wait_result(DWORD r)
 
 } // namespace
 
+// The KEVENT for an event handle (ObReferenceObjectByHandle), made on first use
+void *ksync_event_object(HANDLE handle)
+{
+    EnterCriticalSection(&g_disp);
+    auto it = g_event_proxy.find(handle);
+    XKEVENT *e = it != g_event_proxy.end() ? it->second : nullptr;
+    if (!e) {
+        auto t = g_event_type.find(handle);
+        if (t != g_event_type.end()) {
+            e = new XKEVENT();
+            e->Header.Type = (uint8_t)(t->second == 0 ? XOBJ_EVENT_NOTIFICATION : XOBJ_EVENT_SYNCHRONIZATION);
+            e->Header.Size = sizeof(XKEVENT) / 4;
+            e->Header.WaitListHead.Flink = e->Header.WaitListHead.Blink = &e->Header.WaitListHead;
+            g_event_proxy[handle] = e;
+            g_proxy_handle[e] = handle;
+        }
+    }
+    LeaveCriticalSection(&g_disp);
+    return e;
+}
+
+void ksync_handle_closed(HANDLE handle)
+{
+    EnterCriticalSection(&g_disp);
+    g_event_type.erase(handle);
+    auto it = g_event_proxy.find(handle);
+    if (it != g_event_proxy.end()) { // the KEVENT stays allocated: kernel-mode code may still hold it
+        g_proxy_handle.erase(it->second);
+        g_event_proxy.erase(it);
+    }
+    LeaveCriticalSection(&g_disp);
+}
+
+HANDLE proxy_handle(const void *object)
+{
+    EnterCriticalSection(&g_disp);
+    auto it = g_proxy_handle.find(object);
+    HANDLE h = it != g_proxy_handle.end() ? it->second : nullptr;
+    LeaveCriticalSection(&g_disp);
+    return h;
+}
+
 NTSTATUS ksync_wait_object(void *object, bool alertable, const LARGE_INTEGER *timeout)
 {
     auto *h = (XDISPATCHER_HEADER *)object;
+    if (HANDLE ph = proxy_handle(object)) return wait_result(WaitForSingleObjectEx(ph, ktimeout_ms(timeout), alertable));
     if (h->Type == XOBJ_THREAD) {
         if (XThread *t = xthread_from_kthread(object))
             return wait_result(WaitForSingleObjectEx(t->host_handle, ktimeout_ms(timeout), alertable));
@@ -155,6 +203,9 @@ NTSTATUS __stdcall NtCreateEvent(HANDLE *EventHandle, XOBJECT_ATTRIBUTES *Object
     KTRACE("%p, '%s', %u, %u) -> %p (", EventHandle, name.c_str(), EventType, InitialState, h);
     if (!h) return XSTATUS_NO_MEMORY;
     *EventHandle = h;
+    EnterCriticalSection(&g_disp);
+    g_event_type[h] = EventType;
+    LeaveCriticalSection(&g_disp);
     return err == ERROR_ALREADY_EXISTS ? 0x40000000 /* STATUS_OBJECT_NAME_EXISTS */ : XSTATUS_SUCCESS;
 }
 
@@ -217,6 +268,8 @@ int32_t __stdcall KeSetEvent(XKEVENT *Event, int32_t Increment, BOOLEAN Wait)
     g_gen[Event]++;
     auto it = g_wake.find(Event);
     if (it != g_wake.end()) SetEvent(it->second);
+    auto ph = g_proxy_handle.find(Event);
+    if (ph != g_proxy_handle.end()) SetEvent(ph->second); // an event handle's KEVENT: the handle's waiters
     LeaveCriticalSection(&g_disp);
     return prev;
 }

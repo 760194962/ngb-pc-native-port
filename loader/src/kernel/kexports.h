@@ -38,6 +38,15 @@ void __stdcall XcSHAUpdate(uint8_t *Context, const uint8_t *Input, uint32_t Inpu
 void __stdcall XcSHAFinal(uint8_t *Context, uint8_t *Digest);
 void __stdcall XcHMAC(const uint8_t *Key, uint32_t KeyLength, const uint8_t *Data, uint32_t DataLength, const uint8_t *Data2,
                       uint32_t Data2Length, uint8_t *Digest);
+// k_crypto.cpp (Xbox Live only)
+void __stdcall XcRC4Key(uint8_t *KeyStruct, uint32_t KeyLength, const uint8_t *Key);
+void __stdcall XcRC4Crypt(uint8_t *KeyStruct, uint32_t InputLength, uint8_t *Input);
+uint32_t __stdcall XcModExp(uint32_t *A, const uint32_t *B, const uint32_t *C, const uint32_t *D, uint32_t N);
+BOOLEAN __stdcall XcVerifyPKCS1Signature(const uint8_t *Signature, const uint8_t *PublicKey, const uint8_t *Digest);
+void __stdcall XcDESKeyParity(uint8_t *Key, uint32_t KeyLength);
+void __stdcall XcKeyTable(uint32_t Cipher, uint8_t *KeyTable, const uint8_t *Key);
+void __stdcall XcBlockCryptCBC(uint32_t Cipher, uint32_t InputLength, uint8_t *Output, const uint8_t *Input,
+                               const uint8_t *KeyTable, uint32_t Op, uint8_t *Feedback);
 
 // Memory (k_memory.cpp)
 void *__stdcall ExAllocatePoolWithTag(uint32_t NumberOfBytes, uint32_t Tag);
@@ -49,6 +58,7 @@ void *__stdcall MmAllocateContiguousMemoryEx(uint32_t NumberOfBytes, uint32_t Lo
 void *__stdcall MmClaimGpuInstanceMemory(uint32_t NumberOfBytes, uint32_t *NumberOfPaddingBytes);
 void __stdcall MmFreeContiguousMemory(void *BaseAddress);
 uint32_t __stdcall MmGetPhysicalAddress(void *BaseAddress);
+NTSTATUS __stdcall MmQueryStatistics(uint32_t *Statistics);
 void __stdcall MmLockUnlockBufferPages(void *BaseAddress, uint32_t NumberOfBytes, BOOLEAN UnlockPages);
 void __stdcall MmLockUnlockPhysicalPage(uint32_t PhysicalAddress, BOOLEAN UnlockPage);
 void __stdcall MmPersistContiguousMemory(void *BaseAddress, uint32_t NumberOfBytes, BOOLEAN Persist);
@@ -102,6 +112,7 @@ BOOLEAN __stdcall KeInsertQueueDpc(XKDPC *Dpc, void *SystemArgument1, void *Syst
 BOOLEAN __stdcall KeRemoveQueueDpc(XKDPC *Dpc);
 void __stdcall KeInitializeTimerEx(XKTIMER *Timer, uint32_t Type);
 BOOLEAN __stdcall KeSetTimer(XKTIMER *Timer, LARGE_INTEGER DueTime, XKDPC *Dpc);
+BOOLEAN __stdcall KeSetTimerEx(XKTIMER *Timer, LARGE_INTEGER DueTime, int32_t Period, XKDPC *Dpc);
 BOOLEAN __stdcall KeCancelTimer(XKTIMER *Timer);
 
 // Files, devices, symbolic links, handles (k_file.cpp)
@@ -178,7 +189,7 @@ BOOLEAN __stdcall HalIsResetOrShutdownPending();
 uint32_t __stdcall PhyGetLinkState(BOOLEAN Verify);
 NTSTATUS __stdcall PhyInitialize(BOOLEAN ForceReset, void *Param2);
 extern volatile uint32_t KeTickCount; // milliseconds since boot; advanced by the DPC thread
-extern uint8_t XboxLANKey[6];
+extern uint8_t XboxLANKey[16];
 extern uint8_t XePublicKeyData[284];
 extern XANSI_STRING HalDiskModelNumber;
 extern XANSI_STRING HalDiskSerialNumber;
