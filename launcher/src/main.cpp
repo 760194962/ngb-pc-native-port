@@ -5,6 +5,8 @@
 // --snap OUT.png [PAGE]: draw the window at 1180x700 into OUT.png and exit (screenshots for review).
 // --extract IMAGE DEST: install from IMAGE into DEST without the window (tests); the result on the console.
 #include "install.h"
+#include "keys.h"
+#include "saves.h"
 #include "resource.h"
 #include "strings.h"
 
@@ -22,6 +24,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -72,19 +75,33 @@ struct App {
     std::wstring game_detail;
     int help = 0; // the "?" panel open: 0 none, else its hit id
     int ask = 0;  // the confirmation open: 0 none, else kAsk*
+    // the Saves page: what is on disk (read when the page is opened and after each action), the backup to restore
+    std::vector<saves::Slot> slots;
+    std::vector<saves::Backup> backups;
+    bool saves_read = false;
+    int ctl_tab = 0;      // the Controls page: 0 keyboard, 1 pad
+    int capture = -1;     // a key box waiting for a key: input * 2 + slot
+    int restore_index = -1;
+    std::wstring save_status; // the last action's result
+    bool save_status_bad = false;
     int list_open = 0; // the drop-down list open: 0 none, else its hit id (kHitResList, kHitGpu)
     int drag = 0;         // the slider being dragged (kHitGain, kHitGamma), its value until the button is released
     float drag_value = 1.0f;
 };
-enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete, kAskReset };
+enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete, kAskReset, kAskUnsavedStart, kAskUnsavedClose, kAskRestore, kAskImport,
+       kAskExport };
 App g;
 
 // Hit ids: 0..kPageCount-1 the navigation, then these
 enum {
     kHitStart = 100, kHitLangZh, kHitLangEn, kHitPickIso, kHitPickDest, kHitInstall, kHitCancel, kHitDeleteIso, kHitPickGame,
     kHitHelpImage, kHitHelpInstalled, kHitHelpClose, kHitAskYes, kHitAskNo, kHitDefaultPath, kHitResetPage,
+    kHitSave, kHitDiscard, kHitAskAlt,
+    kHitHelpSet = 400, // + the setting's index in kSettingHelp: its "?"
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
-    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitResList = 300, kHitShadow = 320
+    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitResList = 300, kHitShadow = 320, kHitAniso = 340,
+    kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
+    kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510
 };
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -95,8 +112,44 @@ std::wstring render_size(double scale, bool wide)
     int w = (int)std::lround(std::min(720.0 * scale * (wide ? 4.0 / 3.0 : 1.0), 8192.0)), h = (int)std::lround(480.0 * scale);
     return std::to_wstring(w) + L"\u00D7" + std::to_wstring(h);
 }
+// Every setting's "?": its label and the help it opens (what it does and, where it matters, what it costs;
+// the figures are measurements on the Iris Xe in the chapter-1 bench, project/docs/08)
+const struct {
+    Str label, help;
+} kSettingHelp[] = {
+    {Str::DisplayMode, Str::HelpDisplayMode},
+    {Str::Aspect, Str::HelpAspect},
+    {Str::WindowSize, Str::HelpWindowSize},
+    {Str::Brightness, Str::HelpBrightness},
+    {Str::Gamma, Str::HelpGamma},
+    {Str::Resolution, Str::HelpResolution},
+    {Str::ShadowQuality, Str::HelpShadowQuality},
+    {Str::TexFilter, Str::HelpTexFilter},
+    {Str::AntiAlias, Str::HelpAntiAlias},
+    {Str::VSync, Str::HelpVSync},
+    {Str::SeamFill, Str::HelpSeamFill},
+    {Str::EffectsNative, Str::HelpEffectsNative},
+    {Str::PerfHud, Str::HelpPerfHud},
+    {Str::GpuCard, Str::HelpGpuCard},
+    {Str::SavesCard, Str::HelpSavesCard},
+    {Str::BackupCard, Str::HelpBackupCard},
+    {Str::XreviveCard, Str::HelpXreviveCard},
+    {Str::KeyboardCard, Str::HelpKeyboard},
+    {Str::PadCard, Str::HelpPad}
+};
+constexpr int kSettingHelpCount = (int)(sizeof kSettingHelp / sizeof kSettingHelp[0]);
+int help_id(Str label)
+{
+    for (int i = 0; i < kSettingHelpCount; i++)
+        if (kSettingHelp[i].label == label) return kHitHelpSet + i;
+    return 0;
+}
+// Texture filtering levels (1 = off, the game's own linear filtering)
+const int kAnisoLevels[5] = {1, 2, 4, 8, 16};
 // Shadow quality: the shadow map's scale for each level (low = the Xbox's 128x128)
 const int kShadowScales[4] = {1, 4, 8, 16};
+// The project's site (the author's; About page)
+const wchar_t kSite[] = L"https://akirahayabusa.github.io/ngb-hurricane-patch/";
 // Brightness and gamma sliders: the loader's range (settings.cpp clamps gain and gamma to 0.5 - 3.0), 0.05 steps
 constexpr float kSliderMin = 0.5f, kSliderMax = 3.0f, kSliderW = 260;
 // The window sizes offered (client area) for 16:9 and for 4:3; 0 x 0 = auto (the largest that fits the screen)
@@ -114,6 +167,11 @@ bool inside(const D2D1_RECT_F &r, float x, float y) { return x >= r.left && x < 
 // --- settings ---------------------------------------------------------------------------------------------------
 
 std::string black_ini(const char *key);
+std::wstring save_hdd();
+bool game_running();
+uint16_t kb_key(int input, int slot);
+int pad_source(int button);
+void refresh_saves();
 float slider_value(int id)
 {
     if (g.drag == id) return g.drag_value;
@@ -138,7 +196,14 @@ std::wstring default_game_folder() { return g.dir + L"\\game\\x21"; }
 bool exists(const std::wstring &p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; }
 
 // black.ini next to the game program: one "key = value" per line
-std::string black_ini(const char *key)
+// The settings pages change these, not the files: black.ini and the graphics card preference are written only when
+// the player saves (the user, 2026-10-22). black_ini / gpu_preference give the page's value (changed or saved).
+std::map<std::string, std::string> g_pending; // black.ini key -> value not saved yet
+int g_pending_gpu = -1;                       // a graphics card preference not saved yet
+bool unsaved() { return !g_pending.empty() || g_pending_gpu >= 0; }
+
+// black.ini as saved
+std::string black_ini_saved(const char *key)
 {
     FILE *f = _wfopen((g.dir + L"\\black.ini").c_str(), L"r");
     if (!f) return "";
@@ -159,8 +224,14 @@ std::string black_ini(const char *key)
     return v;
 }
 
+std::string black_ini(const char *key)
+{
+    auto it = g_pending.find(key);
+    return it != g_pending.end() ? it->second : black_ini_saved(key);
+}
+
 // Sets key = value in black.ini, keeping every other line (the game writes the file on exit too)
-void black_ini_set(const char *key, const std::string &value)
+void black_ini_write(const char *key, const std::string &value)
 {
     std::wstring path = g.dir + L"\\black.ini";
     std::vector<std::string> lines;
@@ -188,7 +259,14 @@ void black_ini_set(const char *key, const std::string &value)
     fclose(f);
 }
 
-void set_gpu_preference(int v) // 2 high performance, 1 power saving, 0 let Windows decide
+// A change on a settings page: kept until saved (no change when it is the saved value)
+void black_ini_set(const char *key, const std::string &value)
+{
+    if (value == black_ini_saved(key)) g_pending.erase(key);
+    else g_pending[key] = value;
+}
+
+void write_gpu_preference(int v) // 2 high performance, 1 power saving, 0 let Windows decide
 {
     HKEY k;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", 0, nullptr, 0, KEY_SET_VALUE,
@@ -201,7 +279,7 @@ void set_gpu_preference(int v) // 2 high performance, 1 power saving, 0 let Wind
 }
 
 // Windows' per-program graphics preference for the game (the game sets "high performance" on its first run)
-int gpu_preference()
+int gpu_preference_saved()
 {
     HKEY k;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", 0, KEY_QUERY_VALUE, &k)) return -1;
@@ -212,6 +290,23 @@ int gpu_preference()
     if (r) return -1;
     const wchar_t *p = wcsstr(v, L"GpuPreference=");
     return p ? _wtoi(p + 14) : -1;
+}
+
+int gpu_preference() { return g_pending_gpu >= 0 ? g_pending_gpu : gpu_preference_saved(); }
+void set_gpu_preference(int v) { g_pending_gpu = v == gpu_preference_saved() ? -1 : v; }
+
+// Save: the settings pages' changes into black.ini and Windows' preference; discard: forget them
+void save_settings()
+{
+    for (auto &kv : g_pending) black_ini_write(kv.first.c_str(), kv.second);
+    g_pending.clear();
+    if (g_pending_gpu >= 0) write_gpu_preference(g_pending_gpu);
+    g_pending_gpu = -1;
+}
+void discard_settings()
+{
+    g_pending.clear();
+    g_pending_gpu = -1;
 }
 
 // The graphics cards the game can be given: Windows' per-program preference picks the high performance card, the
@@ -255,10 +350,10 @@ const std::vector<GpuChoice> &gpu_choices()
 }
 
 // The choice in effect: not set yet is high performance (the game sets that on its first run)
-int gpu_choice_index()
+int gpu_choice_index(bool saved = false)
 {
     const std::vector<GpuChoice> &v = gpu_choices();
-    int pref = gpu_preference();
+    int pref = saved ? gpu_preference_saved() : gpu_preference();
     if (pref < 0) pref = 2;
     for (size_t i = 0; i < v.size(); i++)
         if (v[i].pref == pref) return (int)i;
@@ -668,7 +763,7 @@ struct Painter {
     // "Window 1600x900 · 16:9" / "Fullscreen · 16:9" / "Borderless · 4:3"
     std::wstring display_summary()
     {
-        std::string fs = black_ini("fullscreen"), win = black_ini("window");
+        std::string fs = black_ini_saved("fullscreen"), win = black_ini_saved("window"); // what the game will use
         std::wstring s = S(fs == "2" ? Str::ModeFullscreen : fs == "1" ? Str::ModeBorderless : Str::ModeWindow);
         if (fs != "1" && fs != "2" && !win.empty() && win != "auto") {
             std::wstring w(win.begin(), win.end());
@@ -676,7 +771,7 @@ struct Painter {
             if (x != std::wstring::npos) w[x] = L'\u00D7';
             s += L" " + w;
         }
-        return s + L"  \x00B7  " + (black_ini("widescreen") == "0" ? L"4:3" : L"16:9");
+        return s + L"  \x00B7  " + (black_ini_saved("widescreen") == "0" ? L"4:3" : L"16:9");
     }
 
     void start_page()
@@ -715,7 +810,7 @@ struct Painter {
         stroke(c, kInk3);
         fill({c.left, c.top, c.left + 3, c.bottom}, kGold, 0.8f);
         std::wstring rows[3][2] = {{S(Str::Game), ready ? folder_of(g.game) : S(Str::GameMissing)},
-                                   {S(Str::Gpu), gpu_label(gpu_choices()[gpu_choice_index()])},
+                                   {S(Str::Gpu), gpu_label(gpu_choices()[gpu_choice_index(true)])},
                                    {S(Str::Display), display_summary()}};
         for (int i = 0; i < 3; i++) {
             float y = c.top + 12 + i * 46;
@@ -768,26 +863,36 @@ struct Painter {
         stroke(c, kInk3);
         fill({c.left, c.top, c.left + 3, c.bottom}, kGold, 0.8f);
         text(heading, {c.left + 26, c.top + 10, c.right - 20, c.top + 44}, 16, kBone, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        if (help) {
-            float hx = c.left + 26 + measure(heading, 16, DWRITE_FONT_WEIGHT_SEMI_BOLD) + 10;
-            D2D1_RECT_F q = {hx, c.top + 17, hx + 20, c.top + 37};
-            bool hov = g.hover == help;
-            g_hits.push_back({help, {q.left - 4, q.top - 4, q.right + 4, q.bottom + 4}});
-            ID2D1SolidColorBrush *b = nullptr;
-            rt->CreateSolidColorBrush(rgb(hov ? kGold : kAsh, hov ? 1.0f : 0.8f), &b);
-            if (b) {
-                D2D1_ELLIPSE e = {{(q.left + q.right) / 2, (q.top + q.bottom) / 2}, 9.5f, 9.5f};
-                if (hov) {
-                    ID2D1SolidColorBrush *f = nullptr;
-                    rt->CreateSolidColorBrush(rgb(kGold, 0.16f), &f);
-                    if (f) rt->FillEllipse(e, f), f->Release();
-                }
-                rt->DrawEllipse(e, b, 1.2f);
-                b->Release();
-            }
-            text(L"?", q, 12.5f, hov ? kGold : kAsh, 1.0f, DWRITE_FONT_WEIGHT_BOLD, L"Segoe UI", DWRITE_TEXT_ALIGNMENT_CENTER);
-        }
+        if (help) help_mark(help, c.left + 26 + measure(heading, 16, DWRITE_FONT_WEIGHT_SEMI_BOLD) + 10, c.top + 17, 9.5f);
         return c.top + 50;
+    }
+
+    // A round "?" at (x, y) (its box's top-left) opening help `id`
+    void help_mark(int id, float x, float y, float r)
+    {
+        D2D1_RECT_F q = {x, y, x + 2 * r + 1, y + 2 * r + 1};
+        bool hov = g.hover == id;
+        g_hits.push_back({id, {q.left - 4, q.top - 4, q.right + 4, q.bottom + 4}});
+        ID2D1SolidColorBrush *b = nullptr;
+        rt->CreateSolidColorBrush(rgb(hov ? kGold : kAsh, hov ? 1.0f : 0.8f), &b);
+        if (b) {
+            D2D1_ELLIPSE e = {{(q.left + q.right) / 2, (q.top + q.bottom) / 2}, r, r};
+            if (hov) {
+                ID2D1SolidColorBrush *f = nullptr;
+                rt->CreateSolidColorBrush(rgb(kGold, 0.16f), &f);
+                if (f) rt->FillEllipse(e, f), f->Release();
+            }
+            rt->DrawEllipse(e, b, 1.2f);
+            b->Release();
+        }
+        text(L"?", q, r * 1.3f, hov ? kGold : kAsh, 1.0f, DWRITE_FONT_WEIGHT_BOLD, L"Segoe UI", DWRITE_TEXT_ALIGNMENT_CENTER);
+    }
+
+    // A setting's name on the left of its row, with its "?" after it
+    void setting_label(Str s, float lx, float y, float cx)
+    {
+        text(S(s), {lx, y, cx - 10, y + 30}, 13.5f, kAsh);
+        if (int id = help_id(s)) help_mark(id, lx + measure(S(s), 13.5f, DWRITE_FONT_WEIGHT_NORMAL) + 7, y + 8, 7.0f);
     }
 
     // A confirmation over the window: a title, the question, Continue / Cancel
@@ -799,8 +904,14 @@ struct Painter {
                   : g.ask == kAskReset   ? Str::ResetTitle
                                          : Str::AskDeleteTitle;
         Str body = g.ask == kAskOverwrite ? Str::AskOverwrite : g.ask == kAskNonEmpty ? Str::AskNonEmpty
-                 : g.ask == kAskReset     ? (g.page == kDisplay ? Str::ResetDisplay : Str::ResetGraphics)
+                 : g.ask == kAskReset     ? (g.page == kDisplay ? Str::ResetDisplay : g.page == kControls ? Str::ResetControls : Str::ResetGraphics)
+                 : g.ask == kAskUnsavedStart ? Str::UnsavedStart
+                 : g.ask == kAskUnsavedClose ? Str::UnsavedClose
                                           : Str::DeleteConfirm;
+        if (g.ask == kAskUnsavedStart || g.ask == kAskUnsavedClose) title = Str::UnsavedTitle;
+        if (g.ask == kAskRestore) title = Str::AskRestoreTitle, body = Str::AskRestore;
+        if (g.ask == kAskImport) title = Str::ImportX, body = Str::AskImport;
+        if (g.ask == kAskExport) title = Str::ExportX, body = Str::AskExport;
         const float pw = 560, ph = 300, px = (kW - pw) / 2, py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
@@ -820,9 +931,11 @@ struct Painter {
             if (b) rt->DrawText(s, (UINT32)wcslen(s), fmt, {p.left + 34, p.top + 78, p.right - 34, p.bottom - 74}, b), b->Release();
             fmt->Release();
         }
-        button(kHitAskNo, {p.right - 34 - 120 - 12 - 160, p.bottom - 56, p.right - 34 - 120 - 12, p.bottom - 20}, S(Str::Cancel), false);
+        bool unsaved_ask = g.ask == kAskUnsavedStart || g.ask == kAskUnsavedClose; // save / don't save; outside cancels
+        button(unsaved_ask ? kHitAskAlt : kHitAskNo, {p.right - 34 - 120 - 12 - 160, p.bottom - 56, p.right - 34 - 120 - 12, p.bottom - 20},
+               S(unsaved_ask ? Str::DontSave : Str::Cancel), false);
         button(kHitAskYes, {p.right - 34 - 120, p.bottom - 56, p.right - 34, p.bottom - 20},
-               S(g.ask == kAskDelete ? Str::MoveToBin : g.ask == kAskReset ? Str::ResetYes : Str::Continue), true);
+               S(g.ask == kAskDelete ? Str::MoveToBin : g.ask == kAskReset ? Str::ResetYes : unsaved_ask ? Str::Save : Str::Continue), true);
     }
 
     // The "?" panel over the window
@@ -830,15 +943,16 @@ struct Painter {
     {
         fill({0, 0, kW, kH}, kInk, 0.72f);
         g_hits.push_back({kHitHelpClose, {0, 0, kW, kH}}); // a click outside the panel closes it (the panel's own hits come later)
-        bool image = g.help == kHitHelpImage;
-        const float pw = 620, ph = 420, px = (kW - pw) / 2, py = (kH - ph) / 2;
+        bool image = g.help == kHitHelpImage, setting = g.help >= kHitHelpSet && g.help < kHitHelpSet + kSettingHelpCount;
+        Str title = setting ? kSettingHelp[g.help - kHitHelpSet].label : image ? Str::FromImage : Str::InstalledGame;
+        Str body_text = setting ? kSettingHelp[g.help - kHitHelpSet].help : image ? Str::HelpFromImage : Str::HelpInstalled;
+        const float pw = 640, ph = 460, px = (kW - pw) / 2, py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
         stroke(p, kInk3, 1.0f, 6);
         fill({p.left, p.top + 6, p.left + 3, p.bottom - 6}, kGold, 0.85f);
         g_hits.push_back({0x7fff, p}); // inside the panel: nothing (the topmost hit wins over the close area)
-        text(S(image ? Str::FromImage : Str::InstalledGame), {p.left + 34, p.top + 22, p.right - 30, p.top + 58}, 19, kBone, 1.0f,
-             DWRITE_FONT_WEIGHT_BOLD);
+        text(S(title), {p.left + 34, p.top + 22, p.right - 30, p.top + 58}, 19, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({p.left + 34, p.top + 62, p.left + 64, p.top + 64}, kBlood);
         D2D1_RECT_F body = {p.left + 34, p.top + 78, p.right - 34, p.bottom - 74};
         IDWriteTextFormat *fmt = nullptr;
@@ -848,7 +962,7 @@ struct Painter {
             fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 23, 18);
             ID2D1SolidColorBrush *b = nullptr;
             rt->CreateSolidColorBrush(rgb(kBone, 0.92f), &b);
-            const wchar_t *s = S(image ? Str::HelpFromImage : Str::HelpInstalled);
+            const wchar_t *s = S(body_text);
             if (b) rt->DrawText(s, (UINT32)wcslen(s), fmt, body, b), b->Release();
             fmt->Release();
         }
@@ -957,10 +1071,18 @@ struct Painter {
         const float x = kNavW + 56, w = 800;
         text(S(title), {x, 46, x + 700, 98}, 32, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({x, 102, x + 36, 104}, kBlood);
-        text(S(Str::AppliesNext), {x + 60, 88, x + w, 112}, 12.5f, kAsh, 0.85f);
-        button(kHitResetPage, {x + w - 140, 70, x + w, 104}, S(Str::ResetPage), false); // this page only (reset_page)
+        // under the title: when the settings take effect, or that there are changes still to save
+        if (unsaved()) text(S(Str::Unsaved), {x + 60, 88, x + w - 380, 112}, 12.5f, kGold, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        else if (game_running()) // the game read its settings when it started; it keeps what is saved now (loader settings_save)
+            text(S(Str::GameRunningNote), {x + 60, 88, x + w - 380, 112}, 12.5f, kGold, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        else text(S(Str::AppliesNext), {x + 60, 88, x + w - 380, 112}, 12.5f, kAsh, 0.85f);
+        // Save / Discard (enabled with unsaved changes, on any page) and Restore defaults (this page only, reset_page)
+        bool dirty = unsaved();
+        button(kHitSave, {x + w - 110, 66, x + w, 102}, S(Str::Save), true, dirty);
+        button(kHitDiscard, {x + w - 110 - 10 - 120, 66, x + w - 120, 102}, S(Str::Discard), false, dirty);
+        button(kHitResetPage, {x + w - 230 - 10 - 120, 66, x + w - 240, 102}, S(Str::ResetPage), false);
         *card_out = {x, 124, x + w, 124 + 50 + rows * 40.0f + 8};
-        return card(*card_out, S(heading));
+        return card(*card_out, S(heading), help_id(heading));
     }
 
     // Display: how the picture reaches the screen
@@ -969,7 +1091,7 @@ struct Painter {
         D2D1_RECT_F c;
         float y = settings_page(Str::NavDisplay, Str::Picture, 6, &c); // 5 rows and the note under the sliders
         const float lx = c.left + 26, cx = c.left + 210;
-        auto label = [&](Str s) { text(S(s), {lx, y, cx - 10, y + 30}, 13.5f, kAsh); };
+        auto label = [&](Str s) { setting_label(s, lx, y, cx); };
         const float right = c.right - 26;
         label(Str::DisplayMode);
         mode_list(cx, y - 2, right);
@@ -1069,14 +1191,17 @@ struct Painter {
     void graphics_page()
     {
         D2D1_RECT_F c;
-        float y = settings_page(Str::NavGraphics, Str::Rendering, 7, &c);
+        float y = settings_page(Str::NavGraphics, Str::Rendering, 8, &c);
         const float lx = c.left + 26, cx = c.left + 210;
-        auto label = [&](Str s) { text(S(s), {lx, y, cx - 10, y + 30}, 13.5f, kAsh); };
+        auto label = [&](Str s) { setting_label(s, lx, y, cx); };
         label(Str::Resolution);
         resolution_list(cx, y - 2, c.right - 26);
         y += 40;
         label(Str::ShadowQuality);
         shadow_list(cx, y - 2);
+        y += 40;
+        label(Str::TexFilter);
+        aniso_list(cx, y - 2);
         y += 40;
         label(Str::AntiAlias);
         segmented(kHitAa, cx, y, {S(Str::On), S(Str::Off)}, black_ini("aa") == "0" ? 1 : 0, 72);
@@ -1096,8 +1221,21 @@ struct Painter {
         text(S(Str::PerfHudNote), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
 
         D2D1_RECT_F c2 = {c.left, c.bottom + 14, c.right, c.bottom + 14 + 92};
-        float y2 = card(c2, S(Str::GpuCard));
+        float y2 = card(c2, S(Str::GpuCard), help_id(Str::GpuCard));
         gpu_list(cx, y2, c2.right - 26);
+    }
+
+    // Texture filtering: off (as the game sets: linear) or anisotropic 2x-16x (black.ini aniso)
+    void aniso_list(float x, float y)
+    {
+        std::string v = black_ini("aniso");
+        int cur = v.empty() ? 1 : atoi(v.c_str()), sel = 0;
+        std::vector<ListRow> rows = {{S(Str::AnisoOff), S(Str::ShadowXbox)}};
+        for (int i = 1; i < 5; i++) {
+            rows.push_back({std::to_wstring(kAnisoLevels[i]) + L"\u00D7", S(Str::AnisoRow)});
+            if (cur == kAnisoLevels[i]) sel = i;
+        }
+        drop_list(kHitAniso, x, y, {200, 340, 90, 0}, {rows[sel].a, L"", L""}, rows, sel, S(Str::AnisoNote));
     }
 
     // Shadow quality: the game's 128x128 shadow map made at 1, 4, 8 or 16 times its size (black.ini shadow; 4 by default)
@@ -1221,6 +1359,162 @@ struct Painter {
         };
     }
 
+    // Saves: where they are, backups, and xRevive's saves (saves.cpp does the files)
+    void saves_page()
+    {
+        if (!g.saves_read) refresh_saves();
+        const float x = kNavW + 56, w = 800;
+        text(S(Str::NavSaves), {x, 46, x + 700, 98}, 32, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
+        fill({x, 102, x + 36, 104}, kBlood);
+        const float lx = x + 26, vx = x + 150, bw = 150;
+        auto value = [&](const std::wstring &s, float y, float right, bool dim) {
+            text(s, {vx, y, right, y + 32}, 13.5f, dim ? kAsh : kBone, dim ? 0.75f : 1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+        };
+        // where the saves are
+        D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 2 * 40 + 6};
+        float y = card(c, S(Str::SavesCard), help_id(Str::SavesCard));
+        text(S(Str::SavesWhere), {lx, y, vx - 10, y + 32}, 13.5f, kAsh);
+        value(save_hdd(), y, c.right - bw - 30, false);
+        button(kHitOpenSaves, {c.right - bw - 20, y, c.right - 20, y + 32}, S(Str::OpenFolder), false);
+        y += 40;
+        text(S(Str::SavesContents), {lx, y, vx - 10, y + 32}, 13.5f, kAsh);
+        std::wstring sum = S(Str::SavesNone);
+        if (!g.slots.empty()) {
+            wchar_t b[256];
+            swprintf(b, 256, S(Str::SavesSummary), (int)g.slots.size(), g.slots[0].name.c_str(), when(g.slots[0].time).c_str());
+            sum = b;
+        }
+        value(sum, y, c.right - 20, g.slots.empty());
+        // backups
+        const int shown = std::min<int>(3, (int)g.backups.size());
+        D2D1_RECT_F c2 = {x, c.bottom + 12, x + w, c.bottom + 12 + 50 + 40 + std::max(1, shown) * 34 + 8};
+        y = card(c2, S(Str::BackupCard), help_id(Str::BackupCard));
+        button(kHitBackupNow, {lx, y, lx + bw, y + 32}, S(Str::BackupNow), true, !g.slots.empty());
+        button(kHitOpenBackups, {lx + bw + 12, y, lx + 2 * bw + 52, y + 32}, S(Str::OpenBackups), false);
+        y += 42;
+        if (!shown) text(S(Str::NoBackups), {lx, y, c2.right - 20, y + 30}, 13, kAsh, 0.75f);
+        for (int i = 0; i < shown; i++) {
+            const saves::Backup &bk = g.backups[i];
+            Str kind = bk.note == L"before-restore" ? Str::NoteBeforeRestore : bk.note == L"before-import" ? Str::NoteBeforeImport
+                     : bk.note == L"xrevive-before-export" ? Str::NoteXreviveBefore
+                                                           : Str::NoteByHand;
+            wchar_t b[64];
+            swprintf(b, 64, S(Str::BackupSlots), bk.slots);
+            text(when(bk.time), {lx, y, lx + 170, y + 30}, 13, kBone);
+            text(S(kind), {lx + 175, y, lx + 420, y + 30}, 12.5f, kAsh, 0.85f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+            text(b, {lx + 425, y, c2.right - 130, y + 30}, 12.5f, kAsh, 0.85f);
+            button(kHitRestore + i, {c2.right - 120, y + 1, c2.right - 20, y + 29}, S(Str::RestoreBtn), false);
+            y += 34;
+        }
+        // xRevive
+        std::wstring xr = ini_get(L"xrevive");
+        bool xr_ok = !xr.empty() && saves::has_saves(saves::xrevive_root(xr));
+        D2D1_RECT_F c3 = {x, c2.bottom + 12, x + w, c2.bottom + 12 + 50 + 2 * 40 + 4};
+        y = card(c3, S(Str::XreviveCard), help_id(Str::XreviveCard));
+        text(S(Str::XreviveFolder), {lx, y, vx - 10, y + 32}, 13.5f, kAsh);
+        value(xr.empty() ? std::wstring(S(Str::NotChosen)) : xr + (xr_ok ? L"" : std::wstring(L"  \x00B7  ") + S(Str::XreviveNoSaves)),
+              y, c3.right - bw - 30, xr.empty() || !xr_ok);
+        button(kHitPickXrevive, {c3.right - bw - 20, y, c3.right - 20, y + 32}, S(Str::ChooseFolder), false);
+        y += 40;
+        button(kHitImport, {lx, y, lx + 180, y + 32}, S(Str::ImportX), false, xr_ok);
+        button(kHitExport, {lx + 192, y, lx + 372, y + 32}, S(Str::ExportX), false, !xr.empty() && !g.slots.empty());
+        if (!g.save_status.empty())
+            text(g.save_status, {x, c3.bottom + 8, x + w, c3.bottom + 32}, 12.5f, g.save_status_bad ? kBlood : kGold, 1.0f,
+                 DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+    }
+
+    // About: what this is, its version and licence, the legal note (the README's words)
+    // Controls: keys pressed into the Xbox pad, and the PC pad's buttons remapped (black.ini kb_*, padmap_*; the game
+    // program's input/padkeys.cpp). Saved like the other settings pages.
+    void controls_page()
+    {
+        D2D1_RECT_F c;
+        settings_page(Str::NavControls, g.ctl_tab ? Str::PadCard : Str::KeyboardCard, 10, &c);
+        segmented(kHitCtlTab, c.right - 26 - 2 * 110 - 6, c.top + 12, {S(Str::KeyboardCard), S(Str::PadCard)}, g.ctl_tab, 110);
+        const float top = c.top + 52, rh = 32;
+        if (g.ctl_tab == 0) {
+            for (int i = 0; i < keys::kInputs; i++) {
+                int col = i < 12 ? 0 : 1, row = i % 12;
+                float x = c.left + 26 + col * 390, y = top + row * rh;
+                text(S((Str)((int)Str::InA + i)), {x, y, x + 150, y + 28}, 13, kAsh, 1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
+                     DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+                for (int s = 0; s < 2; s++) {
+                    D2D1_RECT_F r = {x + 160 + s * 92, y + 1, x + 160 + s * 92 + 84, y + 27};
+                    int id = kHitKey + i * 2 + s;
+                    bool cap = g.capture == i * 2 + s, hov = g.hover == id;
+                    g_hits.push_back({id, r});
+                    fill(r, cap ? kBlood : hov ? kInk3 : kInk, cap ? 0.3f : 0.9f, 3);
+                    stroke(r, cap || hov ? kGold : kInk3, 1.0f, 3);
+                    uint16_t k = kb_key(i, s);
+                    text(cap ? S(Str::PressKey) : k ? keys::display(k) : L"\u2014", r, 12.5f, cap ? kGold : k ? kBone : kAsh,
+                         k || cap ? 1.0f : 0.5f, DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_CENTER, 0.0f, true);
+                }
+            }
+            text(S(Str::KeyHint), {c.left, c.bottom + 8, c.right, c.bottom + 30}, 12, kAsh, 0.8f);
+        } else {
+            std::vector<ListRow> sources;
+            for (int b = 0; b < keys::kButtons; b++) sources.push_back({S((Str)((int)Str::InA + b))});
+            for (int i = keys::kButtons - 1; i >= 0; i--) { // drawn bottom up: an open list lies over the rows below it
+                int col = i < 6 ? 0 : 1, row = i % 6;
+                float x = c.left + 26 + col * 390, y = top + row * 52;
+                text(S((Str)((int)Str::InA + i)), {x, y, x + 150, y + 30}, 13, kAsh);
+                int src = pad_source(i);
+                drop_list(kHitPadMap + i * 16, x + 160, y - 1, {200, 200, 0, 0}, sources[src], sources, src, L"");
+                if (src != i) text(S(Str::PadChanged), {x + 160, y + 32, x + 370, y + 50}, 11.5f, kGold, 0.9f);
+            }
+            text(S(Str::PadHint), {c.left, c.bottom + 8, c.right, c.bottom + 30}, 12, kAsh, 0.8f);
+        }
+    }
+
+    void about_page()
+    {
+        const float x = kNavW + 56, w = 800, lx = x + 26, vx = x + 150;
+        text(S(Str::NavAbout), {x, 46, x + 700, 98}, 32, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
+        fill({x, 102, x + 36, 104}, kBlood);
+        D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 3 * 36 + 64};
+        float y = card(c, S(Str::AboutTitle));
+        text(S(Str::AboutDesc), {lx, y, c.right - 20, y + 52}, 13.5f, kBone, 0.92f);
+        y += 58;
+        auto row = [&](Str label, const std::wstring &v) {
+            text(S(label), {lx, y, vx - 10, y + 30}, 13.5f, kAsh);
+            text(v, {vx, y, c.right - 160, y + 30}, 13.5f, kBone, 1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
+                 DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+            y += 36;
+        };
+        wchar_t ver[128];
+        swprintf(ver, 128, S(Str::AboutVersion), L"0.1", L"" GAME_VERSION);
+        row(Str::AboutVersionLabel, ver);
+        row(Str::AboutSiteLabel, kSite);
+        button(kHitWebsite, {c.right - 150, y - 36, c.right - 20, y - 6}, S(Str::OpenSite), false);
+        row(Str::AboutLicenseLabel, S(Str::AboutLicense));
+        D2D1_RECT_F c2 = {x, c.bottom + 14, x + w, c.bottom + 14 + 50 + 170};
+        y = card(c2, S(Str::LegalTitle));
+        IDWriteTextFormat *fmt = nullptr;
+        if (SUCCEEDED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr,
+                                             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13,
+                                             g_lang == Lang::Zh ? L"zh-cn" : L"en-us", &fmt))) {
+            fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 21, 16);
+            ID2D1SolidColorBrush *b = nullptr;
+            rt->CreateSolidColorBrush(rgb(kBone, 0.85f), &b);
+            const wchar_t *s = S(Str::LegalText);
+            if (b) rt->DrawText(s, (UINT32)wcslen(s), fmt, {lx, y, c2.right - 26, c2.bottom - 12}, b), b->Release();
+            fmt->Release();
+        }
+    }
+
+    static std::wstring when(long long t)
+    {
+        if (t <= 0) return L"";
+        time_t tt = (time_t)t;
+        tm lt;
+        localtime_s(&lt, &tt);
+        wchar_t b[32];
+        wcsftime(b, 32, L"%Y-%m-%d %H:%M", &lt);
+        return b;
+    }
+
     void placeholder_page()
     {
         const float x = kNavW + 56;
@@ -1238,6 +1532,9 @@ struct Painter {
         else if (g.page == kInstall) install_page();
         else if (g.page == kDisplay) display_page();
         else if (g.page == kGraphics) graphics_page();
+        else if (g.page == kSaves) saves_page();
+        else if (g.page == kAbout) about_page();
+        else if (g.page == kControls) controls_page();
         else placeholder_page();
         if (overlay) overlay(); // an open drop-down list, over the page
         if (g.help) help_panel();
@@ -1310,6 +1607,90 @@ void drag_to(float x)
         }
 }
 
+// --- the Saves page -----------------------------------------------------------------------------------------------
+
+// The Xbox hard disk the game uses (launcher.ini hdd, relative to the launcher's folder; default savedata beside it)
+std::wstring save_hdd()
+{
+    std::wstring h = ini_get(L"hdd", (g.dir + L"\\savedata").c_str());
+    if (h.size() < 2 || (h[1] != L':' && h[0] != L'\\')) h = g.dir + L"\\" + h;
+    return h;
+}
+std::wstring backup_root() { return g.dir + L"\\savedata_backups"; }
+bool game_running() { return FindWindowW(L"BlackLoaderWindow", nullptr) != nullptr; } // the game's window class (d3d/host.cpp)
+void open_folder(const std::wstring &dir) { ShellExecuteW(g.hwnd, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }
+
+void refresh_saves()
+{
+    g.slots = saves::slots(saves::our_root(save_hdd()));
+    g.backups = saves::backups(backup_root());
+    g.saves_read = true;
+}
+
+void saves_result(bool ok, const std::wstring &msg)
+{
+    g.save_status = msg;
+    g.save_status_bad = !ok;
+}
+
+// 0 back up now; kAskRestore / kAskImport / kAskExport once confirmed. What gets replaced is moved into a backup first.
+void saves_action(int what)
+{
+    if (game_running()) return saves_result(false, S(Str::GameRunning));
+    std::wstring ours = saves::our_root(save_hdd()), xr = saves::xrevive_root(ini_get(L"xrevive")), made, err;
+    bool ok = false;
+    Str done = Str::BackupDone;
+    if (what == 0) ok = saves::backup(ours, backup_root(), L"", &made, &err);
+    if (what == kAskRestore && g.restore_index >= 0 && g.restore_index < (int)g.backups.size())
+        ok = saves::replace(g.backups[g.restore_index].dir, ours, backup_root(), L"before-restore", &made, &err), done = Str::RestoreDone;
+    if (what == kAskImport) ok = saves::replace(xr, ours, backup_root(), L"before-import", &made, &err), done = Str::ImportDone;
+    if (what == kAskExport) ok = saves::replace(ours, xr, backup_root(), L"xrevive-before-export", &made, &err), done = Str::ExportDone;
+    wchar_t b[1024];
+    swprintf(b, 1024, S(ok ? done : Str::SavesFailed), ok ? made.c_str() : err.c_str());
+    saves_result(ok, b);
+    refresh_saves();
+}
+
+// --- the Controls page ---------------------------------------------------------------------------------------------
+
+// The key in a slot (the page's value: changed or saved; no kb_ line = the game program's default layout)
+uint16_t kb_key(int input, int slot)
+{
+    std::string v = black_ini((std::string("kb_") + keys::input_ini(input)).c_str());
+    if (v.empty()) return keys::default_key(input, slot);
+    size_t comma = v.find(',');
+    return keys::parse(slot == 0 ? v.substr(0, comma) : comma == std::string::npos ? "" : v.substr(comma + 1));
+}
+
+void kb_write(int input, uint16_t k0, uint16_t k1)
+{
+    if (!k0) k0 = k1, k1 = 0;
+    std::string v = k0 ? keys::ini_name(k0) : "none";
+    if (k1) v += "," + keys::ini_name(k1);
+    black_ini_set((std::string("kb_") + keys::input_ini(input)).c_str(), v);
+}
+
+// A key into a slot (0: clear it); taken from wherever else it was, so one key means one input
+void kb_set(int input, int slot, uint16_t k)
+{
+    for (int i = 0; k && i < keys::kInputs; i++)
+        for (int s = 0; s < 2; s++)
+            if ((i != input || s != slot) && kb_key(i, s) == k) kb_write(i, s ? kb_key(i, 0) : 0, s ? 0 : kb_key(i, 1));
+    uint16_t a = kb_key(input, 0), b = kb_key(input, 1);
+    if (slot == 0) a = k;
+    else b = k;
+    kb_write(input, a, b);
+}
+
+// The PC pad button a game button comes from (padmap_<button>; its own by default)
+int pad_source(int button)
+{
+    std::string v = black_ini((std::string("padmap_") + keys::input_ini(button)).c_str());
+    for (int b = 0; b < keys::kButtons; b++)
+        if (v == keys::input_ini(b)) return b;
+    return button;
+}
+
 // "Restore defaults" on a settings page: that page's settings only, back to what the game uses with no black.ini
 // (loader common.h Config) and, for the graphics card, what the game sets on its first run (high performance)
 void reset_page(Page p)
@@ -1324,12 +1705,16 @@ void reset_page(Page p)
         black_ini_set("render", "scale");
         black_ini_set("scale", "3");
         black_ini_set("shadow", "4");
+        black_ini_set("aniso", "1");
         black_ini_set("aa", "1");
         black_ini_set("vsync", "0");
         black_ini_set("seamfill", "1");
         black_ini_set("effectsnative", "0");
         black_ini_set("perfhud", "0");
         set_gpu_preference(2);
+    } else if (p == kControls) {
+        for (int i = 0; i < keys::kInputs; i++) kb_write(i, keys::default_key(i, 0), keys::default_key(i, 1));
+        for (int b = 0; b < keys::kButtons; b++) black_ini_set((std::string("padmap_") + keys::input_ini(b)).c_str(), keys::input_ini(b));
     }
 }
 
@@ -1388,7 +1773,21 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             return TRUE;
         }
         break;
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN: // a key box waiting: Esc cancels, Delete clears, any other key binds
+        if (g.capture >= 0) {
+            uint16_t k = keys::from_message(wp, lp);
+            if (k != VK_ESCAPE) kb_set(g.capture / 2, g.capture % 2, k == VK_DELETE ? 0 : k);
+            g.capture = -1;
+            InvalidateRect(h, nullptr, FALSE);
+            return 0;
+        }
+        break;
     case WM_LBUTTONUP: {
+        if (g.capture >= 0 && !g.drag) { // a click elsewhere cancels a waiting key box
+            int cid = hit_at(GET_X_LPARAM(lp) * scale, GET_Y_LPARAM(lp) * scale);
+            if (cid < kHitKey || cid >= kHitKey + keys::kInputs * 2) g.capture = -1;
+        }
         if (g.drag) { // the slider's value is saved once it is let go
             char b[16];
             sprintf_s(b, "%.2f", g.drag_value);
@@ -1417,6 +1816,9 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 const int(*sizes)[2] = black_ini("widescreen") == "0" ? kWin43 : kWin169;
                 black_ini_set("window", row ? std::to_string(sizes[row][0]) + "x" + std::to_string(sizes[row][1]) : std::string("auto"));
             }
+            if (g.list_open >= kHitPadMap && g.list_open < kHitPadMap + keys::kButtons * 16 && row >= 0 && row < keys::kButtons)
+                black_ini_set((std::string("padmap_") + keys::input_ini((g.list_open - kHitPadMap) / 16)).c_str(), keys::input_ini(row));
+            if (g.list_open == kHitAniso && row >= 0 && row < 5) black_ini_set("aniso", std::to_string(kAnisoLevels[row]));
             if (g.list_open == kHitShadow && row >= 0 && row < 4) black_ini_set("shadow", std::to_string(kShadowScales[row]));
             if (g.list_open == kHitResList && row == 0) black_ini_set("render", "native");
             if (g.list_open == kHitResList && row >= 1 && row <= kMaxScale) {
@@ -1429,20 +1831,65 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
         if (g.ask) { // a confirmation: yes does what it asked, no (or outside) closes
             int ask = g.ask;
-            if (id == kHitAskYes || id == kHitAskNo) g.ask = 0;
-            if (id == kHitAskYes) {
-                if (ask == kAskDelete) delete_image();
+            if (id == kHitAskYes || id == kHitAskNo || id == kHitAskAlt) g.ask = 0;
+            if (ask == kAskUnsavedStart || ask == kAskUnsavedClose) { // save or not, then go on; outside: stay
+                if (id == kHitAskYes) save_settings();
+                if (id == kHitAskAlt) discard_settings();
+                if (id == kHitAskYes || id == kHitAskAlt) {
+                    if (ask == kAskUnsavedStart) launch_game();
+                    else PostMessageW(h, WM_CLOSE, 0, 0);
+                }
+            } else if (id == kHitAskYes) {
+                if (ask == kAskRestore || ask == kAskImport || ask == kAskExport) saves_action(ask);
+                else if (ask == kAskDelete) delete_image();
                 else if (ask == kAskReset) reset_page(g.page);
                 else start_install();
             }
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
-        if (id == kHitHelpImage || id == kHitHelpInstalled) g.help = id;
-        else if (id >= 0 && id < kPageCount) g.page = (Page)id;
+        if (id == kHitHelpImage || id == kHitHelpInstalled || (id >= kHitHelpSet && id < kHitHelpSet + kSettingHelpCount)) g.help = id;
+        else if (id >= 0 && id < kPageCount) {
+            g.page = (Page)id;
+            if (g.page == kSaves) g.saves_read = false; // read the disk again when the page is opened
+        }
         else if (id == kHitLangZh) set_lang(Lang::Zh);
         else if (id == kHitLangEn) set_lang(Lang::En);
-        else if (id == kHitStart) launch_game();
+        else if (id == kHitStart) {
+            if (unsaved()) g.ask = kAskUnsavedStart; // the game reads the saved settings
+            else launch_game();
+        }
+        else if (id == kHitSave) save_settings();
+        else if (id >= kHitCtlTab && id < kHitCtlTab + 2) g.ctl_tab = id - kHitCtlTab;
+        else if (id >= kHitKey && id < kHitKey + keys::kInputs * 2) {
+            g.capture = id - kHitKey;
+            SetFocus(h);
+        }
+        else if (id >= kHitPadMap && id < kHitPadMap + keys::kButtons * 16 && (id - kHitPadMap) % 16 == 0) g.list_open = id;
+        else if (id == kHitOpenSaves) open_folder(save_hdd());
+        else if (id == kHitWebsite) ShellExecuteW(h, L"open", kSite, nullptr, nullptr, SW_SHOWNORMAL);
+        else if (id == kHitOpenBackups) {
+            CreateDirectoryW(backup_root().c_str(), nullptr);
+            open_folder(backup_root());
+        }
+        else if (id == kHitBackupNow) saves_action(0);
+        else if (id >= kHitRestore && id < kHitRestore + 3) {
+            g.restore_index = id - kHitRestore;
+            if (game_running()) saves_result(false, S(Str::GameRunning));
+            else g.ask = kAskRestore;
+        }
+        else if (id == kHitPickXrevive) {
+            std::wstring dir;
+            if (pick(true, &dir)) {
+                ini_set(L"xrevive", dir);
+                g.save_status.clear();
+            }
+        }
+        else if (id == kHitImport || id == kHitExport) {
+            if (game_running()) saves_result(false, S(Str::GameRunning));
+            else g.ask = id == kHitImport ? kAskImport : kAskExport;
+        }
+        else if (id == kHitDiscard) discard_settings();
         else if (id == kHitPickIso) choose_image();
         else if (id == kHitInstall) request_install();
         else if (id == kHitCancel) g.prog.cancel = true;
@@ -1455,7 +1902,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id >= kHitFx && id < kHitFx + 2) black_ini_set("effectsnative", id == kHitFx ? "1" : "0");
         else if (id >= kHitVsync && id < kHitVsync + 2) black_ini_set("vsync", id == kHitVsync ? "1" : "0");
         else if (id >= kHitHud && id < kHitHud + 2) black_ini_set("perfhud", id == kHitHud ? "1" : "0");
-        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow)
+        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso)
             g.list_open = id;
         InvalidateRect(h, nullptr, FALSE);
         return 0;
@@ -1465,6 +1912,11 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         InvalidateRect(h, nullptr, FALSE);
         return 0;
     case WM_CLOSE:
+        if (unsaved()) { // ask first: save, don't save, or stay
+            g.ask = kAskUnsavedClose;
+            InvalidateRect(h, nullptr, FALSE);
+            return 0;
+        }
         if (installing()) { // stop the worker before the window goes (a half-written file stays: the next install overwrites it)
             g.prog.cancel = true;
             if (g.worker.joinable()) g.worker.join();
@@ -1557,15 +2009,20 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
             g.iso_need = install::image_size(g.iso, &err);
         }
         if (!wcscmp(argv[i], L"--show-ask") && i + 1 < argc) g.ask = _wtoi(argv[i + 1]); // with --snap: a confirmation (4 reset)
+        if (!wcscmp(argv[i], L"--tab") && i + 1 < argc) g.ctl_tab = _wtoi(argv[i + 1]); // with --snap: the Controls page's tab
         if (!wcscmp(argv[i], L"--show-list") && i + 1 < argc) // with --snap: a drop-down list open (gpu | res | mode | aspect | window)
             g.list_open = !wcscmp(argv[i + 1], L"gpu")    ? kHitGpu
                           : !wcscmp(argv[i + 1], L"mode")   ? kHitMode
                           : !wcscmp(argv[i + 1], L"aspect") ? kHitAspect
                           : !wcscmp(argv[i + 1], L"window") ? kHitWin
                           : !wcscmp(argv[i + 1], L"shadow") ? kHitShadow
+                          : !wcscmp(argv[i + 1], L"aniso")  ? kHitAniso
+                          : !wcscmp(argv[i + 1], L"padmap") ? kHitPadMap
                                                             : kHitResList;
-        if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed)
-            g.help = !wcscmp(argv[i + 1], L"image") ? kHitHelpImage : kHitHelpInstalled;
+        if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed | 0..12 a setting's)
+            g.help = !wcscmp(argv[i + 1], L"image")       ? kHitHelpImage
+                     : !wcscmp(argv[i + 1], L"installed") ? kHitHelpInstalled
+                                                          : kHitHelpSet + _wtoi(argv[i + 1]);
         if (!wcscmp(argv[i], L"--game") && i + 1 < argc) { // with --snap: this game folder
             g.game = std::wstring(argv[i + 1]) + L"\\default.xbe";
             set_dest(argv[i + 1]);
