@@ -473,6 +473,15 @@ D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp)
     pp.BackBufferWidth = dm.Width;
     pp.BackBufferHeight = dm.Height;
     pp.FullScreen_RefreshRateInHz = dm.RefreshRate;
+    // Vsync (black.ini vsync) applies here only: an exclusive device shows its frames itself and tears without it.
+    // With one copied back buffer Present waited for each frame to be shown before the next could start, so on the
+    // Iris Xe at 60 Hz the game ran at 78% (r361); two flipped buffers let the next frame start meanwhile. A flipped
+    // buffer is shown whole: the frame fills the screen here (frame_layout), and present() gives no rectangle.
+    pp.PresentationInterval = g_cfg.vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
+    if (g_cfg.vsync) {
+        pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+        pp.BackBufferCount = 2;
+    }
     return pp;
 }
 
@@ -499,9 +508,12 @@ bool create_device_here()
     pp.Windowed = TRUE;
     pp.EnableAutoDepthStencil = TRUE;
     pp.AutoDepthStencilFormat = D3DFMT_D24S8;
-    // Frames are paced by the emulated Xbox vblank (D3DDevice_Swap). With vsync (black.ini vsync) Present also waits for
-    // the display's refresh, so a frame is never shown half-replaced (tearing); without, the refresh adds no second clock.
-    pp.PresentationInterval = g_cfg.vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
+    // Frames are paced by the emulated Xbox vblank (D3DDevice_Swap). A windowed device (window, borderless) never waits
+    // for the display: the desktop compositor shows its frames at the display's refresh, so they do not tear anyway,
+    // and waiting there made Present block until the next composition. CPU and GPU then could not overlap: on the Iris
+    // Xe at 60 Hz the game ran at 88.6% speed with 9.5% late frames (r360). Vsync is for exclusive fullscreen only
+    // (exclusive_params).
+    pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
     g_pp = pp; // the windowed parameters: Reset goes back to them (reset_device)
     if (g_exclusive_now) pp = exclusive_params(pp);
     // FPU_PRESERVE: the game's x87 math must keep its precision; MULTITHREADED: loader threads may call in.
@@ -520,7 +532,10 @@ bool create_device_here()
     }
     g_bb_w = (int)pp.BackBufferWidth; // exclusive: the display mode's size
     g_bb_h = (int)pp.BackBufferHeight;
-    if (!pp.Windowed) logf("host: exclusive fullscreen %ux%u at %u Hz", pp.BackBufferWidth, pp.BackBufferHeight, pp.FullScreen_RefreshRateInHz);
+    if (!pp.Windowed)
+        logf("host: exclusive fullscreen %ux%u at %u Hz, vsync %s", pp.BackBufferWidth, pp.BackBufferHeight, pp.FullScreen_RefreshRateInHz,
+             pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
+    else if (g_cfg.vsync) logf("host: windowed: vsync is not used (the desktop compositor shows the frames without tearing)");
     if (g_cfg.api_count) apicount::install(g_dev);
     D3DADAPTER_IDENTIFIER9 id = {};
     g_d3d->GetAdapterIdentifier(D3DADAPTER_DEFAULT, 0, &id);
@@ -558,7 +573,8 @@ bool reset_device_here()
     }
     g_bb_w = (int)pp.BackBufferWidth; // the exclusive mode's size can differ from the largest monitor's
     g_bb_h = (int)pp.BackBufferHeight;
-    logf("host: device reset, %s %ux%u", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth, pp.BackBufferHeight);
+    logf("host: device reset, %s %ux%u, vsync %s", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth, pp.BackBufferHeight,
+         pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
     if (pp.Windowed && g_restyle_pending.exchange(false)) restyle_windowed(); // now the window can change
     return true;
 }
@@ -597,6 +613,7 @@ HRESULT present()
     // Minimised, nothing is shown: no Present. With vsync it waited far longer than a refresh there and the game ran
     // at 40-45% speed (r324, --background starts minimised); a lost device is still noticed once the window is back.
     if (IsIconic(g_hwnd)) return D3D_OK;
+    if (g_exclusive_now && g_cfg.vsync) return g_dev->Present(nullptr, nullptr, nullptr, nullptr); // flipped (exclusive_params)
     RECT src = {0, 0, g_frame_w ? g_frame_w : g_bb_w, g_frame_h ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)
 }

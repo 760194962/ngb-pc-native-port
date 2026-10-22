@@ -139,8 +139,8 @@ system save. To back them up, copy the whole `savedata` folder.
 More commands under "Diagnostics".
 
 **Graphics settings** (the launcher's Graphics page, or `black.ini`): `shadow` scales the shadow map (1 = the Xbox's
-128x128, default 4 = 512x512, up to 16); `vsync = 1` waits for the display's refresh (no tearing, a few more late
-frames; off by default); `perfhud = 1` shows frame rate, GPU, CPU, memory and disk use in the picture's top-right
+128x128, default 4 = 512x512, up to 16); `vsync = 1` waits for the display's refresh in exclusive fullscreen (no
+tearing; a window or borderless fullscreen never tears anyway; measured at almost no cost; off by default); `perfhud = 1` shows frame rate, GPU, CPU, memory and disk use in the picture's top-right
 corner (off by default); `aniso` anisotropic texture filtering (1 = off, 2-16). On the command line: `--vsync`,
 `--perfhud`, `--aniso N`; command-line values hold for that run only and are not written back to `black.ini`.
 
