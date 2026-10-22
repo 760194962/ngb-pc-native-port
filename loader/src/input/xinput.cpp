@@ -232,6 +232,11 @@ void read_press_file(uint32_t now_ms)
                     bool v = c != std::string::npos && line[c + 1] == '1';
                     if (k == "aa") g_cfg.aa = v;
                     else if (k == "seamfill") g_cfg.seam_fill = v;
+                    else if (k == "perfhud") g_cfg.perfhud = v; // the performance overlay (black.ini perfhud)
+                    else if (k == "shadow") { // shadow maps at N x their Xbox size (black.ini shadow)
+                        g_cfg.shadow_scale = std::clamp(atoi(line.c_str() + c + 1), 1, 16);
+                        xd3d::request_render_rebuild();
+                    }
                     else if (k == "effectsnative") { // as PC SETTINGS > EFFECTS AT XBOX SIZE
                         g_cfg.effects_native = v;
                         xd3d::request_render_rebuild();

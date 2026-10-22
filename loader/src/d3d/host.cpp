@@ -1,6 +1,7 @@
 #include "d3d/apicount.h"
 #include "d3d/draw.h"
 #include "d3d/host.h"
+#include "d3d/perfhud.h"
 #include "d3d/shader_cache.h"
 
 #include "build_profile.h"
@@ -326,6 +327,13 @@ DWORD WINAPI ui_thread(void *)
     RAWINPUTDEVICE mouse = {0x01, 0x02, 0, g_hwnd}; // generic desktop / mouse, while the window has focus
     if (!RegisterRawInputDevices(&mouse, 1, sizeof mouse)) logf("host: raw mouse input not available (%lu)", GetLastError());
     ShowWindow(g_hwnd, g_cfg.background ? SW_SHOWMINNOACTIVE : SW_SHOWNORMAL);
+    // In front of the other windows at every start, the bundled programs (SNES, arcade) included (the user,
+    // 2026-10-22). Windows lets a program take the front only when the one in front allows it: the launcher and the
+    // program that relaunches into another XBE call AllowSetForegroundWindow for the new process (kernel/k_misc.cpp).
+    if (!g_cfg.background) {
+        SetForegroundWindow(g_hwnd);
+        logf("host: window %s", GetForegroundWindow() == g_hwnd ? "in front" : "not given the front by Windows");
+    }
     if (g_cfg.fullscreen) toggle_fullscreen();
     SetEvent(g_window_ready);
     MSG m;
@@ -491,8 +499,9 @@ bool create_device_here()
     pp.Windowed = TRUE;
     pp.EnableAutoDepthStencil = TRUE;
     pp.AutoDepthStencilFormat = D3DFMT_D24S8;
-    // Frames are paced by the emulated Xbox vblank (D3DDevice_Swap); the host monitor's refresh must not add a second clock.
-    pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    // Frames are paced by the emulated Xbox vblank (D3DDevice_Swap). With vsync (black.ini vsync) Present also waits for
+    // the display's refresh, so a frame is never shown half-replaced (tearing); without, the refresh adds no second clock.
+    pp.PresentationInterval = g_cfg.vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
     g_pp = pp; // the windowed parameters: Reset goes back to them (reset_device)
     if (g_exclusive_now) pp = exclusive_params(pp);
     // FPU_PRESERVE: the game's x87 math must keep its precision; MULTITHREADED: loader threads may call in.
@@ -515,6 +524,7 @@ bool create_device_here()
     if (g_cfg.api_count) apicount::install(g_dev);
     D3DADAPTER_IDENTIFIER9 id = {};
     g_d3d->GetAdapterIdentifier(D3DADAPTER_DEFAULT, 0, &id);
+    perfhud::start(id.Description, id.VendorId, id.DeviceId); // black.ini perfhud
     g_intz = SUCCEEDED(g_d3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DUSAGE_DEPTHSTENCIL,
                                                 D3DRTYPE_TEXTURE, FMT_INTZ));
     // Depth views (d3d/device.cpp depth_view): R32F keeps the 24-bit depth the shadow compare needs, where an
@@ -576,6 +586,9 @@ HRESULT present()
     begin_scene();
     g_dev->EndScene();
     g_in_scene = false;
+    // Minimised, nothing is shown: no Present. With vsync it waited far longer than a refresh there and the game ran
+    // at 40-45% speed (r324, --background starts minimised); a lost device is still noticed once the window is back.
+    if (IsIconic(g_hwnd)) return D3D_OK;
     RECT src = {0, 0, g_frame_w ? g_frame_w : g_bb_w, g_frame_h ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)
 }

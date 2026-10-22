@@ -100,6 +100,8 @@ void usage()
            "  --gain K          output gain after the game's gamma ramp (default 1.0; F5/F6 adjust live)\n"
            "  --no-ramp         ignore the game's gamma ramp (no fades, half brightness: the raw framebuffer)\n"
            "  --no-aa           no anti-aliasing (default: edge-directed post filter; F9 toggles)\n"
+           "  --vsync           wait for the display's refresh when presenting (black.ini vsync)\n"
+           "  --perfhud         the performance overlay: frame rate, GPU, CPU, memory, disk (black.ini perfhud)\n"
            "  --no-seamfill     do not fill hairline cracks between geometry pieces (destructible walls)\n"
            "  --perf-at S:D     record performance for D seconds from S seconds after the first frame (perf\\)\n"
            "  --timer-vblank    vblank from a 59.94 Hz timer instead of the display's refresh (default: follow a ~60 Hz display)\n"
@@ -191,6 +193,8 @@ bool parse_args()
         else if (a == L"--no-ramp") g_cfg.ramp = false;
         else if (a == L"--no-aa") { g_cfg.aa = false; settings_mark_cli("aa"); }
         else if (a == L"--no-seamfill") { g_cfg.seam_fill = false; settings_mark_cli("seamfill"); }
+        else if (a == L"--vsync") { g_cfg.vsync = true; settings_mark_cli("vsync"); }
+        else if (a == L"--perfhud") { g_cfg.perfhud = true; settings_mark_cli("perfhud"); }
         else if (a == L"--rescale-at") { if (!next(g_cfg.rescale_at)) return false; }
         else if (a == L"--reverb-gain") {
             settings_mark_cli("reverb_gain");
@@ -461,10 +465,10 @@ int run(void *reserve, unsigned reserve_size)
          narrow(g_cfg.log_path).c_str(), g_cfg.trace ? ", trace" : "", g_cfg.strict ? ", strict" : "");
     logf("address-space stub: reserve %p + 0x%x", reserve, reserve_size);
     // What black.ini (the launcher's pages) and the command line set, as read: the launcher's choices can be checked here
-    logf("settings: render %s, scale %.2f, aa %d, seamfill %d, effectsnative %d, widescreen %d, fullscreen %d, window %dx%d, "
-         "gain %.2f, gamma %.2f",
+    logf("settings: render %s, scale %.2f, aa %d, seamfill %d, effectsnative %d, shadow %d, vsync %d, perfhud %d, widescreen %d, fullscreen %d, "
+         "window %dx%d, gain %.2f, gamma %.2f",
          g_cfg.render_native ? "native" : g_cfg.render_h ? std::to_string(g_cfg.render_h).c_str() : "scale", g_cfg.scale,
-         g_cfg.aa, g_cfg.seam_fill, g_cfg.effects_native, g_cfg.widescreen, g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0,
+         g_cfg.aa, g_cfg.seam_fill, g_cfg.effects_native, g_cfg.shadow_scale, g_cfg.vsync, g_cfg.perfhud, g_cfg.widescreen, g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0,
          g_cfg.window_w, g_cfg.window_h, g_cfg.gain, g_cfg.gamma);
 
     std::string err;

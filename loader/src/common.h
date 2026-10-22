@@ -79,6 +79,9 @@ struct Config {
     bool timer_vblank = false; // --timer-vblank: free-running 59.94 Hz vblank instead of following the display
     bool display_vblank = false; // --display-vblank (tests): follow the display even with --background
     bool effects_native = false; // the small effect buffers at their Xbox size (PC SETTINGS); default: render scale, smoothed
+    int shadow_scale = 4;        // shadow maps at this many times their Xbox size (black.ini shadow: 1, 2, 4, 8, 16)
+    bool vsync = false;          // present on the display's refresh (black.ini vsync); off: frames paced by the Xbox vblank only
+    bool perfhud = false;        // the performance overlay (black.ini perfhud; d3d/perfhud.cpp)
     bool seam_fill = true;     // fill hairline cracks between geometry pieces (PC SETTINGS, --no-seamfill)
     bool autoaim = false;      // the game's view pull toward targets, off by default (input/autoaim.cpp; --autoaim, PC SETTINGS)
     float fov = 70.0f;         // horizontal field of view in play, degrees (fov.cpp; --fov, PC SETTINGS; the game's is 70)

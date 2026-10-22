@@ -10,6 +10,7 @@
 #include "d3d/draw.h"
 #include "d3d/host.h"
 #include "d3d/nv2a_psh.h"
+#include "d3d/perfhud.h"
 #include "d3d/pshader.h"
 #include "perf.h"
 #include "d3d/pushbuf.h"
@@ -28,6 +29,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 std::atomic<uint32_t> g_frame_count;
 
@@ -174,6 +176,23 @@ uint32_t host_h(uint32_t xbox_h) { return (uint32_t)lroundf(xbox_h * scale_y());
 bool small_buffer(uint32_t xw, uint32_t xh) { return xw * 2 <= (uint32_t)g_width && xh * 2 <= (uint32_t)g_height; }
 bool native_size(uint32_t xw, uint32_t xh) { return g_cfg.effects_native && small_buffer(xw, xh); }
 
+// Shadow maps: a small target drawn together with a small depth buffer (Ninja Gaiden Black's 128x128 one, whose depth
+// ~200 shadow-receiver draws a frame sample). Kept square at g_cfg.shadow_scale times the Xbox size instead of the
+// render scale (which made it 512x384 at 4 x 3): the shadow quality setting. Keys of the colour target and the depth
+// buffer (mem_key), recorded when they are first bound together (bind_render_target).
+std::unordered_set<uint64_t> g_shadow_keys;
+
+// The scale a host buffer for Xbox memory `key` (w x h Xbox pixels) is made at
+void buffer_scale(uint64_t key, uint32_t w, uint32_t h, float *sx, float *sy)
+{
+    if (g_shadow_keys.count(key)) *sx = *sy = (float)g_cfg.shadow_scale;
+    else if (native_size(w, h)) *sx = *sy = 1.0f;
+    else {
+        *sx = scale_x();
+        *sy = scale_y();
+    }
+}
+
 // The scale of the bound render target (viewport, scissor, clear rectangles, pre-transformed vertices).
 float g_cur_sx, g_cur_sy;
 float target_scale_x() { return g_cur_sx ? g_cur_sx : scale_x(); }
@@ -196,11 +215,9 @@ HostRT &host_rt_at(uint32_t data, uint32_t w, uint32_t h)
     if (!rt.tex) {
         rt.xw = w;
         rt.xh = h;
-        bool native = native_size(w, h);
-        rt.sx = native ? 1.0f : scale_x();
-        rt.sy = native ? 1.0f : scale_y();
-        w = native ? w : host_w(w);
-        h = native ? h : host_h(h);
+        buffer_scale(mem_key(data, w, h), w, h, &rt.sx, &rt.sy);
+        w = (uint32_t)lroundf(w * rt.sx);
+        h = (uint32_t)lroundf(h * rt.sy);
         host3d::dev()->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &rt.tex, nullptr);
         rt.w = w;
         rt.h = h;
@@ -231,10 +248,10 @@ HostZ &host_z(const PixelContainer *z, uint32_t rt_w, uint32_t rt_h, uint64_t *k
     if (h < rt_h) h = rt_h;
     *key = mem_key(z->Data, w, h);
     HostZ &hz = g_zs[*key];
-    if (!native_size(w, h)) { // the same size as the render targets it pairs with
-        w = host_w(w);
-        h = host_h(h);
-    }
+    float sx, sy; // the same scale as the render targets it pairs with
+    buffer_scale(*key, w, h, &sx, &sy);
+    w = (uint32_t)lroundf(w * sx);
+    h = (uint32_t)lroundf(h * sy);
     if (!hz.surf) {
         if (host3d::intz() &&
             SUCCEEDED(host3d::dev()->CreateTexture(w, h, 1, D3DUSAGE_DEPTHSTENCIL, host3d::FMT_INTZ, D3DPOOL_DEFAULT, &hz.tex, nullptr)))
@@ -377,10 +394,10 @@ IDirect3DPixelShader9 *g_zdepth_ps;
 IDirect3DTexture9 *depth_view(uint64_t key, const HostZ &z, uint32_t w, uint32_t h, int depth_mode) // w, h: Xbox pixels
 {
     bool depth_format = depth_mode != kDepthViewBytes;
-    if (!native_size(w, h)) { // the size of the depth surface
-        w = host_w(w);
-        h = host_h(h);
-    }
+    float sx, sy; // the size of the depth surface
+    buffer_scale(key, w, h, &sx, &sy);
+    w = (uint32_t)lroundf(w * sx);
+    h = (uint32_t)lroundf(h * sy);
     IDirect3DPixelShader9 *&ps = depth_format ? g_zdepth_ps : g_zview_ps;
     if (!ps) ps = depth_format ? compile_ps(kZDepthPS, "zdepth") : compile_ps(kZViewPS, "zview");
     IDirect3DTexture9 *&view = (depth_format ? g_zdepths : g_zviews)[key];
@@ -653,9 +670,20 @@ void bind_render_target(Surface *rt, Surface *z)
 {
     IDirect3DDevice9 *d = host3d::dev();
     flash_count_rt();
-    HostRT &h = host_rt(rt);
     uint32_t rw, rh;
     surface_size(rt, &rw, &rh);
+    if (z) { // a small target with a small depth buffer: a shadow map (buffer_scale), before either is made
+        uint32_t zw, zh;
+        surface_size(z, &zw, &zh);
+        uint64_t rkey = mem_key(rt->Data, rw, rh), zkey = mem_key(z->Data, std::max(zw, rw), std::max(zh, rh));
+        if (rt != g_backbuffer && small_buffer(rw, rh) && small_buffer(zw, zh) && !g_shadow_keys.count(rkey)) {
+            g_shadow_keys.insert(rkey);
+            g_shadow_keys.insert(zkey);
+            logf("[d3d] shadow map: target 0x%08x %ux%u with depth 0x%08x %ux%u, made at %dx", rt->Data, rw, rh, z->Data, zw, zh,
+                 g_cfg.shadow_scale);
+        }
+    }
+    HostRT &h = host_rt(rt);
     IDirect3DSurface9 *zs = nullptr;
     g_cur_zkey = 0; // set below when a depth surface is bound
     if (z) {
@@ -666,7 +694,9 @@ void bind_render_target(Surface *rt, Surface *z)
         g_zbind_at[zkey] = ++g_zbind_count;
         uint32_t zw, zh;
         surface_size(z, &zw, &zh);
-        if (native_size(std::max(zw, h.xw), std::max(zh, h.xh)) != native_size(h.xw, h.xh))
+        float zsx, zsy;
+        buffer_scale(zkey, std::max(zw, h.xw), std::max(zh, h.xh), &zsx, &zsy);
+        if (zsx != h.sx || zsy != h.sy)
             KNOTE_ONCE("render target %ux%u and depth %ux%u at different scales: depth test misaligned", h.xw, h.xh, zw, zh);
         auto c = g_rts.find(zkey);
         if (g_owner[zkey] == Owner::Color && c != g_rts.end() && hz.tex) {
@@ -1338,6 +1368,7 @@ namespace {
 void release_host_targets()
 {
     release_cpu_backbuffer();
+    perfhud::release();
     host3d::end_scene();
     IDirect3DDevice9 *d = host3d::dev();
     d->SetRenderTarget(0, g_host_backbuffer);
@@ -1539,6 +1570,12 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     pace_swap();
     upload_cpu_backbuffer();
     present_backbuffer();
+    if (g_cfg.perfhud) { // the performance overlay over the finished picture
+        RECT frame, pic;
+        host3d::frame_layout(&frame, &pic);
+        perfhud::frame();
+        perfhud::draw(host3d::dev(), pic);
+    }
     copy_to_frontbuffer();
     capture_frame();
     uint32_t frames = ++g_frame_count;

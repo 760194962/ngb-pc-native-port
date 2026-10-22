@@ -45,6 +45,9 @@ void settings_load()
         else if (k == "aa") g_cfg.aa = v != 0;
         else if (k == "seamfill") g_cfg.seam_fill = v != 0;
         else if (k == "effectsnative") g_cfg.effects_native = v != 0;
+        else if (k == "shadow") g_cfg.shadow_scale = std::clamp(atoi(val), 1, 16);
+        else if (k == "vsync") g_cfg.vsync = v != 0;
+        else if (k == "perfhud") g_cfg.perfhud = v != 0;
         else if (k == "fps") g_cfg.fps = atoi(val) == 60 ? 60 : 30;
         else if (k == "widescreen") g_cfg.widescreen = v != 0;
         else if (k == "fullscreen") { // 0 window, 1 borderless, 2 exclusive
@@ -94,6 +97,7 @@ void settings_save()
     fprintf(f, "skipanymovie = %d\n", g_cfg.skip_movies ? 1 : 0);
     fprintf(f, "seamfill = %d\n", g_cfg.seam_fill ? 1 : 0);
     fprintf(f, "effectsnative = %d\n", g_cfg.effects_native ? 1 : 0);
+    fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0, g_cfg.perfhud ? 1 : 0);
     bindings::save_ini(f);
     fclose(f);
 }

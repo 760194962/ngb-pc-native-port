@@ -251,6 +251,7 @@ static bool relaunch(const std::wstring &xbe, bool with_data = true)
         logf("[k] relaunch failed (error %lu): %s", GetLastError(), narrow(cmd).c_str());
         return false;
     }
+    AllowSetForegroundWindow(pi.dwProcessId); // this window is in front: the next program's may come to the front too
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     logf("[k] relaunched as process %lu on %s (log %s)", pi.dwProcessId, narrow(xbe).c_str(), narrow(new_log).c_str());

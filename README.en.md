@@ -117,6 +117,11 @@ system save. To back them up, copy the whole `savedata` folder.
 **Screenshots**: append a line `shot:name` to `logs\presses.txt`, and the next frame is saved as `logs\shots\name.png`.
 More commands under "Diagnostics".
 
+**Graphics settings** (the launcher's Graphics page, or `black.ini`): `shadow` scales the shadow map (1 = the Xbox's
+128x128, default 4 = 512x512, up to 16); `vsync = 1` waits for the display's refresh (no tearing, a few more late
+frames; off by default); `perfhud = 1` shows frame rate, GPU, CPU, memory and disk use in the picture's top-right
+corner (off by default). On the command line: `--vsync`, `--perfhud`.
+
 **Shader cache**: the first time the program meets a shader it compiles it on the spot, which can stutter; the result
 is kept in `cache\shaders\` next to the program and read into memory at the next start, so it stutters no more.
 Deleting the folder does no harm; the shaders are just compiled again.
