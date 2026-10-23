@@ -167,9 +167,30 @@ InsigniaDNS.exe」。原先只写了「关掉 TUN」。提示「DNS 被代理的
 - 启动器截图：中英文的 DNS 卡、两种方式、「?」面板、注册步骤，文字都没有被截断。
 - 性能：只改了文字，不在每帧的路径上。
 
+## XePublicKeyData 为空（2026-10-23 查）
+
+用户：「我觉得你可以查一查，做到心里有数」。结论：**对 Insignia 没有影响，不用补。**
+
+- **谁用它：** x2.1 的 `default.xbe` 只有一处读它：XNET 里的 `FUN_003b3ea4`（`003b3efc push [0x3e1624]`，内核导入 355），
+  唯一调用者是 `FUN_003b1ee9`。全程序也只有这一处调用 `XcVerifyPKCS1Signature`（344）。（kernel thunk 表在 0x3e1420，
+  145 个导入；扫描脚本按 thunk 槽地址找引用，再用 capstone 反汇编确认。）
+- **它在做什么：** 处理服务器发来的一个请求。先对请求数据做 SHA-1，再用 `XePublicKeyData`（微软的公钥）验 256 字节的
+  RSA 签名：验过了就把签名区处理后放进回复；没验过就在回复里记 `'S'`（0x53）。接着不管验没验过，都按请求里的扇区数
+  打开 `\Device\CdRom0`，读光盘扇区（每扇区 0x800 字节）做哈希，把结果放进 0x128 字节的回复（消息 0x530a）发回去。
+  读盘失败时回复里记 `'E'`（0x45）和错误码。看起来是 Xbox Live 当年用来查光盘和主机是否被改的「签名挑战」。
+- **为什么不用补：** 这个签名只有微软的私钥能做，Insignia 没有。所以就算 Insignia 发这种请求，真机用真公钥也一样验不过，
+  回复里同样是 `'S'`。公钥为空和真机的结果没有区别。
+- **真正的差别在读盘：** 读盘那步要用 `ObReferenceObjectByName`（247）、`IoBuildSynchronousFsdRequest`（62）、`IofCallDriver`
+  （86），加载器里都是只记日志的空实现。所以如果服务器真的要光盘哈希，真机会回哈希，移植版会回 `'E'`。这和公钥无关。
+- **实测（r463）：** Clash TUN 开着，用本地 InsigniaDNS.exe 登录，提示「联网：已连接 Insignia」后在排行榜停了约 130 秒。
+  日志里没有 `XcVerifyPKCS1Signature` 的提示，没有 `UNIMPLEMENTED`（上面三个空实现第一次被调用时都会记一条），也没有打开
+  原始光盘设备。说明登录和排行榜不会触发这个请求，和之前所有联网测试排行榜都正常一致。
+- **以后什么时候回头看：** 如果哪天日志出现 `XcVerifyPKCS1Signature: no RSA1 public key` 或上面三个 `UNIMPLEMENTED`，说明
+  服务器发了这种请求，那时要补的是读光盘扇区（把 `\Device\CdRom0` 的原始扇区读接到游戏镜像上），不是公钥。
+
 ## 未完成 / 已知问题
 
 - 用户测试时切到后台后画面变黑（游戏仍在出帧、能操作；那次是强制集显的测试版，窗口在另一块显示器上）；尚未查明，用户
   说先不管。
-- `XePublicKeyData` 为空：需要它的签名检查都判为失败（登录与排行榜没有用到）。
+- `XePublicKeyData` 为空：查过，对 Insignia 没有影响，见「XePublicKeyData 为空（2026-10-23 查）」。
 - 只测了 UDP；TCP 从没出现在线上（服务都走安全网关的 UDP 隧道），出现时日志会记 `IP protocol 6 … not relayed`。
