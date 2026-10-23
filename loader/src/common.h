@@ -97,6 +97,10 @@ struct Config {
     // black.ini online_dns_mode: insignia (default) relays every DNS query to online_dns; console sends them where the
     // console's network settings say (manual DNS such as a PC running InsigniaDNS), as the Xbox / xemu would
     bool online_dns_console = false;
+    // insigniadns: every DNS query to online_insigniadns, the address of a PC running InsigniaDNS (for a proxy that
+    // captures public DNS: the launcher's 联网 page); the console's settings are not used
+    bool online_dns_pc = false;
+    std::wstring online_insigniadns;
     std::wstring online_check; // --online-check FILE: check the online files, write the result there and exit (the launcher)
     bool known_build = false;  // the XBE is the NTSC-U build the address tables are for (main.cpp)
     std::wstring game_override; // --game-override: files there replace the game's of the same relative path

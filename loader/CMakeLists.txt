@@ -118,7 +118,7 @@ set_target_properties(launcher PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Hurric
 target_compile_definitions(launcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00 WINVER=0x0A00
   GAME_VERSION="${PROJECT_VERSION}") # the game program's release number, for the About page
 target_compile_options(launcher PRIVATE /W3 /utf-8 /EHsc)
-target_link_libraries(launcher PRIVATE d2d1 dwrite windowscodecs ole32 shell32 user32 advapi32 bcrypt dxgi ws2_32)
+target_link_libraries(launcher PRIVATE d2d1 dwrite windowscodecs ole32 shell32 user32 advapi32 bcrypt dxgi ws2_32 iphlpapi)
 if(PORT_ICON AND EXISTS "${PORT_ICON}")
   target_sources(launcher PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc") # the same icon as the game
 endif()

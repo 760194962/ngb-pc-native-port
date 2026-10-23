@@ -100,7 +100,8 @@ void usage()
            "  --online-eeprom F --online-hdd F  online play through Insignia with this registered EEPROM and xemu disk\n"
            "                    image (both only read; black.ini online = 1, online_eeprom, online_hdd); --offline: off\n"
            "  --online-check F  check the online files (black.ini or the flags above), write what was found to F, exit\n"
-           "  --online-dns-mode M  insignia (default): every DNS query to Insignia's; console: as the console's settings\n"
+           "  --online-dns-mode M  insignia (default): every DNS query to Insignia's; insigniadns: every query to the\n"
+           "                    InsigniaDNS at --online-insigniadns IP; console: as the console's settings\n"
            "  --no-pc-menus     no PC SETTINGS pages in the game's Options menu (built at start into cache\\menus\n"
            "                    next to black.exe)\n"
            "  --gain K          output gain after the game's gamma ramp (default 1.0; F5/F6 adjust live)\n"
@@ -183,11 +184,16 @@ bool parse_args()
         }
         else if (a == L"--offline") { g_cfg.online = false; settings_mark_cli("online"); }
         else if (a == L"--online-check") { if (!next(g_cfg.online_check)) return false; }
-        else if (a == L"--online-dns-mode") { // insignia / console (black.ini online_dns_mode)
+        else if (a == L"--online-dns-mode") { // insignia / insigniadns / console (black.ini online_dns_mode)
             std::wstring v;
             if (!next(v)) return false;
             g_cfg.online_dns_console = v == L"console";
+            g_cfg.online_dns_pc = v == L"insigniadns";
             settings_mark_cli("online_dns_mode");
+        }
+        else if (a == L"--online-insigniadns") {
+            if (!next(g_cfg.online_insigniadns)) return false;
+            settings_mark_cli("online_insigniadns");
         }
         else if (a == L"--multicore") g_cfg.multicore = true;
         else if (a == L"--game-cpu") {

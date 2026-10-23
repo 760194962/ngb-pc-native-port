@@ -1,6 +1,6 @@
 // Virtual network for online play (net/vnet.h). Only what an Xbox needs to reach Xbox Live: ARP for the gateway, a
-// DHCP lease, DNS relayed to Insignia's server (or where the console's settings send it, black.ini online_dns_mode =
-// console), and UDP through host sockets (Kerberos on 88, the security gateway
+// DHCP lease, DNS relayed to Insignia's server (or to a PC running InsigniaDNS, black.ini online_dns_mode = insigniadns,
+// or where the console's settings send it, = console), and UDP through host sockets (Kerberos on 88, the security gateway
 // on 3074: everything after sign-in travels inside that UDP tunnel). IP fragments are reassembled before they leave
 // and large replies are fragmented for the Xbox. Nothing of the payloads is logged.
 #include <winsock2.h>
@@ -29,6 +29,7 @@ constexpr int MTU = 1500;
 
 uint8_t g_guest_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 uint32_t g_dns_server;  // host byte order
+bool g_dns_pc;          // g_dns_server is the InsigniaDNS of online_dns_mode = insigniadns (not Insignia's instead)
 WSAEVENT g_sock_event;
 
 struct Flow {
@@ -343,7 +344,7 @@ void expire()
         if (kv.second.asked && now - kv.second.asked > 4000) { // the Xbox gives up on a server after a few seconds
             uint32_t server = kv.second.dns_server == DNS_IP || !g_cfg.online_dns_console ? g_dns_server : kv.second.dns_server;
             logf("[net] DNS: no answer from %s in 4 s", ip_str(server).c_str());
-            std::wstring text = g_cfg.online_dns_console && server != g_dns_server
+            std::wstring text = (g_cfg.online_dns_console && server != g_dns_server) || g_dns_pc
                 ? L"联网：DNS " + widen(ip_str(server)) + L" 没有回应（那台电脑开着 InsigniaDNS 吗？）"
                 : L"联网：Insignia 的 DNS 没有回应，请检查网络";
             tell(TELL_DNS_SILENT, text.c_str());
@@ -415,11 +416,19 @@ void vnet_start()
     WSADATA wd;
     WSAStartup(MAKEWORD(2, 2), &wd);
     g_sock_event = WSACreateEvent();
-    std::string dns = g_cfg.online_dns.empty() ? "46.101.64.175" : narrow(g_cfg.online_dns);
+    std::string dns = g_cfg.online_dns_pc ? narrow(g_cfg.online_insigniadns)
+                    : g_cfg.online_dns.empty() ? "46.101.64.175" : narrow(g_cfg.online_dns);
     in_addr a;
     g_dns_server = inet_pton(AF_INET, dns.c_str(), &a) == 1 ? ntohl(a.s_addr) : 0x2E6540AF;
+    g_dns_pc = g_cfg.online_dns_pc && ip_str(g_dns_server) == dns;
+    if (g_cfg.online_dns_pc && !g_dns_pc) { // no address (or not an IPv4 one): Insignia's instead
+        g_dns_server = 0x2E6540AF;
+        logf("[net] online_insigniadns \"%s\" is not an IPv4 address: DNS goes to Insignia's", dns.c_str());
+        tell(TELL_DNS_SILENT, L"联网：InsigniaDNS 的地址无效，改用 Insignia 的 DNS");
+    }
     logf("[net] virtual network up: Xbox 10.0.2.15, gateway 10.0.2.2, DNS relay to %s (%s)", ip_str(g_dns_server).c_str(),
-         g_cfg.online_dns_console ? "10.0.2.3 only; other servers as the console's settings name them" : "every DNS query");
+         g_cfg.online_dns_console ? "10.0.2.3 only; other servers as the console's settings name them"
+         : g_dns_pc              ? "every DNS query, to InsigniaDNS" : "every DNS query");
 }
 
 // The first frames each way, by header only (evidence of the exchange; no payload bytes)

@@ -225,6 +225,7 @@ bool online_check(const std::wstring &out_path)
     }
     SecureZeroMemory(c.data(), c.size());
     put("dns_relay", g_cfg.online_dns.empty() ? "46.101.64.175" : narrow(g_cfg.online_dns));
+    if (!g_cfg.online_insigniadns.empty()) put("insigniadns", narrow(g_cfg.online_insigniadns));
     FILE *f = nullptr;
     if (_wfopen_s(&f, out_path.c_str(), L"wb") || !f) return false;
     fputs(r.c_str(), f);

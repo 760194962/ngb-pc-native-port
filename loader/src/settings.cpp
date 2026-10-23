@@ -93,7 +93,11 @@ void load_file()
         else if (k == "fov") g_cfg.fov = std::clamp(v, 50.0f, 120.0f);
         else if (k == "skipanymovie") g_cfg.skip_movies = v != 0;
         else if (k == "online") g_cfg.online = v != 0;
-        else if (k == "online_dns_mode") g_cfg.online_dns_console = !strcmp(val, "console");
+        else if (k == "online_dns_mode") {
+            g_cfg.online_dns_console = !strcmp(val, "console");
+            g_cfg.online_dns_pc = !strcmp(val, "insigniadns");
+        }
+        else if (k == "online_insigniadns") g_cfg.online_insigniadns = widen(val);
         else if (k == "reverb") g_cfg.reverb = v != 0;
         else if (k == "reverb_gain") g_cfg.reverb_gain = std::clamp(v, 0.0f, 8.0f);
         else if (padkeys::load_ini(k.c_str(), val)) {} // kb_<input> = Key[,Key], padmap_<input> = <input> (Ninja Gaiden Black)
@@ -184,7 +188,8 @@ void write_all(FILE *f)
     if (!g_cfg.online_eeprom.empty()) fprintf(f, "online_eeprom = %s\n", narrow(g_cfg.online_eeprom).c_str());
     if (!g_cfg.online_hdd.empty()) fprintf(f, "online_hdd = %s\n", narrow(g_cfg.online_hdd).c_str());
     if (!g_cfg.online_dns.empty()) fprintf(f, "online_dns = %s\n", narrow(g_cfg.online_dns).c_str());
-    fprintf(f, "online_dns_mode = %s\n", g_cfg.online_dns_console ? "console" : "insignia");
+    fprintf(f, "online_dns_mode = %s\n", g_cfg.online_dns_pc ? "insigniadns" : g_cfg.online_dns_console ? "console" : "insignia");
+    if (!g_cfg.online_insigniadns.empty()) fprintf(f, "online_insigniadns = %s\n", narrow(g_cfg.online_insigniadns).c_str());
     fprintf(f, "seamfill = %d\n", g_cfg.seam_fill ? 1 : 0);
     fprintf(f, "effectsnative = %d\n", g_cfg.effects_native ? 1 : 0);
     fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\naniso = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0,

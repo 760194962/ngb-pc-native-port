@@ -14,6 +14,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <windowsx.h>
+#include <iphlpapi.h>
 #include <d2d1.h>
 #include <dwrite.h>
 #include <dwrite_1.h>
@@ -97,6 +98,10 @@ struct App {
     std::mutex net_lock;
     std::wstring net_result;
     bool net_bad = false, net_busy = false;
+    // the InsigniaDNS address being typed in the DNS card's field (digits and dots), and what was found or wrong
+    bool dns_edit = false;
+    std::wstring dns_text, dns_note;
+    bool dns_note_bad = false;
 };
 enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete, kAskReset, kAskUnsavedStart, kAskUnsavedClose, kAskRestore, kAskImport,
        kAskExport };
@@ -112,7 +117,7 @@ enum {
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitResList = 300, kHitShadow = 320, kHitAniso = 340,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
-    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia
+    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind
 };
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -609,7 +614,8 @@ void choose_existing()
 
 // --- the Online page -----------------------------------------------------------------------------------------------
 // black.ini online = 1 with online_eeprom / online_hdd (the xemu files the player registered with Insignia) and
-// online_dns_mode (insignia / console): the game program's net/online.cpp, project/docs/09.
+// online_dns_mode (insignia / insigniadns with online_insigniadns; the older console): the game program's
+// net/online.cpp and net/vnet.cpp, project/docs/09.
 
 std::wstring from_utf8(const std::string &s)
 {
@@ -665,18 +671,111 @@ std::string online_value(const char *key)
     return it == g.online.end() || it->second.empty() ? "" : it->second[0];
 }
 
-// The DNS server the game will ask first: Insignia's (black.ini online_dns, default 46.101.64.175), or with
-// online_dns_mode = console the console's first manual server
-std::string dns_server(bool *console_pc)
+// The lookups go to a PC running InsigniaDNS: online_dns_mode = insigniadns, or the first launcher's console (the
+// console's manual DNS, which names a PC as well)
+bool dns_by_pc()
+{
+    std::string m = black_ini("online_dns_mode");
+    return m == "insigniadns" || m == "console";
+}
+
+// A dotted IPv4 address, written as Windows writes it back (no "1.2.3", no leading zeros)
+bool ipv4(const std::string &s)
+{
+    in_addr a;
+    char b[16];
+    return inet_pton(AF_INET, s.c_str(), &a) == 1 && inet_ntop(AF_INET, &a, b, sizeof b) && s == b;
+}
+
+// The DNS server the game will ask first: Insignia's (black.ini online_dns, default 46.101.64.175), with
+// online_dns_mode = insigniadns online_insigniadns (the game program falls back to Insignia's when it is no address),
+// with console the console's first manual server
+std::string dns_server(bool *pc)
 {
     std::string relay = black_ini("online_dns");
     if (relay.empty()) relay = "46.101.64.175";
-    *console_pc = false;
-    if (black_ini("online_dns_mode") == "console" && online_value("dns") == "manual" && !online_value("dns1").empty()) {
-        *console_pc = true;
-        return online_value("dns1");
-    }
+    std::string mode = black_ini("online_dns_mode"), addr = black_ini("online_insigniadns");
+    *pc = true;
+    if (mode == "insigniadns" && ipv4(addr)) return addr;
+    if (mode == "console" && online_value("dns") == "manual" && !online_value("dns1").empty()) return online_value("dns1");
+    *pc = false;
     return relay;
+}
+
+// This PC's InsigniaDNS: a program on UDP port 53 at one of the PC's addresses (InsigniaDNS listens on the LAN address
+// only, not on 127.0.0.1: the author's PC, 2026-10-23), else the address of the connection with a gateway (Wi-Fi or
+// Ethernet; a proxy's TUN adapter is neither). Returns whether something listens on port 53.
+bool find_insigniadns(std::string *addr)
+{
+    addr->clear();
+    bool any = false; // a program on 0.0.0.0:53 (every address)
+    char b[16];
+    ULONG size = 0;
+    GetExtendedUdpTable(nullptr, &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0);
+    std::vector<uint8_t> buf(size + 1024);
+    size = (ULONG)buf.size();
+    if (GetExtendedUdpTable(buf.data(), &size, FALSE, AF_INET, UDP_TABLE_OWNER_PID, 0) == NO_ERROR) {
+        const auto *t = (const MIB_UDPTABLE_OWNER_PID *)buf.data();
+        for (DWORD i = 0; i < t->dwNumEntries && addr->empty(); i++) {
+            const MIB_UDPROW_OWNER_PID &r = t->table[i];
+            if (ntohs((u_short)r.dwLocalPort) != 53) continue;
+            in_addr a;
+            a.s_addr = r.dwLocalAddr;
+            if (!r.dwLocalAddr) any = true;
+            else if (ntohl(r.dwLocalAddr) >> 24 != 127 && inet_ntop(AF_INET, &a, b, sizeof b)) *addr = b;
+        }
+    }
+    if (!addr->empty()) return true;
+    const ULONG flags = GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+    size = 0;
+    GetAdaptersAddresses(AF_INET, flags, nullptr, nullptr, &size);
+    std::vector<uint64_t> abuf(size / 8 + 1);
+    size = (ULONG)(abuf.size() * 8);
+    auto *ad = (IP_ADAPTER_ADDRESSES *)abuf.data();
+    if (GetAdaptersAddresses(AF_INET, flags, nullptr, ad, &size) == NO_ERROR)
+        for (; ad && addr->empty(); ad = ad->Next) {
+            if (ad->OperStatus != IfOperStatusUp || !ad->FirstGatewayAddress ||
+                (ad->IfType != IF_TYPE_ETHERNET_CSMACD && ad->IfType != IF_TYPE_IEEE80211))
+                continue;
+            for (auto *u = ad->FirstUnicastAddress; u && addr->empty(); u = u->Next) {
+                const auto *sin = (const sockaddr_in *)u->Address.lpSockaddr;
+                if (sin->sin_family == AF_INET && ntohl(sin->sin_addr.s_addr) >> 16 != 0xA9FE &&
+                    inet_ntop(AF_INET, &sin->sin_addr, b, sizeof b))
+                    *addr = b;
+            }
+        }
+    return any && !addr->empty();
+}
+
+// "This PC": the address found goes into the field, with whether InsigniaDNS seems to run
+void dns_find()
+{
+    std::string a;
+    bool found = find_insigniadns(&a);
+    g.dns_edit = false;
+    g.dns_note_bad = !found;
+    if (a.empty()) {
+        g.dns_note = S(Str::DnsFindNone);
+        return;
+    }
+    black_ini_set("online_insigniadns", a);
+    g.dns_note = S(found ? Str::DnsFound : Str::DnsFoundNoListener);
+}
+
+// The field typed in: kept (Enter, a click elsewhere) when it is an address, else what it was stays
+void dns_edit_end(bool keep)
+{
+    if (!g.dns_edit) return;
+    g.dns_edit = false;
+    std::string v = to_utf8(g.dns_text);
+    if (!keep || v == black_ini("online_insigniadns")) return;
+    if (ipv4(v)) {
+        black_ini_set("online_insigniadns", v);
+        g.dns_note.clear();
+    } else {
+        g.dns_note = S(Str::DnsAddrBad);
+        g.dns_note_bad = true;
+    }
 }
 
 // Check network: asks that server for AS.XBOXLIVE.COM (the game's first lookup) on a thread of its own; the answer
@@ -1762,7 +1861,8 @@ struct Painter {
              DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
 
         // DNS
-        D2D1_RECT_F c2 = {c.left, c.bottom + 12, c.right, c.bottom + 12 + 50 + 3 * 40 + 8};
+        bool pc = dns_by_pc(); // a row more: the InsigniaDNS address
+        D2D1_RECT_F c2 = {c.left, c.bottom + 12, c.right, c.bottom + 12 + 50 + (pc ? 4 : 3) * 40 + 8};
         y = card(c2, S(Str::DnsCard), help_id(Str::DnsCard));
         label(Str::DnsConsole);
         std::string mode = online_value("dns");
@@ -1772,10 +1872,24 @@ struct Painter {
         text(console, {cx, y, right, y + 30}, 13.5f, mode.empty() ? kAsh : kBone);
         y += 40;
         label(Str::DnsMode);
-        bool by_console = black_ini("online_dns_mode") == "console";
-        segmented(kHitDnsMode, cx, y, {S(Str::DnsInsignia), S(Str::DnsByConsole)}, by_console ? 1 : 0, 170);
-        text(S(by_console ? Str::DnsConsoleNote : Str::DnsInsigniaNote), {cx + 2 * 176 + 10, y - 4, right, y + 34}, 12, kAsh, 0.8f);
+        segmented(kHitDnsMode, cx, y, {S(Str::DnsInsignia), S(Str::DnsByConsole)}, pc ? 1 : 0, 170);
+        text(S(pc ? Str::DnsConsoleNote : Str::DnsInsigniaNote), {cx + 2 * 176 + 10, y - 4, right, y + 34}, 12, kAsh, 0.8f);
         y += 40;
+        if (pc) { // the address, typed (WM_CHAR) or found on this PC
+            label(Str::DnsAddr);
+            D2D1_RECT_F f = {cx, y, cx + 200, y + 30};
+            g_hits.push_back({kHitDnsAddr, f});
+            std::string addr = black_ini("online_insigniadns");
+            fill(f, kInk, 0.9f);
+            stroke(f, g.dns_edit ? kGold : g.hover == kHitDnsAddr ? kAsh : kInk3);
+            bool hint = !g.dns_edit && addr.empty();
+            text(g.dns_edit ? g.dns_text + L"\u258F" : hint ? std::wstring(S(Str::DnsAddrHint)) : from_utf8(addr),
+                 {f.left + 10, f.top, f.right - 6, f.bottom}, 13.5f, hint ? kAsh : kBone, hint ? 0.7f : 1.0f);
+            button(kHitDnsFind, {cx + 212, y, cx + 212 + 100, y + 30}, S(Str::DnsFind), false);
+            if (!g.dns_note.empty())
+                text(g.dns_note, {cx + 324, y - 5, right, y + 35}, 12, g.dns_note_bad ? kBlood : kGold);
+            y += 40;
+        }
         button(kHitNetCheck, {cx, y, cx + 170, y + 30}, S(Str::NetCheck), false, !g.net_busy);
         {
             std::lock_guard<std::mutex> l(g.net_lock);
@@ -2045,7 +2159,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         int id = hit_at(GET_X_LPARAM(lp) * scale, GET_Y_LPARAM(lp) * scale);
         if (id != g.hover) {
             g.hover = id;
-            SetCursor(LoadCursorW(nullptr, id >= 0 && id != 0x7fff ? (LPCWSTR)IDC_HAND : (LPCWSTR)IDC_ARROW));
+            SetCursor(LoadCursorW(nullptr, id == kHitDnsAddr ? (LPCWSTR)IDC_IBEAM : id >= 0 && id != 0x7fff ? (LPCWSTR)IDC_HAND : (LPCWSTR)IDC_ARROW));
             InvalidateRect(h, nullptr, FALSE);
         }
         TRACKMOUSEEVENT t = {sizeof t, TME_LEAVE, h, 0};
@@ -2058,7 +2172,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_SETCURSOR:
         if (LOWORD(lp) == HTCLIENT) {
-            SetCursor(LoadCursorW(nullptr, g.hover >= 0 && g.hover != 0x7fff ? (LPCWSTR)IDC_HAND : (LPCWSTR)IDC_ARROW));
+            SetCursor(LoadCursorW(nullptr, g.hover == kHitDnsAddr ? (LPCWSTR)IDC_IBEAM
+                                           : g.hover >= 0 && g.hover != 0x7fff ? (LPCWSTR)IDC_HAND : (LPCWSTR)IDC_ARROW));
             return TRUE;
         }
         break;
@@ -2068,6 +2183,28 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             uint16_t k = keys::from_message(wp, lp);
             if (k != VK_ESCAPE) kb_set(g.capture / 2, g.capture % 2, k == VK_DELETE ? 0 : k);
             g.capture = -1;
+            InvalidateRect(h, nullptr, FALSE);
+            return 0;
+        }
+        break;
+    case WM_CHAR: // the InsigniaDNS address being typed: digits and dots; Enter keeps it, Esc drops it, Ctrl+V pastes
+        if (g.dns_edit) {
+            auto add = [](wchar_t c) {
+                if (((c >= L'0' && c <= L'9') || c == L'.') && g.dns_text.size() < 15) g.dns_text += c;
+            };
+            wchar_t c = (wchar_t)wp;
+            if (c == L'\r') dns_edit_end(true);
+            else if (c == 27) dns_edit_end(false);
+            else if (c == L'\b') {
+                if (!g.dns_text.empty()) g.dns_text.pop_back();
+            } else if (c == 22 && OpenClipboard(h)) {
+                if (HANDLE d = GetClipboardData(CF_UNICODETEXT))
+                    if (const wchar_t *p = (const wchar_t *)GlobalLock(d)) {
+                        for (; *p; p++) add(*p);
+                        GlobalUnlock(d);
+                    }
+                CloseClipboard();
+            } else add(c);
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
@@ -2087,6 +2224,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
         int id = hit_at(GET_X_LPARAM(lp) * scale, GET_Y_LPARAM(lp) * scale);
+        if (id != kHitDnsAddr) dns_edit_end(true); // a click elsewhere ends the typing
         if (g.help) { // the panel is modal: it only closes
             if (id == kHitHelpClose) g.help = 0;
             InvalidateRect(h, nullptr, FALSE);
@@ -2193,7 +2331,17 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id >= kHitVsync && id < kHitVsync + 2) black_ini_set("vsync", id == kHitVsync ? "1" : "0");
         else if (id >= kHitHud && id < kHitHud + 2) black_ini_set("perfhud", id == kHitHud ? "1" : "0");
         else if (id >= kHitOnline && id < kHitOnline + 2) black_ini_set("online", id == kHitOnline ? "1" : "0");
-        else if (id >= kHitDnsMode && id < kHitDnsMode + 2) black_ini_set("online_dns_mode", id == kHitDnsMode ? "insignia" : "console");
+        else if (id >= kHitDnsMode && id < kHitDnsMode + 2) {
+            black_ini_set("online_dns_mode", id == kHitDnsMode ? "insignia" : "insigniadns");
+            if (id != kHitDnsMode && black_ini("online_insigniadns").empty()) dns_find(); // first time: this PC's
+        }
+        else if (id == kHitDnsAddr && !g.dns_edit) {
+            g.dns_edit = true;
+            g.dns_text = from_utf8(black_ini("online_insigniadns"));
+            g.dns_note.clear();
+            SetFocus(h);
+        }
+        else if (id == kHitDnsFind) dns_find();
         else if (id == kHitPickEeprom || id == kHitPickHdd) {
             COMDLG_FILTERSPEC spec = {S(Str::OnlineFilter), id == kHitPickEeprom ? L"*.bin;*.rom" : L"*.qcow2;*.img;*.bin"};
             std::wstring f;

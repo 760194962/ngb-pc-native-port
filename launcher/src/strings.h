@@ -271,6 +271,13 @@ enum class Str {
     HelpOnline,
     HelpDns,
     ChooseFile,
+    DnsAddr,
+    DnsAddrHint,
+    DnsFind,
+    DnsFound,
+    DnsFoundNoListener,
+    DnsFindNone,
+    DnsAddrBad,
     Count
 };
 

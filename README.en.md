@@ -198,11 +198,13 @@ code runs unchanged, as it does in xemu.
 - **Insignia's DNS** (the default, recommended): the port sends every DNS lookup of the game to Insignia's DNS
   (`46.101.64.175`; change it with `online_dns = …`), whatever xemu was set to, with no InsigniaDNS. Only inside the port;
   the console's files are not changed.
-- **As the console sets**: as in xemu. With automatic DNS it also asks Insignia's; with manual DNS it asks only the
-  addresses entered. If that is a PC running InsigniaDNS.exe (common when registering, e.g. a `192.168.x.x` primary),
-  keep it running there.
+- **InsigniaDNS**: every lookup goes to a PC running InsigniaDNS.exe, at the InsigniaDNS address entered. "This PC"
+  finds InsigniaDNS running on this PC and fills in its address. InsigniaDNS listens on the LAN address (`192.168.x.x`)
+  only; `127.0.0.1` does not work. The address is kept in the port's settings, not taken from the DNS entered in xemu,
+  so on another PC or network change it here. Use it when a proxy captures public DNS.
 
-The Console setting row shows the DNS setting of the console in xemu (automatic, or manual and the addresses).
+The Console setting row only shows the DNS setting of the console in xemu (automatic, or manual and the addresses), as
+entered there when registering. Neither way above uses it.
 
 **If it cannot connect:**
 
@@ -211,7 +213,7 @@ The Console setting row shows the DNS setting of the console in xemu (automatic,
   - `198.18.x.x`: a proxy's (Clash etc.) TUN / fake-ip mode captures DNS; turn TUN off;
   - no answer: check the network, or the InsigniaDNS on that PC.
 
-  An InsigniaDNS on a LAN address (`192.168.x.x`) is usually not captured by TUN, so with TUN on, try "As the console sets".
+  An InsigniaDNS on a LAN address (`192.168.x.x`) is usually not captured by TUN, so with TUN on, switch to "InsigniaDNS".
 - The game also shows why it cannot connect in the bottom-right corner: DNS captured, DNS not answering, xemu running,
   files not valid.
 - In the game's "cannot connect" / "repair gamertag" boxes, Ⓐ now cancels like Ⓑ. Their Ⓐ used to open the Xbox
