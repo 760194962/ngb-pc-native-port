@@ -162,25 +162,31 @@ Esc 为 Start……），在启动器的「控制」页可改，也可把手柄�
    这一页写的是游戏程序旁边的 `black.ini`（`online = 1`、`online_eeprom = …`、`online_hdd = …`），也可以直接改这个文件。
 4. **进游戏**：主菜单选「排行榜」，选自己的玩家代号即可登录，然后查看榜单。连上时画面右下角会提示「联网：已连接 Insignia」。
 
-**要不要开 InsigniaDNS？** 默认不用。「联网」页的 DNS「查询方式」：
+**要不要开 InsigniaDNS.exe？** 默认不用。先分清两个名字很像的东西：
 
-- **直接用 Insignia DNS**（默认，推荐）：游戏的所有 DNS 查询都由移植版转给 Insignia 的 DNS（`46.101.64.175`，可用 `online_dns = …`
-  改），不管 xemu 里怎么设定的，也不用开 InsigniaDNS。只在移植版里生效，不改主机文件。
-- **用 InsigniaDNS**：所有查询转给一台开着 InsigniaDNS.exe 的电脑，地址在「InsigniaDNS 地址」里填。点「找本机」会找这台
-  电脑上正在运行的 InsigniaDNS 并填上它的地址。InsigniaDNS 只在局域网地址（`192.168.x.x`）上监听，填 `127.0.0.1` 不行。
-  这个地址存在移植版的设置里，不看 xemu 里填的 DNS，所以换了电脑或网络只要在这里改。代理软件截走公网 DNS 时用这个。
+- **Insignia 公网 DNS**：Insignia 架在网上的 DNS 服务器（`46.101.64.175`），什么都不用装。
+- **本地 InsigniaDNS.exe**：从 Insignia 下载、在你电脑上运行的小程序，在这台电脑的局域网地址上回答查询。
 
-「当前 DNS」一行显示游戏实际会用的 DNS：「自动 46.101.64.175（Insignia 的 DNS）」或「手动 192.168.x.x（InsigniaDNS）」，随上面的选择变化。
+「联网」页的 DNS「查询方式」就是在这两个里选：
+
+- **Insignia 公网 DNS**（默认，推荐）：游戏的所有 DNS 查询都由移植版转给它（地址可用 `online_dns = …` 改），不管 xemu 里
+  怎么设定的，也不用开 InsigniaDNS.exe。只在移植版里生效，不改主机文件。
+- **本地 InsigniaDNS.exe**：所有查询转给一台运行 InsigniaDNS.exe 的电脑，地址在「InsigniaDNS.exe 地址」里填。点「找本机」
+  会找这台电脑上正在运行的 InsigniaDNS.exe 并填上它的地址。它只在局域网地址（`192.168.x.x`）上监听，填 `127.0.0.1` 不行。
+  这个地址存在移植版的设置里，不看 xemu 里填的 DNS，所以换了电脑或网络只要在这里改。开着代理 TUN 时用这个（见下）。
+
+「当前 DNS」一行显示游戏实际会用的 DNS：「自动 46.101.64.175（Insignia 公网 DNS）」或「手动 192.168.x.x（本地 InsigniaDNS.exe）」，随上面的选择变化。
 xemu 主机设定里填的 DNS 不用，也不再显示：移植版会把游戏的每个 DNS 查询都改发到这里显示的地址。
 
 **连不上时：**
 
 - 先按「联网」页的「检查网络」。它会用当前的查询方式问一次 `AS.XBOXLIVE.COM`：
   - 答出地址：DNS 正常；
-  - 答出 `198.18.x.x`：代理软件（Clash 等）的 TUN / fake-ip 模式截走了 DNS，先关掉 TUN；
-  - 没有回应：检查网络，或那台电脑上的 InsigniaDNS。
-  
-  局域网地址（`192.168.x.x`）上的 InsigniaDNS 一般不会被 TUN 截走，所以开着 TUN 时可以改用「用 InsigniaDNS」。
+  - 答出 `198.18.x.x`：代理软件（Clash 等）的 TUN / fake-ip 模式截走了 DNS；
+  - 没有回应：检查网络，或那台电脑上的 InsigniaDNS.exe。
+
+  被 TUN 截走时，不想关 TUN 也行：**先关 TUN，启动 InsigniaDNS.exe，再开 TUN**，然后查询方式选「本地 InsigniaDNS.exe」。
+  局域网地址（`192.168.x.x`）上的 InsigniaDNS.exe 不会被 TUN 截走。也可以直接关掉 TUN，用 Insignia 公网 DNS。
 - 游戏里也会在右下角提示连不上的原因：DNS 被截走、DNS 没有回应、xemu 正在运行、文件无效等。
 - 游戏的「无法连接 / 修复玩家代号」框里按 Ⓐ 现在和 Ⓑ 一样是取消。这些框的 Ⓐ 原本会去 Xbox 仪表板，移植版没有仪表板。
 - 日志 `black.log` 里搜 `online:` 和 `[net]`，能看到身份是否读成功、DNS 问到了什么。
@@ -199,7 +205,7 @@ xemu 主机设定里填的 DNS 不用，也不再显示：移植版会把游戏�
    xemu 和移植版里同时登录，就像一张身份证不能同时在两处刷。
 4. **换一本「电话簿」（DNS）。** 联网第一步是查「Xbox Live 的服务器在哪」，这叫 DNS，相当于查电话簿。普通电话簿里 Xbox Live
    的号码早停机了；Insignia 的电话簿把这些名字指到 Insignia 自己的服务器。不管游戏去查哪本，移植版都换成 Insignia 的：
-   「直接用 Insignia DNS」查 Insignia 官方那本；「用 InsigniaDNS」查你电脑上 InsigniaDNS.exe 那本，给代理软件截走查询时用。
+   「Insignia 公网 DNS」查 Insignia 放在网上的那本；「本地 InsigniaDNS.exe」查你电脑上那个小程序手里的那本，给代理软件截走查询时用。
 
 结果：游戏以为自己连上了当年的 Xbox Live，Insignia 以为来的是一台真 Xbox（你注册的那台），两边对上，就能登录、看排行榜。
 

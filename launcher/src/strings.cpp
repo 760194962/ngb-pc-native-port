@@ -368,26 +368,26 @@ const Pair kText[(int)Str::Count] = {
      L"Manual  "},
     {L"查询方式",
      L"Lookups"},
-    {L"直接用 Insignia DNS",
-     L"Insignia’s DNS"},
-    {L"用 InsigniaDNS",
-     L"InsigniaDNS"},
-    {L"推荐：不用开 InsigniaDNS。只在移植版里生效，不改主机文件。",
-     L"Recommended: no InsigniaDNS needed. Only inside the port; the console’s files stay as they are."},
-    {L"代理截走 DNS 时用：查询转给下面这台开着 InsigniaDNS 的电脑。",
-     L"When a proxy captures DNS: lookups go to the PC below, running InsigniaDNS."},
+    {L"Insignia 公网 DNS",
+     L"Insignia public DNS"},
+    {L"本地 InsigniaDNS.exe",
+     L"Local InsigniaDNS.exe"},
+    {L"推荐：Insignia 架在网上的服务器，不用装任何程序。",
+     L"Recommended: Insignia’s server on the internet; nothing to run."},
+    {L"开着代理 TUN 时用：查询转给下面这台运行 InsigniaDNS.exe 的电脑。",
+     L"With a proxy’s TUN on: lookups go to the PC below, running the InsigniaDNS.exe program."},
     {L"检查网络",
      L"Check network"},
     {L"正在检查…",
      L"Checking…"},
     {L"✓ DNS 正常：AS.XBOXLIVE.COM → ",
      L"✓ DNS works: AS.XBOXLIVE.COM → "},
-    {L"DNS 被代理截走（回答 %s），请关闭代理的 TUN 模式",
-     L"A proxy captures DNS (answer %s): turn its TUN mode off"},
+    {L"DNS 被代理的 TUN 截走（回答 %s）：办法见 DNS 旁的「?」",
+     L"A proxy’s TUN captures DNS (answer %s): see the “?” by DNS"},
     {L"%s 没有回应：检查网络",
      L"%s does not answer: check the network"},
-    {L"%s 没有回应：那台电脑开着 InsigniaDNS 吗？",
-     L"%s does not answer: is InsigniaDNS running on that PC?"},
+    {L"%s 没有回应：那台电脑上 InsigniaDNS.exe 开着吗？",
+     L"%s does not answer: is InsigniaDNS.exe running on that PC?"},
     {L"DNS 有回答，但没有 AS.XBOXLIVE.COM 的地址",
      L"DNS answered without an address for AS.XBOXLIVE.COM"},
     {L"登录",
@@ -396,33 +396,43 @@ const Pair kText[(int)Str::Count] = {
      L"In the game: main menu → Ranking → your gamertag; signing in happens there. No account yet: register once in xemu."},
     {L"Insignia 官网",
      L"Insignia website"},
-    {L"联网关闭，DNS 查询方式改回「直接用 Insignia DNS」。选好的 EEPROM 与硬盘镜像保留。",
-     L"Online off and lookups back to Insignia’s DNS. The chosen EEPROM and hard disk image stay."},
+    {L"联网关闭，DNS 查询方式改回「Insignia 公网 DNS」。选好的 EEPROM 与硬盘镜像保留。",
+     L"Online off and lookups back to Insignia’s public DNS. The chosen EEPROM and hard disk image stay."},
     {L"用你自己的 Insignia 账号在游戏「排行榜」里登录、查看真实榜单。移植版没有自己的账号，它借用你在 xemu 里注册好的那台「主机」：EEPROM 里有主机身份，硬盘镜像里有账号。两个文件只读，不会被修改，也不会被复制或上传到别处。\n\n默认关闭；关闭时游戏看不到网络，和以前完全一样。xemu 在运行时不会开联网，因为同一台主机不能同时登录两次。\n\n性能：集成显卡第 1 章实测，开与关都是 97.7% 的游戏速度，网络只在进入排行榜后才启动。",
      L"Sign in with your own Insignia account in the game’s Ranking menu and see the real leaderboards. The port has no account of its own: it borrows the “console” you registered in xemu (its identity is in the EEPROM, the accounts on the hard disk image). Both files are only read, never changed, copied or sent anywhere.\n\nOff by default; off, the game sees no network, exactly as before. While xemu runs the port stays offline, since one console cannot sign in twice.\n\nPerformance: measured on integrated graphics in chapter 1, 97.7% game speed both on and off; the network only starts once you open Ranking."},
-    {L"游戏登录前要先用 DNS 查到 Insignia 服务器的地址。\n\n「直接用 Insignia DNS」（推荐）：所有查询都直接转给 Insignia 的 DNS，不用开 InsigniaDNS，也不用管 xemu 里怎么设定的。\n\n「用 InsigniaDNS」：所有查询都转给一台开着 InsigniaDNS.exe 的电脑，地址在这里填，不看 xemu 里填的 DNS，所以换了电脑或网络只要改这里。点「找本机」会找这台电脑上正在运行的 InsigniaDNS；它只在局域网地址（如 192.168.x.x）上监听，127.0.0.1 不行。代理软件截走公网 DNS 时用这个。\n\n连不上时先点「检查网络」：回答是 198.18.x.x，说明代理软件（Clash 等）的 TUN 模式截走了 DNS，要先关掉。",
-     L"Before signing in the game looks up Insignia’s servers through DNS.\n\n“Insignia’s DNS” (recommended): every lookup goes straight to Insignia’s DNS, with no InsigniaDNS and whatever xemu was set to.\n\n“InsigniaDNS”: every lookup goes to a PC running InsigniaDNS.exe, at the address entered here, not the DNS entered in xemu; on another PC or network, change it here. “This PC” finds InsigniaDNS running on this PC; it listens on the LAN address (such as 192.168.x.x) only, not on 127.0.0.1. Use it when a proxy captures public DNS.\n\nIf it cannot connect, press “Check network” first: an answer of 198.18.x.x means a proxy’s (Clash etc.) TUN mode captures DNS; turn it off."},
+    {L"游戏登录前要先用 DNS 查到 Insignia 服务器的地址。下面两个名字很像，但不是一回事：\n"
+     L"· Insignia 公网 DNS：Insignia 架在网上的 DNS 服务器（46.101.64.175），什么都不用装。\n"
+     L"· 本地 InsigniaDNS.exe：从 Insignia 下载、在你电脑上运行的小程序，在这台电脑的局域网地址（如 192.168.x.x）上回答查询，127.0.0.1 不行。\n\n"
+     L"查询方式选「Insignia 公网 DNS」（推荐）：所有查询都转给它，不用开 InsigniaDNS.exe，也不管 xemu 里怎么设定。\n\n"
+     L"选「本地 InsigniaDNS.exe」：所有查询转给一台运行它的电脑，地址在这里填（「找本机」自动找）；换了电脑或网络只要改这里。\n\n"
+     L"开着代理（Clash 等）的 TUN 时，公网 DNS 会被截走（「检查网络」答出 198.18.x.x）。办法：先关 TUN，启动 InsigniaDNS.exe，再开 TUN，然后选「本地 InsigniaDNS.exe」。或者直接关掉 TUN。",
+     L"Before signing in the game looks up Insignia’s servers through DNS. Two things have nearly the same name:\n"
+     L"· Insignia’s public DNS: Insignia’s DNS server on the internet (46.101.64.175); nothing to install.\n"
+     L"· Local InsigniaDNS.exe: a small program from Insignia running on your PC; it answers on that PC’s LAN address (such as 192.168.x.x), not on 127.0.0.1.\n\n"
+     L"“Insignia public DNS” (recommended): every lookup goes to it, with no InsigniaDNS.exe and whatever xemu was set to.\n\n"
+     L"“Local InsigniaDNS.exe”: every lookup goes to a PC running it, at the address entered here (“This PC” finds it); on another PC or network, change it here.\n\n"
+     L"With a proxy’s (Clash etc.) TUN on, public DNS is captured (Check network answers 198.18.x.x). Turn TUN off, start InsigniaDNS.exe, turn TUN back on, then choose “Local InsigniaDNS.exe”. Or just turn TUN off."},
     {L"选择文件…", L"Choose file…"},
-    {L"InsigniaDNS 地址",
-     L"InsigniaDNS address"},
+    {L"InsigniaDNS.exe 地址",
+     L"InsigniaDNS.exe address"},
     {L"点这里填地址",
      L"Click to enter"},
     {L"找本机",
      L"This PC"},
-    {L"✓ 找到本机正在运行的 InsigniaDNS",
-     L"✓ InsigniaDNS is running on this PC"},
-    {L"本机没有在运行的 InsigniaDNS，先填了本机地址：记得打开它",
-     L"No InsigniaDNS running here; this PC’s address is filled in: start it"},
+    {L"✓ 找到本机正在运行的 InsigniaDNS.exe",
+     L"✓ InsigniaDNS.exe is running on this PC"},
+    {L"本机没有在运行的 InsigniaDNS.exe，先填了本机地址：记得打开它",
+     L"No InsigniaDNS.exe running here; this PC’s address is filled in: start it"},
     {L"找不到本机的网络地址",
      L"No network address found for this PC"},
     {L"地址格式不对，例如 192.168.1.10",
      L"Not an address, e.g. 192.168.1.10"},
-    {L"（Insignia 的 DNS）",
-     L" (Insignia’s DNS)"},
-    {L"（InsigniaDNS）",
-     L" (InsigniaDNS)"},
-    {L"（还没填 InsigniaDNS 地址，先用 Insignia 的 DNS）",
-     L" (no InsigniaDNS address yet: Insignia’s DNS for now)"},
+    {L"（Insignia 公网 DNS）",
+     L" (Insignia’s public DNS)"},
+    {L"（本地 InsigniaDNS.exe）",
+     L" (local InsigniaDNS.exe)"},
+    {L"（还没填 InsigniaDNS.exe 地址，先用 Insignia 公网 DNS）",
+     L" (no InsigniaDNS.exe address yet: Insignia’s public DNS for now)"},
     {L"（xemu 主机设定里的）",
      L" (from the console’s setting in xemu)"},
     {L"注册步骤",
@@ -430,15 +440,15 @@ const Pair kText[(int)Str::Count] = {
     {L"在 xemu 里注册 Insignia（只需一次）",
      L"Registering with Insignia in xemu (once)"},
     {L"第 1 步　准备 xemu：网络设为启用（NAT）。开机后在仪表板「设置 → 系统信息」看版本，应为 1.00.5960；不是的话进一款支持 Xbox Live 的游戏选「Xbox Live」，会自动升级。\n\n"
-     L"第 2 步　注册主机：按 Insignia 官网的连接指南取得 Insignia Setup Assistant，在 xemu 里运行，选 Register。提示 DNS 被劫持时，在电脑上运行 insigniaDNS.exe，主机的主 DNS 填这台电脑的局域网地址。\n\n"
-     L"第 3 步　设 DNS：仪表板「网络设置」里主 DNS 填 46.101.64.175，次 DNS 填 1.1.1.1，做一次连接测试。\n\n"
+     L"第 2 步　注册主机：按 Insignia 官网的连接指南取得 Insignia Setup Assistant，在 xemu 里运行，选 Register。提示 DNS 被劫持时，在电脑上运行 InsigniaDNS.exe 程序，主机的主 DNS 填这台电脑的局域网地址；开着代理 TUN 的话，先关 TUN，启动 InsigniaDNS.exe，再开 TUN。\n\n"
+     L"第 3 步　设 DNS：仪表板「网络设置」里主 DNS 填 46.101.64.175（Insignia 公网 DNS），次 DNS 填 1.1.1.1，做一次连接测试。\n\n"
      L"第 4 步　申请订阅码：在 insignia.live 首页填邮箱，订阅码会发到邮箱。\n\n"
      L"第 5 步　建账号：在仪表板上选国家、取玩家代号、填订阅码。服务免费，信用卡一步按官网说明填测试卡号 4111 1111 1111 1111 和假资料，不要填真卡；账单邮箱要和申请订阅码时一样。最后设一个通行码。\n\n"
      L"第 6 步　回到这里：关掉 xemu，在上面选 xemu 用的 EEPROM（如 eeprom.bin）和硬盘镜像（如 xbox_hdd.qcow2），位置在 xemu 设置的「系统」页。「主机」一行显示已注册和玩家代号就成了。\n\n"
      L"建议先备份这两个文件。xemu 里的具体操作以 Insignia 官网和它的 Discord 为准。",
      L"1  Prepare xemu: enable networking (NAT). On the dashboard, Settings → System Info should show 1.00.5960; if not, start a game with Xbox Live and choose Xbox Live to update.\n\n"
-     L"2  Register the console: get the Insignia Setup Assistant as Insignia’s connection guide says, run it in xemu and choose Register. If it reports DNS hijacking, run insigniaDNS.exe on a PC and set the console’s primary DNS to that PC’s LAN address.\n\n"
-     L"3  Set DNS: in the dashboard’s network settings, primary DNS 46.101.64.175, secondary 1.1.1.1; run a connection test.\n\n"
+     L"2  Register the console: get the Insignia Setup Assistant as Insignia’s connection guide says, run it in xemu and choose Register. If it reports DNS hijacking, run the InsigniaDNS.exe program on a PC and set the console’s primary DNS to that PC’s LAN address; with a proxy’s TUN on, turn TUN off, start InsigniaDNS.exe, then turn TUN back on.\n\n"
+     L"3  Set DNS: in the dashboard’s network settings, primary DNS 46.101.64.175 (Insignia’s public DNS), secondary 1.1.1.1; run a connection test.\n\n"
      L"4  Get a subscription code: enter your email on insignia.live; the code is emailed to you.\n\n"
      L"5  Create the account on the dashboard: country, gamertag, the code. The service is free: at the card step use the test number 4111 1111 1111 1111 and made-up details, as the guide says, never a real card; the billing email must be the one you got the code with. Then set a pass code.\n\n"
      L"6  Back here: close xemu and choose its EEPROM (e.g. eeprom.bin) and hard disk image (e.g. xbox_hdd.qcow2) above; xemu’s System settings show where they are. The Console row then shows registered and your gamertag.\n\n"

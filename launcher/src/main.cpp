@@ -1229,10 +1229,11 @@ struct Painter {
         g_hits.push_back({kHitHelpClose, {0, 0, kW, kH}}); // a click outside the panel closes it (the panel's own hits come later)
         bool image = g.help == kHitHelpImage, setting = g.help >= kHitHelpSet && g.help < kHitHelpSet + kSettingHelpCount;
         bool reg = g.help == kHitHelpRegister; // the registration steps: a larger panel
+        bool big = reg || (setting && kSettingHelp[g.help - kHitHelpSet].label == Str::DnsCard); // so is DNS's
         Str title = setting ? kSettingHelp[g.help - kHitHelpSet].label : image ? Str::FromImage : reg ? Str::RegisterTitle : Str::InstalledGame;
         Str body_text = setting ? kSettingHelp[g.help - kHitHelpSet].help : image ? Str::HelpFromImage
                       : reg ? Str::HelpRegister : Str::HelpInstalled;
-        const float pw = reg ? 820.0f : 640.0f, ph = reg ? 640.0f : 460.0f, px = (kW - pw) / 2, py = (kH - ph) / 2;
+        const float pw = big ? 820.0f : 640.0f, ph = big ? 640.0f : 460.0f, px = (kW - pw) / 2, py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
         stroke(p, kInk3, 1.0f, 6);

@@ -145,6 +145,28 @@ DNS 卡第一行原来显示硬盘镜像里的主机设定（如「手动 192.16
 选了「用 InsigniaDNS」但地址为空时用红字显示「自动 46.101.64.175（还没填 InsigniaDNS 地址，先用 Insignia 的 DNS）」，和游戏
 的回退一致。三种情况截图核对过。
 
+## 两个 DNS 的叫法；开着 TUN 时（2026-10-23）
+
+用户：「对 Insignia 公网 DNS 和本机通过 InsigniaDNS.exe 启动的解析服务的介绍或者描述做一个区分，否则用户会傻傻分不清」。
+原来的两个选项是「直接用 Insignia DNS」和「用 InsigniaDNS」，只差一个空格。统一改为：
+
+- **Insignia 公网 DNS**：Insignia 架在网上的服务器 46.101.64.175（`online_dns_mode = insignia`）。
+- **本地 InsigniaDNS.exe**：电脑上运行的程序，在局域网地址上回答（`online_dns_mode = insigniadns`）。
+
+启动器（选项、说明、「当前 DNS」、地址行、检查结果、注册步骤）、游戏内提示、README 都用这两个名字；DNS 的「?」面板
+开头先讲两者的区别，面板改为与「注册步骤」一样大。设置文件里的值不变。
+
+用户纠正：开着代理 TUN 时公网 DNS 被截走，**先关 TUN，启动 InsigniaDNS.exe，再开 TUN** 就不受影响，然后选「本地
+InsigniaDNS.exe」。原先只写了「关掉 TUN」。提示「DNS 被代理的 TUN 截走」改为指向这个办法。
+
+证据：
+- **r460**（Clash TUN 开着，默认公网 DNS）：`DNS query AS.XBOXLIVE.COM to 46.101.64.175`，回答被截成 198.18.0.252，
+  日志 `shown to the player: 联网：DNS 被代理的 TUN 截走（198.18.x.x）：改用本地 InsigniaDNS.exe 或关掉 TUN`。
+- **r461**（同样开着 TUN；本机 InsigniaDNS.exe 在 192.168.2.8:53，`--online-dns-mode insigniadns --online-insigniadns
+  192.168.2.8`）：AS / MACS / TGS.XBOXLIVE.COM → 49.13.57.101，88 与 3074 有回包，提示「联网：已连接 Insignia」。
+- 启动器截图：中英文的 DNS 卡、两种方式、「?」面板、注册步骤，文字都没有被截断。
+- 性能：只改了文字，不在每帧的路径上。
+
 ## 未完成 / 已知问题
 
 - 用户测试时切到后台后画面变黑（游戏仍在出帧、能操作；那次是强制集显的测试版，窗口在另一块显示器上）；尚未查明，用户

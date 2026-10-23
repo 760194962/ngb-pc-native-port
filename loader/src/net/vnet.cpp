@@ -302,7 +302,7 @@ void dns_answer_log(const uint8_t *d, size_t len)
         if (type == 1 && rdlen == 4 && i + 14 <= len) {
             ips += (ips.empty() ? "" : ", ") + ip_str(rd32(d + i + 10));
             if ((rd32(d + i + 10) & 0xFFFE0000) == 0xC6120000) // 198.18.0.0/15: a proxy's fake-ip answer, not Insignia's
-                tell(TELL_FAKE_DNS, L"联网：DNS 被代理软件截走（198.18.x.x），请关闭代理的 TUN 模式");
+                tell(TELL_FAKE_DNS, L"联网：DNS 被代理的 TUN 截走（198.18.x.x）：改用本地 InsigniaDNS.exe 或关掉 TUN");
         }
         i += 10 + rdlen;
     }
@@ -345,8 +345,8 @@ void expire()
             uint32_t server = kv.second.dns_server == DNS_IP || !g_cfg.online_dns_console ? g_dns_server : kv.second.dns_server;
             logf("[net] DNS: no answer from %s in 4 s", ip_str(server).c_str());
             std::wstring text = (g_cfg.online_dns_console && server != g_dns_server) || g_dns_pc
-                ? L"联网：DNS " + widen(ip_str(server)) + L" 没有回应（那台电脑开着 InsigniaDNS 吗？）"
-                : L"联网：Insignia 的 DNS 没有回应，请检查网络";
+                ? L"联网：DNS " + widen(ip_str(server)) + L" 没有回应（那台电脑上 InsigniaDNS.exe 开着吗？）"
+                : L"联网：Insignia 公网 DNS 没有回应，请检查网络";
             tell(TELL_DNS_SILENT, text.c_str());
             kv.second.asked = 0;
         }
@@ -424,7 +424,7 @@ void vnet_start()
     if (g_cfg.online_dns_pc && !g_dns_pc) { // no address (or not an IPv4 one): Insignia's instead
         g_dns_server = 0x2E6540AF;
         logf("[net] online_insigniadns \"%s\" is not an IPv4 address: DNS goes to Insignia's", dns.c_str());
-        tell(TELL_DNS_SILENT, L"联网：InsigniaDNS 的地址无效，改用 Insignia 的 DNS");
+        tell(TELL_DNS_SILENT, L"联网：InsigniaDNS.exe 的地址无效，改用 Insignia 公网 DNS");
     }
     logf("[net] virtual network up: Xbox 10.0.2.15, gateway 10.0.2.2, DNS relay to %s (%s)", ip_str(g_dns_server).c_str(),
          g_cfg.online_dns_console ? "10.0.2.3 only; other servers as the console's settings name them"

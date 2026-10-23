@@ -194,28 +194,35 @@ code runs unchanged, as it does in xemu.
 4. **In the game**: main menu → Ranking, pick your gamertag to sign in, and view the leaderboards. When it connects, the
    picture's bottom-right corner says so.
 
-**Do you need InsigniaDNS?** Not by default. The Online page's DNS "Lookups":
+**Do you need InsigniaDNS.exe?** Not by default. First, two things with nearly the same name:
 
-- **Insignia's DNS** (the default, recommended): the port sends every DNS lookup of the game to Insignia's DNS
-  (`46.101.64.175`; change it with `online_dns = …`), whatever xemu was set to, with no InsigniaDNS. Only inside the port;
-  the console's files are not changed.
-- **InsigniaDNS**: every lookup goes to a PC running InsigniaDNS.exe, at the InsigniaDNS address entered. "This PC"
-  finds InsigniaDNS running on this PC and fills in its address. InsigniaDNS listens on the LAN address (`192.168.x.x`)
-  only; `127.0.0.1` does not work. The address is kept in the port's settings, not taken from the DNS entered in xemu,
-  so on another PC or network change it here. Use it when a proxy captures public DNS.
+- **Insignia's public DNS**: Insignia's DNS server on the internet (`46.101.64.175`); nothing to install.
+- **Local InsigniaDNS.exe**: a small program from Insignia running on your PC; it answers on that PC's LAN address.
 
-The DNS in use row shows the DNS the game will actually use: "Automatic 46.101.64.175 (Insignia's DNS)" or "Manual
-192.168.x.x (InsigniaDNS)", following the choice above. The DNS entered in the console's setting in xemu is not used and
+The Online page's DNS "Lookups" choose between them:
+
+- **Insignia public DNS** (the default, recommended): the port sends every DNS lookup of the game to it (change the
+  address with `online_dns = …`), whatever xemu was set to, with no InsigniaDNS.exe. Only inside the port; the
+  console's files are not changed.
+- **Local InsigniaDNS.exe**: every lookup goes to a PC running InsigniaDNS.exe, at the InsigniaDNS.exe address entered.
+  "This PC" finds InsigniaDNS.exe running on this PC and fills in its address. It listens on the LAN address
+  (`192.168.x.x`) only; `127.0.0.1` does not work. The address is kept in the port's settings, not taken from the DNS
+  entered in xemu, so on another PC or network change it here. Use it with a proxy's TUN on (see below).
+
+The DNS in use row shows the DNS the game will actually use: "Automatic 46.101.64.175 (Insignia's public DNS)" or
+"Manual 192.168.x.x (local InsigniaDNS.exe)", following the choice above. The DNS entered in the console's setting in xemu is not used and
 no longer shown: the port sends every DNS lookup of the game to the address shown here.
 
 **If it cannot connect:**
 
 - Press Check network on the Online page first. It asks for `AS.XBOXLIVE.COM` the way the lookups are set:
   - an address: DNS works;
-  - `198.18.x.x`: a proxy's (Clash etc.) TUN / fake-ip mode captures DNS; turn TUN off;
-  - no answer: check the network, or the InsigniaDNS on that PC.
+  - `198.18.x.x`: a proxy's (Clash etc.) TUN / fake-ip mode captures DNS;
+  - no answer: check the network, or the InsigniaDNS.exe on that PC.
 
-  An InsigniaDNS on a LAN address (`192.168.x.x`) is usually not captured by TUN, so with TUN on, switch to "InsigniaDNS".
+  To keep TUN on: **turn TUN off, start InsigniaDNS.exe, turn TUN back on**, then choose "Local InsigniaDNS.exe".
+  InsigniaDNS.exe on a LAN address (`192.168.x.x`) is not captured by TUN. Or just turn TUN off and use Insignia's
+  public DNS.
 - The game also shows why it cannot connect in the bottom-right corner: DNS captured, DNS not answering, xemu running,
   files not valid.
 - In the game's "cannot connect" / "repair gamertag" boxes, Ⓐ now cancels like Ⓑ. Their Ⓐ used to open the Xbox
@@ -239,8 +246,9 @@ Live so that old games can go online again. To reach it, the port does four thin
    console cannot sign in from xemu and the port at the same time, as one ID card cannot be shown in two places at once.
 4. **Another phone book (DNS).** The first step online is looking up where the Xbox Live servers are: DNS, a phone book.
    In an ordinary phone book, Xbox Live's numbers were disconnected long ago; Insignia's phone book points those names at
-   Insignia's own servers. Whichever book the game asks, the port asks Insignia's instead: "Insignia's DNS" uses
-   Insignia's public one; "InsigniaDNS" uses the copy InsigniaDNS.exe keeps on your PC, for when a proxy captures lookups.
+   Insignia's own servers. Whichever book the game asks, the port asks Insignia's instead: "Insignia public DNS" uses
+   the one Insignia keeps on the internet; "Local InsigniaDNS.exe" uses the one the small program on your PC keeps, for
+   when a proxy captures lookups.
 
 So the game believes it reached the old Xbox Live, and Insignia believes a real Xbox (the one you registered) is calling;
 the two match, and you can sign in and see the leaderboards.
