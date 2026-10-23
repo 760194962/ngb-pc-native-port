@@ -203,8 +203,9 @@ code runs unchanged, as it does in xemu.
   only; `127.0.0.1` does not work. The address is kept in the port's settings, not taken from the DNS entered in xemu,
   so on another PC or network change it here. Use it when a proxy captures public DNS.
 
-The Console setting row only shows the DNS setting of the console in xemu (automatic, or manual and the addresses), as
-entered there when registering. Neither way above uses it.
+The DNS in use row shows the DNS the game will actually use: "Automatic 46.101.64.175 (Insignia's DNS)" or "Manual
+192.168.x.x (InsigniaDNS)", following the choice above. The DNS entered in the console's setting in xemu is not used and
+no longer shown: the port sends every DNS lookup of the game to the address shown here.
 
 **If it cannot connect:**
 

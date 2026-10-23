@@ -1864,12 +1864,14 @@ struct Painter {
         bool pc = dns_by_pc(); // a row more: the InsigniaDNS address
         D2D1_RECT_F c2 = {c.left, c.bottom + 12, c.right, c.bottom + 12 + 50 + (pc ? 4 : 3) * 40 + 8};
         y = card(c2, S(Str::DnsCard), help_id(Str::DnsCard));
+        // the DNS the game will use, as chosen below (not the console's own setting: the port redirects every lookup)
         label(Str::DnsConsole);
-        std::string mode = online_value("dns");
-        std::wstring console = mode.empty() ? L"\u2014"
-                             : mode == "manual" ? S(Str::DnsManual) + from_utf8(online_value("dns1")) + L" / " + from_utf8(online_value("dns2"))
-                                                : std::wstring(S(Str::DnsAuto));
-        text(console, {cx, y, right, y + 30}, 13.5f, mode.empty() ? kAsh : kBone);
+        bool by_pc = false;
+        std::wstring server = from_utf8(dns_server(&by_pc));
+        bool no_addr = !by_pc && black_ini("online_dns_mode") == "insigniadns"; // the game falls back to Insignia's
+        Str whose = no_addr ? Str::DnsFallback : !by_pc ? Str::DnsInsigniaOwn
+                  : black_ini("online_dns_mode") == "console" ? Str::DnsLegacy : Str::DnsPc;
+        text(S(by_pc ? Str::DnsManual : Str::DnsAuto) + server + S(whose), {cx, y, right, y + 30}, 13.5f, no_addr ? kBlood : kBone);
         y += 40;
         label(Str::DnsMode);
         segmented(kHitDnsMode, cx, y, {S(Str::DnsInsignia), S(Str::DnsByConsole)}, pc ? 1 : 0, 170);

@@ -278,6 +278,10 @@ enum class Str {
     DnsFoundNoListener,
     DnsFindNone,
     DnsAddrBad,
+    DnsInsigniaOwn,
+    DnsPc,
+    DnsFallback,
+    DnsLegacy,
     Count
 };
 

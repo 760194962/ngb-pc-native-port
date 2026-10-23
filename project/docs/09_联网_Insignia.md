@@ -89,7 +89,7 @@ online_dns_mode = insignia     # 默认：所有 DNS 查询转给 online_dns；i
 
 | 部分 | 文件 | 说明 |
 |---|---|---|
-| 启动器「联网」页 | `launcher/src/main.cpp`、`strings.*` | 开关；EEPROM / 硬盘镜像选文件；「主机」行显示检查结果（身份有效、已注册、账号）；DNS 卡：主机设定（自动 / 手动及地址）、查询方式（直接用 Insignia DNS / 用 InsigniaDNS，后者多一行地址框与「找本机」；最初是「按主机设定」，见下文「InsigniaDNS 地址」）、「检查网络」；登录说明与 Insignia 官网链接；两个「?」帮助；保存 / 放弃 / 恢复默认与其他设定页相同 |
+| 启动器「联网」页 | `launcher/src/main.cpp`、`strings.*` | 开关；EEPROM / 硬盘镜像选文件；「主机」行显示检查结果（身份有效、已注册、账号）；DNS 卡：当前 DNS（游戏实际会用的：自动＝Insignia 的，手动＝填的 InsigniaDNS；最初显示的是主机设定，用户觉得没有意义，2026-10-23 改）、查询方式（直接用 Insignia DNS / 用 InsigniaDNS，后者多一行地址框与「找本机」；最初是「按主机设定」，见下文「InsigniaDNS 地址」）、「检查网络」；登录说明与 Insignia 官网链接；两个「?」帮助；保存 / 放弃 / 恢复默认与其他设定页相同 |
 | 检查 | `net/online.cpp` `online_check` | 启动器以 `--online-check` 调游戏程序（隐藏窗口），复用同一套解密与 qcow2 读取；输出只有：EEPROM ok / invalid / unreadable、硬盘 ok / 原因、registered、account（扇区 10–31 偏移 24 的玩家代号）、dns auto / manual 与两个地址、xemu 是否在运行。不含密钥、序列号、MAC |
 | 主机 DNS 设定 | 同上 | 配置区第 8 扇区：偏移 76 的标志位 8 = 手动 DNS，96 / 100 两个 DNS（用户的盘：标志 8、192.168.2.8 / 1.1.1.1，与 InsigniaDNS 窗口里的主机设定一致）。标志位 8 的含义只由这一块盘推断，还没有拿自动 DNS 的盘对照过 |
 | 检查网络 | `launcher/src/main.cpp` `net_check` | 在单独线程里按当前查询方式向那台 DNS 问 `AS.XBOXLIVE.COM`，3 秒超时：答出地址＝正常；198.18.0.0/15＝代理 TUN；无回应＝网络或 InsigniaDNS |
@@ -138,6 +138,12 @@ online_dns_mode = insignia     # 默认：所有 DNS 查询转给 online_dns；i
   都有回包，提示「联网：已连接 Insignia」，排行榜显示成绩。
 - **r455：** 地址 `1.2.3`：日志 `is not an IPv4 address: DNS goes to Insignia's`，转发到 46.101.64.175，提示「InsigniaDNS 的地址无效」。
 - 性能：只改了联网启动时选 DNS 地址与启动器，不在每帧的路径上；联网关闭时不执行。
+
+「当前 DNS」（2026-10-23，用户：「哪一行既然没有意义就不要显示，直接显示我们当前真实的 dns 和真实的自动或手动」）：
+DNS 卡第一行原来显示硬盘镜像里的主机设定（如「手动 192.168.100.7 / 1.1.1.1」），不随查询方式变化，两种方式也都不用它。
+现在显示 `dns_server` 算出的地址：「自动 46.101.64.175（Insignia 的 DNS）」、「手动 192.168.2.8（InsigniaDNS）」，
+选了「用 InsigniaDNS」但地址为空时用红字显示「自动 46.101.64.175（还没填 InsigniaDNS 地址，先用 Insignia 的 DNS）」，和游戏
+的回退一致。三种情况截图核对过。
 
 ## 未完成 / 已知问题
 
