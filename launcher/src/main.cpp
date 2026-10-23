@@ -58,6 +58,7 @@ struct App {
     IWICImagingFactory *wic = nullptr;
     ID2D1HwndRenderTarget *rt = nullptr;
     IWICBitmapSource *hero_src = nullptr, *texture_src = nullptr; // decoded once, made into bitmaps per target
+    IWICBitmapSource *pay_src[2] = {}; // the author's WeChat Pay and Alipay codes (the About page's sponsor panel)
     Page page = kStart;
     int hover = -1; // hit id under the mouse
     bool pressed = false;
@@ -117,7 +118,7 @@ enum {
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitResList = 300, kHitShadow = 320, kHitAniso = 340,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
-    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister
+    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister, kHitSponsor
 };
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -907,6 +908,7 @@ struct ListShape {
 struct Painter {
     ID2D1RenderTarget *rt;
     ID2D1Bitmap *hero = nullptr, *texture = nullptr;
+    ID2D1Bitmap *const *pay = nullptr; // [2]: WeChat Pay, Alipay
     std::function<void()> overlay; // an open drop-down list, drawn after the page
 
     void text(const std::wstring &s, D2D1_RECT_F r, float size, uint32_t color, float alpha = 1.0f,
@@ -1229,11 +1231,14 @@ struct Painter {
         g_hits.push_back({kHitHelpClose, {0, 0, kW, kH}}); // a click outside the panel closes it (the panel's own hits come later)
         bool image = g.help == kHitHelpImage, setting = g.help >= kHitHelpSet && g.help < kHitHelpSet + kSettingHelpCount;
         bool reg = g.help == kHitHelpRegister; // the registration steps: a larger panel
+        bool sponsor = g.help == kHitSponsor;  // the text, then the two payment codes side by side: larger still
         bool big = reg || (setting && kSettingHelp[g.help - kHitHelpSet].label == Str::DnsCard); // so is DNS's
-        Str title = setting ? kSettingHelp[g.help - kHitHelpSet].label : image ? Str::FromImage : reg ? Str::RegisterTitle : Str::InstalledGame;
+        Str title = setting ? kSettingHelp[g.help - kHitHelpSet].label : image ? Str::FromImage : reg ? Str::RegisterTitle
+                  : sponsor ? Str::SponsorTitle : Str::InstalledGame;
         Str body_text = setting ? kSettingHelp[g.help - kHitHelpSet].help : image ? Str::HelpFromImage
-                      : reg ? Str::HelpRegister : Str::HelpInstalled;
-        const float pw = big ? 820.0f : 640.0f, ph = big ? 640.0f : 460.0f, px = (kW - pw) / 2, py = (kH - ph) / 2;
+                      : reg ? Str::HelpRegister : sponsor ? Str::SponsorText : Str::HelpInstalled;
+        const float pw = big || sponsor ? 820.0f : 640.0f, ph = sponsor ? 680.0f : big ? 640.0f : 460.0f, px = (kW - pw) / 2,
+                    py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
         stroke(p, kInk3, 1.0f, 6);
@@ -1241,7 +1246,18 @@ struct Painter {
         g_hits.push_back({0x7fff, p}); // inside the panel: nothing (the topmost hit wins over the close area)
         text(S(title), {p.left + 34, p.top + 22, p.right - 30, p.top + 58}, 19, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({p.left + 34, p.top + 62, p.left + 64, p.top + 64}, kBlood);
-        D2D1_RECT_F body = {p.left + 34, p.top + 78, p.right - 34, p.bottom - 74};
+        D2D1_RECT_F body = {p.left + 34, p.top + 78, p.right - 34, sponsor ? p.top + 272 : p.bottom - 74};
+        if (sponsor && pay) { // each code at its own aspect, bottoms aligned, left of the button
+            float x = p.left + 34;
+            const float top = p.top + 280, bottom = p.bottom - 24;
+            for (int i = 0; i < 2; i++) {
+                if (!pay[i]) continue;
+                D2D1_SIZE_F sz = pay[i]->GetSize();
+                float w = (bottom - top) * sz.width / sz.height;
+                rt->DrawBitmap(pay[i], {x, top, x + w, bottom}, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                x += w + 30;
+            }
+        }
         IDWriteTextFormat *fmt = nullptr;
         if (SUCCEEDED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr,
                                              DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14,
@@ -1769,6 +1785,7 @@ struct Painter {
         fill({x, 102, x + 36, 104}, kBlood);
         D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 52 + 8 * 31 + 6};
         float y = card(c, S(Str::AboutTitle));
+        button(kHitSponsor, {c.right - 170, c.top + 12, c.right - 20, c.top + 42}, S(Str::Sponsor), false);
         text(S(Str::AboutDesc), {lx, y, c.right - 20, y + 48}, 13.5f, kBone, 0.92f);
         y += 52;
         auto row = [&](Str label, const std::wstring &v, int link) { // link: kLinks index to open on a click, or -1
@@ -1957,21 +1974,24 @@ void paint()
         g.rt->SetDpi(dpi, dpi);
         g.rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     }
-    static ID2D1Bitmap *hero, *texture;
+    static ID2D1Bitmap *hero, *texture, *pay[2];
     static ID2D1RenderTarget *made_for;
     if (made_for != g.rt) {
         release(hero);
         release(texture);
+        for (auto &b : pay) release(b);
         hero = to_bitmap(g.rt, g.hero_src);
         texture = to_bitmap(g.rt, g.texture_src);
+        for (int i = 0; i < 2; i++) pay[i] = to_bitmap(g.rt, g.pay_src[i]);
         made_for = g.rt;
     }
     g.rt->BeginDraw();
-    Painter p{g.rt, hero, texture};
+    Painter p{g.rt, hero, texture, pay};
     p.draw();
     if (g.rt->EndDraw() == D2DERR_RECREATE_TARGET) {
         release(hero);
         release(texture);
+        for (auto &b : pay) release(b);
         release(g.rt);
         made_for = nullptr;
     }
@@ -2282,7 +2302,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
-        if (id == kHitHelpImage || id == kHitHelpInstalled || id == kHitHelpRegister || (id >= kHitHelpSet && id < kHitHelpSet + kSettingHelpCount)) g.help = id;
+        if (id == kHitHelpImage || id == kHitHelpInstalled || id == kHitHelpRegister || id == kHitSponsor || (id >= kHitHelpSet && id < kHitHelpSet + kSettingHelpCount)) g.help = id;
         else if (id >= 0 && id < kPageCount) {
             g.page = (Page)id;
             if (g.page == kSaves) g.saves_read = false; // read the disk again when the page is opened
@@ -2397,8 +2417,9 @@ int snap(const wchar_t *out, int page)
         D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
     if (FAILED(g.d2d->CreateWicBitmapRenderTarget(bmp, p, &rt))) return 1;
     ID2D1Bitmap *hero = to_bitmap(rt, g.hero_src), *texture = to_bitmap(rt, g.texture_src);
+    ID2D1Bitmap *pay[2] = {to_bitmap(rt, g.pay_src[0]), to_bitmap(rt, g.pay_src[1])};
     rt->BeginDraw();
-    Painter pt{rt, hero, texture};
+    Painter pt{rt, hero, texture, pay};
     pt.draw();
     HRESULT hr = rt->EndDraw();
     IWICStream *st = nullptr;
@@ -2414,6 +2435,7 @@ int snap(const wchar_t *out, int page)
     release(st);
     release(hero);
     release(texture);
+    for (auto *b : pay) release(b);
     release(rt);
     release(bmp);
     return SUCCEEDED(hr) ? 0 : 1;
@@ -2441,6 +2463,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
         return 1;
     g.hero_src = load_jpeg(IDR_HERO);
     g.texture_src = load_jpeg(IDR_TEXTURE);
+    g.pay_src[0] = load_jpeg(IDR_PAY_WECHAT);
+    g.pay_src[1] = load_jpeg(IDR_PAY_ALIPAY);
 
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -2472,10 +2496,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
                           : !wcscmp(argv[i + 1], L"aniso")  ? kHitAniso
                           : !wcscmp(argv[i + 1], L"padmap") ? kHitPadMap
                                                             : kHitResList;
-        if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed | register | 0..12 a setting's)
+        if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed | register | sponsor | 0..12 a setting's)
             g.help = !wcscmp(argv[i + 1], L"image")       ? kHitHelpImage
                      : !wcscmp(argv[i + 1], L"installed") ? kHitHelpInstalled
                      : !wcscmp(argv[i + 1], L"register")  ? kHitHelpRegister
+                     : !wcscmp(argv[i + 1], L"sponsor")   ? kHitSponsor
                                                           : kHitHelpSet + _wtoi(argv[i + 1]);
         if (!wcscmp(argv[i], L"--game") && i + 1 < argc) { // with --snap: this game folder
             g.game = std::wstring(argv[i + 1]) + L"\\default.xbe";

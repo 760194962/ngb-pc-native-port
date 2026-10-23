@@ -3,3 +3,5 @@
 
 IDR_HERO    RCDATA "../art/hero.jpg"
 IDR_TEXTURE RCDATA "../art/texture.jpg"
+IDR_PAY_WECHAT RCDATA "../art/pay_wechat.jpg"
+IDR_PAY_ALIPAY RCDATA "../art/pay_alipay.jpg"

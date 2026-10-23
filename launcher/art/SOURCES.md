@@ -18,3 +18,10 @@ The Dragon Sword from the game's pause menu (weapons page): its texture dumped f
 loader's `trace`, made into an .ico (sizes 16 to 256) for the local builds on 2026-10-22, then put into the repository
 and the release at the author's decision the same day ("仍用龙剑图标"). SHA-256 (first 20 hex): `eb6e2b63165e62171b14`.
 Both programs carry it through PORT_ICON (loader/CMakeLists.txt). The artwork is Koei Tecmo's.
+
+## `pay_wechat.jpg`, `pay_alipay.jpg`: the author's payment codes
+
+The author's own WeChat Pay and Alipay receiving codes, given on 2026-10-23 for the About page's "请作者喝杯茶" panel
+("如果玩家有兴趣赞助，请备注姓名"), published as they are at the author's decision ("照原样发吧"). The WeChat one is the file as
+given (828x1124); the Alipay one is the given 1708x2560 image halved to 854x1280 (JPEG quality 92). SHA-256 (first 20
+hex): `pay_wechat.jpg` `d05784b833486a388ebf`, `pay_alipay.jpg` `f6acafe36eba4b25cdda`.

@@ -100,7 +100,7 @@ XInput come with Windows, and the C++ runtime is built into the programs.
 3. Adjust the Display, Graphics and Controls pages if you like (changes apply once saved; each "?" explains its
    setting), then start from the Play page.
 
-The Saves page backs up and restores saves and imports from / exports to xRevive; About has the version and the legal note.
+The Saves page backs up and restores saves and imports from / exports to xRevive; About has the version, the legal note and "Buy me a tea" (the author's WeChat Pay and Alipay codes; giving is entirely optional).
 
 **With run.bat (for development)**: `run.bat` in the repository root starts the game directly, without the launcher,
 from this layout:
@@ -324,7 +324,8 @@ Microsoft Xbox Development Kit. Please use your own legally obtained copy of the
 
 The exceptions are the pictures in `launcher/art/`: the launcher's background art, taken from the author's own
 website (its Ryu Hayabusa key art is Koei Tecmo's), and the programs' icon, the game's Dragon Sword texture. Both are
-used only as the interface of this non-commercial fan port; the sources are in `launcher/art/SOURCES.md`.
+used only as the interface of this non-commercial fan port; the sources are in `launcher/art/SOURCES.md`. The author's own
+two payment codes are there too.
 
 This project is free software under the GNU General Public License, version 2 or (at your option) any later version.
 See `LICENSE`.

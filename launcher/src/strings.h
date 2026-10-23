@@ -285,6 +285,9 @@ enum class Str {
     RegisterSteps, // the sign-in card's button and its panel: registering in xemu, step by step
     RegisterTitle,
     HelpRegister,
+    Sponsor, // the About card's button and its panel: the author's WeChat Pay and Alipay codes
+    SponsorTitle,
+    SponsorText,
     Count
 };
 
