@@ -49,7 +49,7 @@ Each item's verdict and evidence are in `project/docs/06_功能验证矩阵.md` 
 - **Sound**: a software DirectSound mixer on XAudio2, with reverb.
 - **Performance**: in a chapter 1 battle, an average frame time of 10.45 ms on Intel Iris Xe integrated graphics
   (the 60 fps budget is 16.68 ms; r178, `project/docs/05_音频输入存档.md`).
-- **Input**: XInput controllers.
+- **Input**: Xbox and other XInput controllers, plus PS3 / PS4 / PS5 controllers, the Switch Pro Controller, Joy-Cons and DirectInput pads (through SDL3); all with rumble.
 
 ### Original-game defects fixed
 
@@ -158,6 +158,14 @@ itself only: the bundled SNES / arcade programs stay 16:9.
 default WASD to move, arrows for the camera, J / K to attack, Space to jump, Esc for Start...). The launcher's Controls
 page changes them and can remap the controller's buttons. In `black.ini`: `kb_<input> = Key[,Key]` and
 `padmap_<input> = <input>`. Keys do not reach the game while Alt is held.
+
+**Supported controllers**: Xbox and other XInput controllers are read through Windows' XInput; the rest through the
+built-in SDL3 (zlib licence, linked into `blackrt.dll`), with no DS4Windows or similar needed: PS4 / PS5 controllers
+(USB or Bluetooth), the Switch Pro Controller, Joy-Cons (a pair as one controller, or one held sideways), DirectInput pads
+and USB adapters for PS1 / PS2 pads (whether an adapter rumbles depends on the adapter). A PS3 controller needs its
+driver first (DsHidMini, for example). Buttons follow the Xbox layout by position: bottom A, right B, left X, top Y, so
+the button marked B on a Nintendo pad is A; a PlayStation pad's touchpad click is Back. Several controllers can be
+plugged in at once and all drive the same character. `--no-sdl-pads` keeps to XInput.
 
 **Shader cache**: the first time the program meets a shader it compiles it on the spot, which can stutter; the result
 is kept in `cache\shaders\` next to the program and read into memory at the next start, so it stutters no more.
@@ -270,6 +278,9 @@ cmake --build build --config RelWithDebInfo
 This produces `build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe` and `blackrt.dll`. `loader/CMakePresets.json` also has upstream's
 Visual Studio 2022 / 2026 presets.
 
+**SDL3**: at configure time CMake downloads the SDL3 3.4.18 source release (SHA256 checked) and builds it with the
+program; `-DNGB_SDL3_DIR=<path>` builds from an unpacked copy instead.
+
 **Icon**: both programs carry `launcher/art/icon.ico` (the Dragon Sword, see "Legal") by default. For another icon or
 none, configure with `-DPORT_ICON=<path to .ico>` or `-DPORT_ICON=`.
 
@@ -340,5 +351,7 @@ See `LICENSE`.
   behaviour.
 - [XbSymbolDatabase](https://github.com/Cxbx-Reloaded/XbSymbolDatabase): identifies the Xbox library functions in the
   game.
+- [SDL3](https://libsdl.org) (zlib licence, linked into `blackrt.dll`): reads the controllers beyond XInput and their
+  rumble.
 
 Developed by 哈雅布撒 (Bilibili) with Claude Code.

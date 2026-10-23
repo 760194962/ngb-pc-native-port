@@ -1,6 +1,7 @@
 // HLE replacement for the Xbox input library (XPP section: USB host controller + XID gamepads).
-// Xbox port 0 is fed by every PC XInput controller, merged with keyboard and mouse while the game window has
-// focus: the mouse rotates the view directly (input/mouselook.cpp; a click in the window captures the mouse),
+// Xbox port 0 is fed by every PC XInput controller and the pads SDL3 reads (input/sdlpad.cpp), merged with keyboard
+// and mouse while the game window has focus: the mouse rotates the view directly (input/mouselook.cpp; a click in
+// the window captures the mouse),
 // keys and mouse buttons are bound to the game's actions (input/bindings.cpp, PC SETTINGS > CONTROLS > KEY BINDINGS).
 #include "audio/output.h"
 #include "build_profile.h"
@@ -15,6 +16,7 @@
 #include "input/padkeys.h"
 #include "input/mouselook.h"
 #include "input/movies.h"
+#include "input/sdlpad.h"
 
 #include <algorithm>
 #include <cmath>
@@ -80,6 +82,7 @@ void load_xinput()
         g_pc_set = (PFN_SetState)GetProcAddress(m, "XInputSetState");
     }
     logf("[input] PC XInput %s; keyboard mapping active when the game window has focus", g_pc_get ? "loaded" : "not available");
+    sdlpad::start(); // the pads XInput does not see
 }
 
 // --press "frame:button,..." or "SECONDSs:button,...": scripted presses for unattended test runs, held for
@@ -417,6 +420,18 @@ void read_pad(uint32_t port, XGamepad &g)
         merge_stick(g.sThumbLX, g.sThumbLY, p.sThumbLX, p.sThumbLY);
         merge_stick(g.sThumbRX, g.sThumbRY, p.sThumbRX, p.sThumbRY);
     }
+    sdlpad::State s;
+    if (sdlpad::read(s)) { // DualShock, DualSense, Switch, DirectInput pads: already in XInput layout
+        g.wButtons |= s.buttons & 0x00FF;
+        for (int b = 0; b < 4; b++)
+            if (s.buttons & (0x1000 << b)) g.bAnalogButtons[b] = 255; // A B X Y
+        if (s.buttons & 0x0200) g.bAnalogButtons[4] = 255;            // BLACK = right shoulder
+        if (s.buttons & 0x0100) g.bAnalogButtons[5] = 255;            // WHITE = left shoulder
+        g.bAnalogButtons[6] = max8(g.bAnalogButtons[6], s.lt);
+        g.bAnalogButtons[7] = max8(g.bAnalogButtons[7], s.rt);
+        merge_stick(g.sThumbLX, g.sThumbLY, s.lx, s.ly);
+        merge_stick(g.sThumbRX, g.sThumbRY, s.rx, s.ry);
+    }
     apply_presses(g);
     // Mouse look, the key bindings and the movie skip read BLACK's game objects (binding table 0x2F3BD4, the
     // movie player at *0x2D45F0): BLACK only. Ninja Gaiden Black and its bundled programs: keys pressed into the pad
@@ -570,6 +585,7 @@ uint32_t __stdcall XInputSetState(Device *h, uint8_t *pFeedback)
     ULONGLONG now = GetTickCount64();
     if (h->port == 0 && (v.wLeftMotorSpeed != last.wLeftMotorSpeed || v.wRightMotorSpeed != last.wRightMotorSpeed || now - last_ms > 2000)) {
         for (DWORD i = 0; g_pc_set && i < 4; i++) g_pc_set(i, &v); // port 0 = every PC pad
+        sdlpad::rumble(v.wLeftMotorSpeed, v.wRightMotorSpeed);
         static int logged; // the first changes, as evidence in the log
         if (logged < 40 && (v.wLeftMotorSpeed != last.wLeftMotorSpeed || v.wRightMotorSpeed != last.wRightMotorSpeed)) {
             logged++;

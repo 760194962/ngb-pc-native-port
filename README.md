@@ -43,7 +43,7 @@
 - **声音**：软件 DirectSound 混音器，经 XAudio2 输出，带混响。
 - **性能**：第 1 章战斗场景在 Intel Iris Xe 核显上平均帧时间 10.45 ms（60 fps 的预算是 16.68 ms；r178，
   `project/docs/05_音频输入存档.md`）。
-- **输入**：XInput 手柄。
+- **输入**：Xbox 与其他 XInput 手柄，以及 PS3 / PS4 / PS5 手柄、Switch Pro 手柄、Joy-Con、DirectInput 手柄（经 SDL3）；震动都有。
 
 ### 修过的原版缺陷
 
@@ -133,6 +133,12 @@ run.bat
 **键盘与手柄**：游戏本身只认手柄；键盘的每个键直接按下手柄上的一个输入（默认 WASD 移动、方向键视角、J / K 攻击、空格跳、
 Esc 为 Start……），在启动器的「控制」页可改，也可把手柄按钮重新映射。`black.ini` 里是 `kb_<输入> = 键[,键]` 与
 `padmap_<输入> = <输入>`。按住 Alt 时按键不会送进游戏。
+
+**支持的手柄**：Xbox 手柄和其他 XInput 手柄由 Windows 的 XInput 读；其余手柄由内置的 SDL3（zlib 许可，静态编进
+`blackrt.dll`）读，不用装 DS4Windows 之类的工具：PS4 / PS5 手柄（USB 或蓝牙）、Switch Pro 手柄、Joy-Con（一对合成一个
+手柄，也可只用一只横握）、DirectInput 手柄与 PS1 / PS2 手柄的 USB 转接器（转接器能否震动看转接器本身）。PS3 手柄要先装
+驱动（如 DsHidMini）。按键按位置对应 Xbox 布局：最下面的键是 A、右边是 B、左边是 X、上面是 Y，所以 Switch 手柄上标着 B
+的键是 A；PS 手柄的触摸板按下等于 Back。几个手柄可以同时插着，都控制同一个角色。只想用 XInput 时加 `--no-sdl-pads`。
 
 **着色器缓存**：程序第一次遇到某个着色器时要现场编译，会卡一下；编译结果存在程序旁的 `cache\shaders\`，下次启动时一次读进
 内存，之后就不再卡。删掉这个文件夹没有坏处，只是会重新编译一遍。
@@ -225,6 +231,9 @@ cmake --build build --config RelWithDebInfo
 得到 `build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe` 与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
 2022 / 2026 预设。
 
+**SDL3**：配置时 CMake 会下载 SDL3 3.4.18 的源码包（校验 SHA256）并与程序一起编译；已有解压好的源码时用
+`-DNGB_SDL3_DIR=<路径>`，不再下载。
+
 **图标**：两个程序默认带 `launcher/art/icon.ico`（龙剑，见"法律声明"）。要换别的图标或不要图标，配置时用
 `-DPORT_ICON=<.ico 路径>` 或 `-DPORT_ICON=`。
 
@@ -286,5 +295,6 @@ Microsoft 的商标。仓库不含游戏代码或数据，也不含 Microsoft Xb
   行为的参考（未复制代码）。
 - [genma-pc](https://github.com/w1284603830/genma-pc)：同类的 Xbox 原生移植，CLIPPLANE 等行为的参照。
 - [XbSymbolDatabase](https://github.com/Cxbx-Reloaded/XbSymbolDatabase)：识别游戏里的 Xbox 库函数。
+- [SDL3](https://libsdl.org)（zlib 许可，静态编进 `blackrt.dll`）：读 XInput 以外的手柄与它们的震动。
 
 开发：哈雅布撒（b 站），与 Claude Code 合作。

@@ -84,6 +84,27 @@ target_compile_definitions(blackrt PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SEC
   BLACK_VERSION="${PROJECT_VERSION}")
 target_compile_options(blackrt PRIVATE /W3 /utf-8 /EHsc)
 target_link_libraries(blackrt PRIVATE ntdll bcrypt d3d9 d3dcompiler windowscodecs ole32 user32 gdi32 winmm dbghelp advapi32 shell32 pdh dxgi psapi ws2_32)
+
+# SDL3 (zlib licence), linked statically, only its gamepad side: the controllers XInput does not see (DualShock 3/4,
+# DualSense, Switch Pro and Joy-Con, DirectInput pads and adapters; input/sdlpad.cpp). NGB_SDL3_DIR: an unpacked
+# SDL3-3.4.18 to build from instead of downloading the release.
+set(NGB_SDL3_DIR "" CACHE PATH "SDL3 source tree (empty: download SDL3 3.4.18)")
+if(NGB_SDL3_DIR)
+  set(FETCHCONTENT_SOURCE_DIR_SDL3 "${NGB_SDL3_DIR}")
+endif()
+foreach(_off SDL_SHARED SDL_TEST_LIBRARY SDL_TESTS SDL_EXAMPLES SDL_INSTALL SDL_AUDIO SDL_VIDEO SDL_GPU SDL_RENDER
+             SDL_CAMERA SDL_DIALOG SDL_TRAY SDL_POWER)
+  set(${_off} OFF CACHE BOOL "" FORCE)
+endforeach()
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+include(FetchContent)
+FetchContent_Declare(SDL3
+  URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz
+  URL_HASH SHA256=9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3
+  EXCLUDE_FROM_ALL)
+FetchContent_MakeAvailable(SDL3)
+target_sources(blackrt PRIVATE src/input/sdlpad.cpp)
+target_link_libraries(blackrt PRIVATE SDL3::SDL3-static)
 # Xbox SEH handlers run through the same fs:[0] chain; no SafeSEH tables anywhere in the process.
 target_link_options(blackrt PRIVATE /SAFESEH:NO /MAP) # blackrt.map: port addresses in crash logs -> functions
 

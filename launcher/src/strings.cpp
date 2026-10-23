@@ -257,9 +257,14 @@ const Pair kText[(int)Str::Count] = {
      L"direction, or a stick pushed all the way. Every input can have two keys. Keyboard and controller work together; keys count only "
      L"while the game\u2019s window is in front.\n\nPerformance: none (the keys are read once a frame)."},
     {L"把手柄上的按钮换成别的按钮，例如交换 A 与 B，或把防御移到 LB/RB 习惯的位置。改动只对这个游戏有效，不影响 Windows 和其他游戏。\n\n"
-     L"Xbox 手柄的黑键 / 白键对应 PC 手柄的 RB / LB（肩键）。",
+     L"Xbox 手柄的黑键 / 白键对应 PC 手柄的 RB / LB（肩键）。\n\n"
+     L"支持的手柄：Xbox 与其他 XInput 手柄；PS3 / PS4 / PS5 手柄（PS3 需装驱动）、Switch Pro 手柄、Joy-Con（一对或单只）、"
+     L"DirectInput 手柄与老手柄的 USB 转接器。按键按位置对应 Xbox 布局：最下面的键是 A、右边的键是 B，PS 手柄的触摸板按下等于 Back。",
      L"Swaps controller buttons, for example A and B, or moves guard to where your hands expect it. It applies to this game only, not to "
-     L"Windows or other games.\n\nThe Xbox controller\u2019s Black / White buttons are the PC controller\u2019s RB / LB (shoulder buttons)."},
+     L"Windows or other games.\n\nThe Xbox controller\u2019s Black / White buttons are the PC controller\u2019s RB / LB (shoulder buttons).\n\n"
+     L"Supported controllers: Xbox and other XInput pads; PS3 / PS4 / PS5 controllers (PS3 needs its driver), the Switch Pro "
+     L"Controller, Joy-Cons (a pair or one), DirectInput pads and USB adapters for older pads. Buttons follow the Xbox layout by "
+     L"position: the bottom one is A, the right one B; a PlayStation pad\u2019s touchpad click is Back."},
     {L"A 键", L"A"},
     {L"B 键", L"B"},
     {L"X 键", L"X"},

@@ -128,6 +128,7 @@ struct Config {
     uint32_t pix_watch_rt = 0; // press-file "cfg:pixwatchrt:HEX": watch that render target (its data address) instead
     bool edge_mirror = true;  // press-file "cfg:edgemirror:0": projected reads past a render target clamp as on the Xbox
                               // (on: alpha 0 past the edge, d3d/draw.cpp apply_texture_stages)
+    bool sdl_pads = true;     // --no-sdl-pads: XInput pads only (input/sdlpad.cpp)
     bool rhw_edge_fix = true; // press-file "cfg:rhwedge:0": keep XYZRHW quads that stop a pixel short of their target (d3d/draw.cpp)
     bool rhw_offset = true;    // press-file "cfg:rhwoffset:0": XYZRHW positions ignore the screen-space offset (comparison)
     bool zview8 = false;       // press-file "cfg:zview8:1": depth views back to A8R8G8B8 (8-bit depth) for comparison

@@ -97,6 +97,7 @@ void usage()
            "  --autoaim         the game's auto-aim (the view pulling toward enemies), off by default; --no-autoaim\n"
            "  --fov D           horizontal field of view in play, 50-120 degrees (default 70, the game's; PC SETTINGS > VIDEO)\n"
            "  --no-movie-skip   movies skip only as in the original (default: A / START skip every movie)\n"
+           "  --no-sdl-pads     XInput controllers only (default: also DualShock, DualSense, Switch and DirectInput pads)\n"
            "  --online-eeprom F --online-hdd F  online play through Insignia with this registered EEPROM and xemu disk\n"
            "                    image (both only read; black.ini online = 1, online_eeprom, online_hdd); --offline: off\n"
            "  --online-check F  check the online files (black.ini or the flags above), write what was found to F, exit\n"
@@ -279,6 +280,7 @@ bool parse_args()
         } else if (a == L"--press-file") {
             if (!next(g_cfg.press_file)) return false;
         } else if (a == L"--no-movie-skip") { g_cfg.skip_movies = false; settings_mark_cli("skipanymovie"); }
+        else if (a == L"--no-sdl-pads") g_cfg.sdl_pads = false;
         else if (a == L"--no-pc-menus") g_cfg.pc_menus = false;
         else if (a == L"--timer-vblank") g_cfg.timer_vblank = true;
         else if (a == L"--display-vblank") g_cfg.display_vblank = true;
