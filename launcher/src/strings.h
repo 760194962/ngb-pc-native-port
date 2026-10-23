@@ -282,6 +282,9 @@ enum class Str {
     DnsPc,
     DnsFallback,
     DnsLegacy,
+    RegisterSteps, // the sign-in card's button and its panel: registering in xemu, step by step
+    RegisterTitle,
+    HelpRegister,
     Count
 };
 

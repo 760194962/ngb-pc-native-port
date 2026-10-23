@@ -89,7 +89,7 @@ online_dns_mode = insignia     # 默认：所有 DNS 查询转给 online_dns；i
 
 | 部分 | 文件 | 说明 |
 |---|---|---|
-| 启动器「联网」页 | `launcher/src/main.cpp`、`strings.*` | 开关；EEPROM / 硬盘镜像选文件；「主机」行显示检查结果（身份有效、已注册、账号）；DNS 卡：当前 DNS（游戏实际会用的：自动＝Insignia 的，手动＝填的 InsigniaDNS；最初显示的是主机设定，用户觉得没有意义，2026-10-23 改）、查询方式（直接用 Insignia DNS / 用 InsigniaDNS，后者多一行地址框与「找本机」；最初是「按主机设定」，见下文「InsigniaDNS 地址」）、「检查网络」；登录说明与 Insignia 官网链接；两个「?」帮助；保存 / 放弃 / 恢复默认与其他设定页相同 |
+| 启动器「联网」页 | `launcher/src/main.cpp`、`strings.*` | 开关；EEPROM / 硬盘镜像选文件；「主机」行显示检查结果（身份有效、已注册、账号）；DNS 卡：当前 DNS（游戏实际会用的：自动＝Insignia 的，手动＝填的 InsigniaDNS；最初显示的是主机设定，用户觉得没有意义，2026-10-23 改）、查询方式（直接用 Insignia DNS / 用 InsigniaDNS，后者多一行地址框与「找本机」；最初是「按主机设定」，见下文「InsigniaDNS 地址」）、「检查网络」；登录说明、「注册步骤」（分步面板，2026-10-23）与 Insignia 官网链接；两个「?」帮助；保存 / 放弃 / 恢复默认与其他设定页相同 |
 | 检查 | `net/online.cpp` `online_check` | 启动器以 `--online-check` 调游戏程序（隐藏窗口），复用同一套解密与 qcow2 读取；输出只有：EEPROM ok / invalid / unreadable、硬盘 ok / 原因、registered、account（扇区 10–31 偏移 24 的玩家代号）、dns auto / manual 与两个地址、xemu 是否在运行。不含密钥、序列号、MAC |
 | 主机 DNS 设定 | 同上 | 配置区第 8 扇区：偏移 76 的标志位 8 = 手动 DNS，96 / 100 两个 DNS（用户的盘：标志 8、192.168.2.8 / 1.1.1.1，与 InsigniaDNS 窗口里的主机设定一致）。标志位 8 的含义只由这一块盘推断，还没有拿自动 DNS 的盘对照过 |
 | 检查网络 | `launcher/src/main.cpp` `net_check` | 在单独线程里按当前查询方式向那台 DNS 问 `AS.XBOXLIVE.COM`，3 秒超时：答出地址＝正常；198.18.0.0/15＝代理 TUN；无回应＝网络或 InsigniaDNS |

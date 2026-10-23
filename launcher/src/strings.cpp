@@ -392,8 +392,8 @@ const Pair kText[(int)Str::Count] = {
      L"DNS answered without an address for AS.XBOXLIVE.COM"},
     {L"登录",
      L"Signing in"},
-    {L"进游戏后：主菜单「排行榜」→ 选自己的玩家代号，登录和榜单都在游戏里。还没有账号：先按 Insignia 官网的说明在 xemu 里注册（只需一次）。",
-     L"In the game: main menu → Ranking → pick your gamertag; signing in and the leaderboards are in the game. No account yet: register once in xemu, following Insignia’s instructions."},
+    {L"进游戏后：主菜单「排行榜」→ 选自己的玩家代号，登录和榜单都在游戏里。还没有账号：按「注册步骤」在 xemu 里注册一次。",
+     L"In the game: main menu → Ranking → your gamertag; signing in happens there. No account yet: register once in xemu."},
     {L"Insignia 官网",
      L"Insignia website"},
     {L"联网关闭，DNS 查询方式改回「直接用 Insignia DNS」。选好的 EEPROM 与硬盘镜像保留。",
@@ -425,6 +425,24 @@ const Pair kText[(int)Str::Count] = {
      L" (no InsigniaDNS address yet: Insignia’s DNS for now)"},
     {L"（xemu 主机设定里的）",
      L" (from the console’s setting in xemu)"},
+    {L"注册步骤",
+     L"How to register"},
+    {L"在 xemu 里注册 Insignia（只需一次）",
+     L"Registering with Insignia in xemu (once)"},
+    {L"第 1 步　准备 xemu：网络设为启用（NAT）。开机后在仪表板「设置 → 系统信息」看版本，应为 1.00.5960；不是的话进一款支持 Xbox Live 的游戏选「Xbox Live」，会自动升级。\n\n"
+     L"第 2 步　注册主机：按 Insignia 官网的连接指南取得 Insignia Setup Assistant，在 xemu 里运行，选 Register。提示 DNS 被劫持时，在电脑上运行 insigniaDNS.exe，主机的主 DNS 填这台电脑的局域网地址。\n\n"
+     L"第 3 步　设 DNS：仪表板「网络设置」里主 DNS 填 46.101.64.175，次 DNS 填 1.1.1.1，做一次连接测试。\n\n"
+     L"第 4 步　申请订阅码：在 insignia.live 首页填邮箱，订阅码会发到邮箱。\n\n"
+     L"第 5 步　建账号：在仪表板上选国家、取玩家代号、填订阅码。服务免费，信用卡一步按官网说明填测试卡号 4111 1111 1111 1111 和假资料，不要填真卡；账单邮箱要和申请订阅码时一样。最后设一个通行码。\n\n"
+     L"第 6 步　回到这里：关掉 xemu，在上面选 xemu 用的 EEPROM（如 eeprom.bin）和硬盘镜像（如 xbox_hdd.qcow2），位置在 xemu 设置的「系统」页。「主机」一行显示已注册和玩家代号就成了。\n\n"
+     L"建议先备份这两个文件。xemu 里的具体操作以 Insignia 官网和它的 Discord 为准。",
+     L"1  Prepare xemu: enable networking (NAT). On the dashboard, Settings → System Info should show 1.00.5960; if not, start a game with Xbox Live and choose Xbox Live to update.\n\n"
+     L"2  Register the console: get the Insignia Setup Assistant as Insignia’s connection guide says, run it in xemu and choose Register. If it reports DNS hijacking, run insigniaDNS.exe on a PC and set the console’s primary DNS to that PC’s LAN address.\n\n"
+     L"3  Set DNS: in the dashboard’s network settings, primary DNS 46.101.64.175, secondary 1.1.1.1; run a connection test.\n\n"
+     L"4  Get a subscription code: enter your email on insignia.live; the code is emailed to you.\n\n"
+     L"5  Create the account on the dashboard: country, gamertag, the code. The service is free: at the card step use the test number 4111 1111 1111 1111 and made-up details, as the guide says, never a real card; the billing email must be the one you got the code with. Then set a pass code.\n\n"
+     L"6  Back here: close xemu and choose its EEPROM (e.g. eeprom.bin) and hard disk image (e.g. xbox_hdd.qcow2) above; xemu’s System settings show where they are. The Console row then shows registered and your gamertag.\n\n"
+     L"Back up both files first. For the details in xemu, Insignia’s site and Discord have the last word."},
 };
 
 } // namespace

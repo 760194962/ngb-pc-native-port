@@ -181,7 +181,8 @@ code runs unchanged, as it does in xemu.
 
 1. **Register with Insignia in xemu first** (once): follow Insignia's own instructions to register your console and
    account with xemu, and check that you can sign in to Xbox Live there. Your EEPROM (`eeprom.bin`) and hard disk image
-   (`xbox_hdd.qcow2`) then hold the console's identity and the account.
+   (`xbox_hdd.qcow2`) then hold the console's identity and the account. "How to register" on the launcher's Online
+   page (Signing in card) lists the steps, taken from Insignia's connection guide.
 2. **Close xemu**: one console cannot sign in twice, and the port stays offline while xemu runs.
 3. **The launcher's Online page**:
    - Select On, then choose the two files with "Choose file…". Both files are only read.

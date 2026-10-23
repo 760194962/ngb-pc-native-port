@@ -117,7 +117,7 @@ enum {
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitResList = 300, kHitShadow = 320, kHitAniso = 340,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
-    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind
+    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister
 };
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -1228,9 +1228,11 @@ struct Painter {
         fill({0, 0, kW, kH}, kInk, 0.72f);
         g_hits.push_back({kHitHelpClose, {0, 0, kW, kH}}); // a click outside the panel closes it (the panel's own hits come later)
         bool image = g.help == kHitHelpImage, setting = g.help >= kHitHelpSet && g.help < kHitHelpSet + kSettingHelpCount;
-        Str title = setting ? kSettingHelp[g.help - kHitHelpSet].label : image ? Str::FromImage : Str::InstalledGame;
-        Str body_text = setting ? kSettingHelp[g.help - kHitHelpSet].help : image ? Str::HelpFromImage : Str::HelpInstalled;
-        const float pw = 640, ph = 460, px = (kW - pw) / 2, py = (kH - ph) / 2;
+        bool reg = g.help == kHitHelpRegister; // the registration steps: a larger panel
+        Str title = setting ? kSettingHelp[g.help - kHitHelpSet].label : image ? Str::FromImage : reg ? Str::RegisterTitle : Str::InstalledGame;
+        Str body_text = setting ? kSettingHelp[g.help - kHitHelpSet].help : image ? Str::HelpFromImage
+                      : reg ? Str::HelpRegister : Str::HelpInstalled;
+        const float pw = reg ? 820.0f : 640.0f, ph = reg ? 640.0f : 460.0f, px = (kW - pw) / 2, py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
         stroke(p, kInk3, 1.0f, 6);
@@ -1902,7 +1904,8 @@ struct Painter {
         // how to sign in
         D2D1_RECT_F c3 = {c.left, c2.bottom + 12, c.right, c2.bottom + 12 + 50 + 48};
         y = card(c3, S(Str::LoginCard));
-        text(S(Str::LoginHow), {lx, y - 6, right - 160, y + 42}, 12.5f, kBone, 0.9f);
+        text(S(Str::LoginHow), {lx, y - 6, right - 300, y + 42}, 12.5f, kBone, 0.9f);
+        button(kHitHelpRegister, {right - 280, y + 2, right - 152, y + 32}, S(Str::RegisterSteps), false);
         button(kHitInsignia, {right - 140, y + 2, right, y + 32}, S(Str::InsigniaSite), false);
     }
 
@@ -2278,7 +2281,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
-        if (id == kHitHelpImage || id == kHitHelpInstalled || (id >= kHitHelpSet && id < kHitHelpSet + kSettingHelpCount)) g.help = id;
+        if (id == kHitHelpImage || id == kHitHelpInstalled || id == kHitHelpRegister || (id >= kHitHelpSet && id < kHitHelpSet + kSettingHelpCount)) g.help = id;
         else if (id >= 0 && id < kPageCount) {
             g.page = (Page)id;
             if (g.page == kSaves) g.saves_read = false; // read the disk again when the page is opened
@@ -2468,9 +2471,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
                           : !wcscmp(argv[i + 1], L"aniso")  ? kHitAniso
                           : !wcscmp(argv[i + 1], L"padmap") ? kHitPadMap
                                                             : kHitResList;
-        if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed | 0..12 a setting's)
+        if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed | register | 0..12 a setting's)
             g.help = !wcscmp(argv[i + 1], L"image")       ? kHitHelpImage
                      : !wcscmp(argv[i + 1], L"installed") ? kHitHelpInstalled
+                     : !wcscmp(argv[i + 1], L"register")  ? kHitHelpRegister
                                                           : kHitHelpSet + _wtoi(argv[i + 1]);
         if (!wcscmp(argv[i], L"--game") && i + 1 < argc) { // with --snap: this game folder
             g.game = std::wstring(argv[i + 1]) + L"\\default.xbe";
