@@ -19,6 +19,7 @@ const Pair kText[(int)Str::Count] = {
     {L"存档", L"Saves"},
     {L"联网", L"Online"},
     {L"关于", L"About"},
+    {L"支持作者", L"Support"},
     {L"忍者龙剑传  黑之章", L"NINJA GAIDEN BLACK"},
     {L"飓风版 · 中英文版 · PC 原生移植", L"Hurricane edition · Chinese / English · native PC port"},
     {L"开始游戏", L"PLAY"},
@@ -453,15 +454,13 @@ const Pair kText[(int)Str::Count] = {
      L"5  Create the account on the dashboard: country, gamertag, the code. The service is free: at the card step use the test number 4111 1111 1111 1111 and made-up details, as the guide says, never a real card; the billing email must be the one you got the code with. Then set a pass code.\n\n"
      L"6  Back here: close xemu and choose its EEPROM (e.g. eeprom.bin) and hard disk image (e.g. xbox_hdd.qcow2) above; xemu’s System settings show where they are. The Console row then shows registered and your gamertag.\n\n"
      L"Back up both files first. For the details in xemu, Insignia’s site and Discord have the last word."},
-    {L"请作者喝杯茶",
-     L"Buy me a tea"},
-    {L"请作者喝杯茶",
-     L"Buy the author a tea"},
+    {L"请作者喝杯奶茶",
+     L"Buy the author a milk tea"},
     {L"《黑之章》的中文汉化、飓风补丁，还有这个 PC 原生移植版，都是我做的。移植版从拆解原版程序做起，画面、声音、存档、联网，到最近修好的手柄震动，一点点接到了 PC 上。它们都免费，以后也一直免费，赞不赞助都不影响你玩到的任何内容。\n\n"
-     L"如果它让你又一次握起了龙剑，觉得值一杯茶，扫下面任意一个码就好。转账时请备注姓名或昵称，好让我知道这份心意来自谁。\n\n"
+     L"如果它让你又一次握起了龙剑，觉得值一杯奶茶，扫下面任意一个码就好。转账时请备注姓名或昵称，好让我知道这份心意来自谁。\n\n"
      L"不方便也完全没关系：玩得开心，遇到问题告诉我，一样是在帮它变得更好。",
      L"The Chinese translation of Ninja Gaiden Black, the Hurricane patch and this native PC port are all my work. The port was built up from the original program piece by piece: graphics, sound, saves, online play, and lately the controller’s rumble. All of it is free and will stay free; nothing in it depends on a donation.\n\n"
-     L"If it put the Dragon Sword back in your hands and feels worth a cup of tea, either code below works (WeChat Pay, Alipay). Please put your name or nickname in the note, so I know who it came from.\n\n"
+     L"If it put the Dragon Sword back in your hands and feels worth a milk tea, either code below works (WeChat Pay, Alipay). Please put your name or nickname in the note, so I know who it came from.\n\n"
      L"If not, that is perfectly fine: enjoy the game, and tell me about anything that goes wrong. That helps just as much."},
 };
 

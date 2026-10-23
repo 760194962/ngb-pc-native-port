@@ -42,8 +42,8 @@ constexpr float kW = 1180, kH = 700, kNavW = 236;
 D2D1_COLOR_F rgb(uint32_t v, float a = 1.0f) { return D2D1::ColorF(v, a); }
 const uint32_t kInk = 0x0b0a0d, kInk3 = 0x2a2630, kBone = 0xece7dd, kAsh = 0xa39c92, kBlood = 0xcf3640, kGold = 0xcfa650;
 
-enum Page { kStart, kInstall, kDisplay, kGraphics, kControls, kSaves, kOnline, kAbout, kPageCount };
-const wchar_t *const kIcons[kPageCount] = {L"\xE768", L"\xE896", L"\xE7F4", L"\xE790", L"\xE7FC", L"\xE74E", L"\xE774", L"\xE946"};
+enum Page { kStart, kInstall, kDisplay, kGraphics, kControls, kSaves, kOnline, kAbout, kSupport, kPageCount };
+const wchar_t *const kIcons[kPageCount] = {L"\xE768", L"\xE896", L"\xE7F4", L"\xE790", L"\xE7FC", L"\xE74E", L"\xE774", L"\xE946", L"\xEB52"};
 
 template <class T> void release(T *&p)
 {
@@ -58,7 +58,7 @@ struct App {
     IWICImagingFactory *wic = nullptr;
     ID2D1HwndRenderTarget *rt = nullptr;
     IWICBitmapSource *hero_src = nullptr, *texture_src = nullptr; // decoded once, made into bitmaps per target
-    IWICBitmapSource *pay_src[2] = {}; // the author's WeChat Pay and Alipay codes (the About page's sponsor panel)
+    IWICBitmapSource *pay_src[2] = {}; // the author's WeChat Pay and Alipay codes (the Support page)
     Page page = kStart;
     int hover = -1; // hit id under the mouse
     bool pressed = false;
@@ -118,7 +118,7 @@ enum {
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitResList = 300, kHitShadow = 320, kHitAniso = 340,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
-    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister, kHitSponsor
+    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister
 };
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -1025,9 +1025,9 @@ struct Painter {
             } else if (hov) {
                 fill(r, kBone, 0.05f, 4);
             }
-            uint32_t c = sel || hov ? kBone : kAsh;
-            text(kIcons[i], {r.left + 18, r.top, r.left + 44, r.bottom}, 17, sel ? kBlood : c, 1.0f, DWRITE_FONT_WEIGHT_NORMAL,
-                 L"Segoe Fluent Icons");
+            uint32_t c = sel || hov ? kBone : i == kSupport ? kGold : kAsh; // Support stands out in gold, heart and all
+            text(kIcons[i], {r.left + 18, r.top, r.left + 44, r.bottom}, 17, sel ? kBlood : i == kSupport ? kGold : c, 1.0f,
+                 DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons");
             text(S((Str)((int)Str::NavStart + i)), {r.left + 52, r.top, r.right - 8, r.bottom}, 15, c, 1.0f,
                  sel ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
         }
@@ -1121,6 +1121,43 @@ struct Painter {
         }
         text(label, r, primary ? 15.5f : 13.5f, enabled ? kBone : kAsh, enabled ? 1.0f : 0.6f,
              primary ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_CENTER);
+    }
+
+    // Support: the author's note, then the WeChat Pay and Alipay codes side by side under it
+    void support_page()
+    {
+        const float x = kNavW + 56, w = 800;
+        text(S(Str::SponsorTitle), {x, 46, x + 700, 98}, 32, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
+        fill({x, 102, x + 36, 104}, kBlood);
+        D2D1_RECT_F c = {x, 116, x + w, 326};
+        fill(c, kInk, 0.66f);
+        stroke(c, kInk3);
+        fill({c.left, c.top, c.left + 3, c.bottom}, kGold, 0.8f);
+        IDWriteTextFormat *fmt = nullptr;
+        if (SUCCEEDED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr,
+                                             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14,
+                                             g_lang == Lang::Zh ? L"zh-cn" : L"en-us", &fmt))) {
+            fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 22, 17);
+            ID2D1SolidColorBrush *b = nullptr;
+            rt->CreateSolidColorBrush(rgb(kBone, 0.92f), &b);
+            const wchar_t *t = S(Str::SponsorText);
+            if (b) rt->DrawText(t, (UINT32)wcslen(t), fmt, {c.left + 26, c.top + 18, c.right - 26, c.bottom - 12}, b), b->Release();
+            fmt->Release();
+        }
+        if (!pay) return;
+        const float top = c.bottom + 16, bottom = kH - 16, gap = 40;
+        float ws[2] = {}, total = gap;
+        for (int i = 0; i < 2; i++)
+            if (pay[i]) {
+                D2D1_SIZE_F sz = pay[i]->GetSize();
+                total += ws[i] = (bottom - top) * sz.width / sz.height;
+            }
+        float px = x + (w - total) / 2;
+        for (int i = 0; i < 2; i++) {
+            if (!pay[i]) continue;
+            rt->DrawBitmap(pay[i], {px, top, px + ws[i], bottom}, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            px += ws[i] + gap;
+        }
     }
 
     // A card with a gold edge and a heading; returns the content's top
@@ -1231,14 +1268,11 @@ struct Painter {
         g_hits.push_back({kHitHelpClose, {0, 0, kW, kH}}); // a click outside the panel closes it (the panel's own hits come later)
         bool image = g.help == kHitHelpImage, setting = g.help >= kHitHelpSet && g.help < kHitHelpSet + kSettingHelpCount;
         bool reg = g.help == kHitHelpRegister; // the registration steps: a larger panel
-        bool sponsor = g.help == kHitSponsor;  // the text, then the two payment codes side by side: larger still
         bool big = reg || (setting && kSettingHelp[g.help - kHitHelpSet].label == Str::DnsCard); // so is DNS's
-        Str title = setting ? kSettingHelp[g.help - kHitHelpSet].label : image ? Str::FromImage : reg ? Str::RegisterTitle
-                  : sponsor ? Str::SponsorTitle : Str::InstalledGame;
+        Str title = setting ? kSettingHelp[g.help - kHitHelpSet].label : image ? Str::FromImage : reg ? Str::RegisterTitle : Str::InstalledGame;
         Str body_text = setting ? kSettingHelp[g.help - kHitHelpSet].help : image ? Str::HelpFromImage
-                      : reg ? Str::HelpRegister : sponsor ? Str::SponsorText : Str::HelpInstalled;
-        const float pw = big || sponsor ? 820.0f : 640.0f, ph = sponsor ? 680.0f : big ? 640.0f : 460.0f, px = (kW - pw) / 2,
-                    py = (kH - ph) / 2;
+                      : reg ? Str::HelpRegister : Str::HelpInstalled;
+        const float pw = big ? 820.0f : 640.0f, ph = big ? 640.0f : 460.0f, px = (kW - pw) / 2, py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
         stroke(p, kInk3, 1.0f, 6);
@@ -1246,18 +1280,7 @@ struct Painter {
         g_hits.push_back({0x7fff, p}); // inside the panel: nothing (the topmost hit wins over the close area)
         text(S(title), {p.left + 34, p.top + 22, p.right - 30, p.top + 58}, 19, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({p.left + 34, p.top + 62, p.left + 64, p.top + 64}, kBlood);
-        D2D1_RECT_F body = {p.left + 34, p.top + 78, p.right - 34, sponsor ? p.top + 272 : p.bottom - 74};
-        if (sponsor && pay) { // each code at its own aspect, bottoms aligned, left of the button
-            float x = p.left + 34;
-            const float top = p.top + 280, bottom = p.bottom - 24;
-            for (int i = 0; i < 2; i++) {
-                if (!pay[i]) continue;
-                D2D1_SIZE_F sz = pay[i]->GetSize();
-                float w = (bottom - top) * sz.width / sz.height;
-                rt->DrawBitmap(pay[i], {x, top, x + w, bottom}, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-                x += w + 30;
-            }
-        }
+        D2D1_RECT_F body = {p.left + 34, p.top + 78, p.right - 34, p.bottom - 74};
         IDWriteTextFormat *fmt = nullptr;
         if (SUCCEEDED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr,
                                              DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14,
@@ -1785,7 +1808,6 @@ struct Painter {
         fill({x, 102, x + 36, 104}, kBlood);
         D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 52 + 8 * 31 + 6};
         float y = card(c, S(Str::AboutTitle));
-        button(kHitSponsor, {c.right - 170, c.top + 12, c.right - 20, c.top + 42}, S(Str::Sponsor), false);
         text(S(Str::AboutDesc), {lx, y, c.right - 20, y + 48}, 13.5f, kBone, 0.92f);
         y += 52;
         auto row = [&](Str label, const std::wstring &v, int link) { // link: kLinks index to open on a click, or -1
@@ -1946,6 +1968,7 @@ struct Painter {
         else if (g.page == kGraphics) graphics_page();
         else if (g.page == kSaves) saves_page();
         else if (g.page == kAbout) about_page();
+        else if (g.page == kSupport) support_page();
         else if (g.page == kControls) controls_page();
         else if (g.page == kOnline) online_page();
         else placeholder_page();
@@ -2302,7 +2325,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
-        if (id == kHitHelpImage || id == kHitHelpInstalled || id == kHitHelpRegister || id == kHitSponsor || (id >= kHitHelpSet && id < kHitHelpSet + kSettingHelpCount)) g.help = id;
+        if (id == kHitHelpImage || id == kHitHelpInstalled || id == kHitHelpRegister || (id >= kHitHelpSet && id < kHitHelpSet + kSettingHelpCount)) g.help = id;
         else if (id >= 0 && id < kPageCount) {
             g.page = (Page)id;
             if (g.page == kSaves) g.saves_read = false; // read the disk again when the page is opened
@@ -2496,11 +2519,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
                           : !wcscmp(argv[i + 1], L"aniso")  ? kHitAniso
                           : !wcscmp(argv[i + 1], L"padmap") ? kHitPadMap
                                                             : kHitResList;
-        if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed | register | sponsor | 0..12 a setting's)
+        if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed | register | 0..12 a setting's)
             g.help = !wcscmp(argv[i + 1], L"image")       ? kHitHelpImage
                      : !wcscmp(argv[i + 1], L"installed") ? kHitHelpInstalled
                      : !wcscmp(argv[i + 1], L"register")  ? kHitHelpRegister
-                     : !wcscmp(argv[i + 1], L"sponsor")   ? kHitSponsor
                                                           : kHitHelpSet + _wtoi(argv[i + 1]);
         if (!wcscmp(argv[i], L"--game") && i + 1 < argc) { // with --snap: this game folder
             g.game = std::wstring(argv[i + 1]) + L"\\default.xbe";

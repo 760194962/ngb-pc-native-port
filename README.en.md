@@ -100,7 +100,7 @@ XInput come with Windows, and the C++ runtime is built into the programs.
 3. Adjust the Display, Graphics and Controls pages if you like (changes apply once saved; each "?" explains its
    setting), then start from the Play page.
 
-The Saves page backs up and restores saves and imports from / exports to xRevive; About has the version, the legal note and "Buy me a tea" (the author's WeChat Pay and Alipay codes; giving is entirely optional).
+The Saves page backs up and restores saves and imports from / exports to xRevive; About has the version and the legal note; Support has the author's WeChat Pay and Alipay codes (giving is entirely optional).
 
 **With run.bat (for development)**: `run.bat` in the repository root starts the game directly, without the launcher,
 from this layout:

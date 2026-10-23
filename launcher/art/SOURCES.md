@@ -21,7 +21,10 @@ Both programs carry it through PORT_ICON (loader/CMakeLists.txt). The artwork is
 
 ## `pay_wechat.jpg`, `pay_alipay.jpg`: the author's payment codes
 
-The author's own WeChat Pay and Alipay receiving codes, given on 2026-10-23 for the About page's "请作者喝杯茶" panel
+The author's own WeChat Pay and Alipay receiving codes, given on 2026-10-23 for the launcher's "支持作者" (Support) page
 ("如果玩家有兴趣赞助，请备注姓名"), published as they are at the author's decision ("照原样发吧"). The WeChat one is the file as
-given (828x1124); the Alipay one is the given 1708x2560 image halved to 854x1280 (JPEG quality 92). SHA-256 (first 20
-hex): `pay_wechat.jpg` `d05784b833486a388ebf`, `pay_alipay.jpg` `f6acafe36eba4b25cdda`.
+given (828x1124); the Alipay one is the given 1708x2560 image halved to 854x1280 (JPEG quality 92). At the author's request ("把支付宝二维码中间
+我的照片换成另外微信中间的图片") the photo in the Alipay code's centre (box x 738-969, y 1362-1593 of the given image) was replaced
+with the WeChat code's centre picture (x 365-461, y 420-515; the WeChat badge over its corner filled from the neighbouring
+pixels), scaled into the box with rounded corners; no pixel outside the box changed, so the code's modules are as given. SHA-256 (first 20
+hex): `pay_wechat.jpg` `d05784b833486a388ebf`, `pay_alipay.jpg` `768f8ad648ed09abcc85`.
