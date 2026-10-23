@@ -555,11 +555,14 @@ uint32_t __stdcall XInputGetState(Device *h, XState *pState)
     return ERROR_SUCCESS;
 }
 
-// XINPUT_FEEDBACK: header {dwStatus, hEvent, Reserved[58]} (68 bytes with padding), then rumble.
+// XINPUT_FEEDBACK: header {dwStatus, hEvent, Reserved[58]} packed to 66 bytes, then rumble {wLeftMotorSpeed,
+// wRightMotorSpeed} at +66 / +68: XAPI's XInputSetState (x2.1 0x3DBBDE) puts the HID report id and length in the
+// last two Reserved bytes (+0x40, +0x41) so the motors follow as the report body, and the game's per-frame sender
+// (0x30DE40) keeps the feedback at esi-0x4D with the motors at esi-0xB / esi-9 (+0x42 / +0x44).
 uint32_t __stdcall XInputSetState(Device *h, uint8_t *pFeedback)
 {
     if (!h || h->magic != DEV_MAGIC) return ERROR_DEVICE_NOT_CONNECTED;
-    PcVibration v = {*(uint16_t *)(pFeedback + 68), *(uint16_t *)(pFeedback + 70)};
+    PcVibration v = {*(uint16_t *)(pFeedback + 66), *(uint16_t *)(pFeedback + 68)};
     // The game sets the motors every frame; the host call costs ~0.4 ms per pad slot (11% of the frame time in
     // chapter 1, r119 perf), so pass it on only when the speeds change (and again every 2 s for a pad plugged in later).
     static PcVibration last = {0xFFFF, 0xFFFF};
@@ -567,6 +570,11 @@ uint32_t __stdcall XInputSetState(Device *h, uint8_t *pFeedback)
     ULONGLONG now = GetTickCount64();
     if (h->port == 0 && (v.wLeftMotorSpeed != last.wLeftMotorSpeed || v.wRightMotorSpeed != last.wRightMotorSpeed || now - last_ms > 2000)) {
         for (DWORD i = 0; g_pc_set && i < 4; i++) g_pc_set(i, &v); // port 0 = every PC pad
+        static int logged; // the first changes, as evidence in the log
+        if (logged < 40 && (v.wLeftMotorSpeed != last.wLeftMotorSpeed || v.wRightMotorSpeed != last.wRightMotorSpeed)) {
+            logged++;
+            logf("[input] rumble left %u right %u (frame %u)", v.wLeftMotorSpeed, v.wRightMotorSpeed, g_frame_count.load());
+        }
         last = v;
         last_ms = now;
     }
