@@ -10,6 +10,8 @@
 #include "resource.h"
 #include "strings.h"
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <windowsx.h>
 #include <d2d1.h>
@@ -25,6 +27,7 @@
 #include <cstdio>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -38,8 +41,8 @@ constexpr float kW = 1180, kH = 700, kNavW = 236;
 D2D1_COLOR_F rgb(uint32_t v, float a = 1.0f) { return D2D1::ColorF(v, a); }
 const uint32_t kInk = 0x0b0a0d, kInk3 = 0x2a2630, kBone = 0xece7dd, kAsh = 0xa39c92, kBlood = 0xcf3640, kGold = 0xcfa650;
 
-enum Page { kStart, kInstall, kDisplay, kGraphics, kControls, kSaves, kAbout, kPageCount };
-const wchar_t *const kIcons[kPageCount] = {L"\xE768", L"\xE896", L"\xE7F4", L"\xE790", L"\xE7FC", L"\xE74E", L"\xE946"};
+enum Page { kStart, kInstall, kDisplay, kGraphics, kControls, kSaves, kOnline, kAbout, kPageCount };
+const wchar_t *const kIcons[kPageCount] = {L"\xE768", L"\xE896", L"\xE7F4", L"\xE790", L"\xE7FC", L"\xE74E", L"\xE774", L"\xE946"};
 
 template <class T> void release(T *&p)
 {
@@ -87,6 +90,13 @@ struct App {
     int list_open = 0; // the drop-down list open: 0 none, else its hit id (kHitResList, kHitGpu)
     int drag = 0;         // the slider being dragged (kHitGain, kHitGamma), its value until the button is released
     float drag_value = 1.0f;
+    // the Online page: what the game program found in the chosen files (--online-check), for which files; the network
+    // check's result (made on a thread of its own)
+    std::map<std::string, std::vector<std::string>> online;
+    std::string online_for;
+    std::mutex net_lock;
+    std::wstring net_result;
+    bool net_bad = false, net_busy = false;
 };
 enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete, kAskReset, kAskUnsavedStart, kAskUnsavedClose, kAskRestore, kAskImport,
        kAskExport };
@@ -101,7 +111,8 @@ enum {
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitResList = 300, kHitShadow = 320, kHitAniso = 340,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
-    kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510
+    kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
+    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia
 };
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -141,7 +152,9 @@ const struct {
     {Str::BackupCard, Str::HelpBackupCard},
     {Str::XreviveCard, Str::HelpXreviveCard},
     {Str::KeyboardCard, Str::HelpKeyboard},
-    {Str::PadCard, Str::HelpPad}
+    {Str::PadCard, Str::HelpPad},
+    {Str::OnlineCard, Str::HelpOnline},
+    {Str::DnsCard, Str::HelpDns}
 };
 constexpr int kSettingHelpCount = (int)(sizeof kSettingHelp / sizeof kSettingHelp[0]);
 int help_id(Str label)
@@ -221,7 +234,7 @@ std::string black_ini_saved(const char *key)
 {
     FILE *f = _wfopen((g.dir + L"\\black.ini").c_str(), L"r");
     if (!f) return "";
-    char line[512];
+    char line[1024];
     std::string v;
     size_t n = strlen(key);
     while (fgets(line, sizeof line, f)) {
@@ -251,7 +264,7 @@ void black_ini_write(const char *key, const std::string &value)
     std::vector<std::string> lines;
     FILE *f = _wfopen(path.c_str(), L"r");
     if (f) {
-        char line[512];
+        char line[1024];
         while (fgets(line, sizeof line, f)) {
             std::string l = line;
             l.erase(l.find_last_not_of("\r\n") + 1);
@@ -422,14 +435,15 @@ void check_game()
     if (!exists(g.game)) g.game_detail.clear();
 }
 
-bool pick(bool folder, std::wstring *out)
+// A folder or a file (filter: the file types offered first, default disc images)
+bool pick(bool folder, std::wstring *out, const COMDLG_FILTERSPEC *filter = nullptr)
 {
     IFileOpenDialog *d = nullptr;
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&d)))) return false;
     DWORD opt = 0;
     d->GetOptions(&opt);
     d->SetOptions(opt | FOS_FORCEFILESYSTEM | (folder ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST));
-    COMDLG_FILTERSPEC spec[] = {{S(Str::ImageFilter), L"*.iso"}, {L"*.*", L"*.*"}};
+    COMDLG_FILTERSPEC spec[] = {filter ? *filter : COMDLG_FILTERSPEC{S(Str::ImageFilter), L"*.iso"}, {L"*.*", L"*.*"}};
     if (!folder) d->SetFileTypes(2, spec);
     bool ok = false;
     IShellItem *item = nullptr;
@@ -591,6 +605,162 @@ void choose_existing()
 {
     std::wstring dir;
     if (!installing() && pick(true, &dir)) set_game_folder(dir);
+}
+
+// --- the Online page -----------------------------------------------------------------------------------------------
+// black.ini online = 1 with online_eeprom / online_hdd (the xemu files the player registered with Insignia) and
+// online_dns_mode (insignia / console): the game program's net/online.cpp, project/docs/09.
+
+std::wstring from_utf8(const std::string &s)
+{
+    std::wstring w(MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0), L'\0');
+    if (!w.empty()) MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), &w[0], (int)w.size());
+    return w;
+}
+
+std::string to_utf8(const std::wstring &w)
+{
+    std::string s(WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr), '\0');
+    if (!s.empty()) WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), &s[0], (int)s.size(), nullptr, nullptr);
+    return s;
+}
+
+// What the game program finds in the chosen files (--online-check: whether the EEPROM verifies, the disk has a
+// registered console and which gamertags, the console's DNS setting, whether xemu runs; nothing secret), asked again
+// only when the files change. One "key = value" a line; a key may repeat (account).
+void online_check()
+{
+    std::string ee = black_ini("online_eeprom"), hdd = black_ini("online_hdd");
+    if (ee + "|" + hdd == g.online_for) return;
+    g.online_for = ee + "|" + hdd;
+    g.online.clear();
+    if (ee.empty() || hdd.empty()) return;
+    CreateDirectoryW((g.dir + L"\\cache").c_str(), nullptr);
+    std::wstring out = g.dir + L"\\cache\\online_check.txt";
+    DeleteFileW(out.c_str());
+    std::wstring cmd = L"\"" + game_exe() + L"\" --background --online-eeprom \"" + from_utf8(ee) + L"\" --online-hdd \"" +
+                       from_utf8(hdd) + L"\" --online-check \"" + out + L"\" \"" + g.game + L"\"";
+    STARTUPINFOW si = {sizeof si};
+    PROCESS_INFORMATION pi = {};
+    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, g.dir.c_str(), &si, &pi)) return;
+    WaitForSingleObject(pi.hProcess, 10000);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    FILE *f = _wfopen(out.c_str(), L"r");
+    if (!f) return;
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        std::string l = line;
+        size_t eq = l.find(" = ");
+        if (eq == std::string::npos) continue;
+        l.erase(l.find_last_not_of("\r\n") + 1);
+        g.online[l.substr(0, eq)].push_back(l.substr(eq + 3));
+    }
+    fclose(f);
+}
+
+std::string online_value(const char *key)
+{
+    auto it = g.online.find(key);
+    return it == g.online.end() || it->second.empty() ? "" : it->second[0];
+}
+
+// The DNS server the game will ask first: Insignia's (black.ini online_dns, default 46.101.64.175), or with
+// online_dns_mode = console the console's first manual server
+std::string dns_server(bool *console_pc)
+{
+    std::string relay = black_ini("online_dns");
+    if (relay.empty()) relay = "46.101.64.175";
+    *console_pc = false;
+    if (black_ini("online_dns_mode") == "console" && online_value("dns") == "manual" && !online_value("dns1").empty()) {
+        *console_pc = true;
+        return online_value("dns1");
+    }
+    return relay;
+}
+
+// Check network: asks that server for AS.XBOXLIVE.COM (the game's first lookup) on a thread of its own; the answer
+// tells a working DNS, a proxy's fake address (198.18.0.0/15, TUN mode), or no answer
+void net_check()
+{
+    if (g.net_busy) return;
+    bool pc = false;
+    std::string server = dns_server(&pc);
+    g.net_busy = true;
+    {
+        std::lock_guard<std::mutex> l(g.net_lock);
+        g.net_result = S(Str::NetChecking);
+        g.net_bad = false;
+    }
+    std::thread([server, pc] {
+        WSADATA wd;
+        WSAStartup(MAKEWORD(2, 2), &wd);
+        uint8_t q[64] = {0x4E, 0x47, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0}; // id "NG", recursion desired, one question
+        size_t n = 12;
+        for (const char *label : {"AS", "XBOXLIVE", "COM"}) {
+            q[n++] = (uint8_t)strlen(label);
+            memcpy(q + n, label, strlen(label));
+            n += strlen(label);
+        }
+        q[n++] = 0;
+        const uint8_t tail[4] = {0, 1, 0, 1}; // type A, class IN
+        memcpy(q + n, tail, 4);
+        n += 4;
+        SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        DWORD timeout = 3000;
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof timeout);
+        sockaddr_in to = {};
+        to.sin_family = AF_INET;
+        to.sin_port = htons(53);
+        inet_pton(AF_INET, server.c_str(), &to.sin_addr);
+        uint8_t r[512];
+        int got = sendto(s, (const char *)q, (int)n, 0, (sockaddr *)&to, sizeof to) > 0 ? recv(s, (char *)r, sizeof r, 0) : -1;
+        closesocket(s);
+        std::string addr; // the first address in the answer
+        if (got > 12 && r[0] == 0x4E && r[1] == 0x47) {
+            int answers = r[6] << 8 | r[7];
+            size_t i = 12;
+            while (i < (size_t)got && r[i]) i += r[i] >= 0xC0 ? 2 : 1 + r[i];
+            i += 5; // the name's end, type, class
+            for (int k = 0; k < answers && addr.empty() && i + 12 <= (size_t)got; k++) {
+                if (r[i] >= 0xC0) i += 2;
+                else {
+                    while (i < (size_t)got && r[i]) i += 1 + r[i];
+                    i++;
+                }
+                if (i + 10 > (size_t)got) break;
+                int type = r[i] << 8 | r[i + 1], len = r[i + 8] << 8 | r[i + 9];
+                if (type == 1 && len == 4 && i + 14 <= (size_t)got) {
+                    char b[16];
+                    snprintf(b, sizeof b, "%u.%u.%u.%u", r[i + 10], r[i + 11], r[i + 12], r[i + 13]);
+                    addr = b;
+                }
+                i += 10 + len;
+            }
+        }
+        std::wstring w_server = from_utf8(server), w_addr = from_utf8(addr), result;
+        bool bad = true;
+        wchar_t b[256];
+        if (got <= 0) {
+            swprintf(b, 256, S(pc ? Str::NetSilentPc : Str::NetSilent), w_server.c_str());
+            result = b;
+        } else if (addr.empty()) {
+            result = S(Str::NetNoAddr);
+        } else if (addr.rfind("198.18.", 0) == 0 || addr.rfind("198.19.", 0) == 0) {
+            swprintf(b, 256, S(Str::NetFake), w_addr.c_str());
+            result = b;
+        } else {
+            result = S(Str::NetOk) + w_addr + L"  (" + w_server + L")";
+            bad = false;
+        }
+        {
+            std::lock_guard<std::mutex> l(g.net_lock);
+            g.net_result = result;
+            g.net_bad = bad;
+        }
+        g.net_busy = false;
+        InvalidateRect(g.hwnd, nullptr, FALSE);
+    }).detach();
 }
 
 // --- resources --------------------------------------------------------------------------------------------------
@@ -918,7 +1088,8 @@ struct Painter {
                   : g.ask == kAskReset   ? Str::ResetTitle
                                          : Str::AskDeleteTitle;
         Str body = g.ask == kAskOverwrite ? Str::AskOverwrite : g.ask == kAskNonEmpty ? Str::AskNonEmpty
-                 : g.ask == kAskReset     ? (g.page == kDisplay ? Str::ResetDisplay : g.page == kControls ? Str::ResetControls : Str::ResetGraphics)
+                 : g.ask == kAskReset     ? (g.page == kDisplay ? Str::ResetDisplay : g.page == kControls ? Str::ResetControls
+                                            : g.page == kOnline ? Str::ResetOnline : Str::ResetGraphics)
                  : g.ask == kAskUnsavedStart ? Str::UnsavedStart
                  : g.ask == kAskUnsavedClose ? Str::UnsavedClose
                                           : Str::DeleteConfirm;
@@ -1544,6 +1715,81 @@ struct Painter {
         return b;
     }
 
+    // Online: the switch, the registered console's files, DNS and a network check, how to sign in (black.ini online*)
+    void online_page()
+    {
+        online_check();
+        D2D1_RECT_F c;
+        float y = settings_page(Str::NavOnline, Str::OnlineCard, 4, &c);
+        const float lx = c.left + 26, cx = c.left + 210, right = c.right - 26, bw = 120;
+        auto label = [&](Str s) { text(S(s), {lx, y, cx - 10, y + 30}, 13.5f, kAsh); };
+        auto path_row = [&](Str s, const char *key, int hit) {
+            label(s);
+            std::string v = black_ini(key);
+            text(v.empty() ? std::wstring(S(Str::NotChosen)) : from_utf8(v), {cx, y, right - bw - 12, y + 30}, 13.5f,
+                 v.empty() ? kAsh : kBone, v.empty() ? 0.7f : 1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING,
+                 0.0f, true);
+            button(hit, {right - bw, y, right, y + 30}, S(Str::ChooseFile), false);
+            y += 40;
+        };
+        label(Str::OnlineSwitch);
+        segmented(kHitOnline, cx, y, {S(Str::On), S(Str::Off)}, black_ini("online") == "1" ? 0 : 1, 72);
+        y += 40;
+        path_row(Str::OnlineEeprom, "online_eeprom", kHitPickEeprom);
+        path_row(Str::OnlineHdd, "online_hdd", kHitPickHdd);
+        label(Str::OnlineStatus);
+        // the check's result: what is wrong first, else valid and the gamertags
+        std::wstring st;
+        bool good = false;
+        std::string ee = online_value("eeprom"), hdd = online_value("hdd");
+        if (black_ini("online_eeprom").empty() || black_ini("online_hdd").empty()) st = S(Str::OnlineFilesNone);
+        else if (g.online.empty()) st = S(Str::OnlineCheckFailed);
+        else if (ee == "unreadable") st = S(Str::OnlineEepromUnreadable);
+        else if (ee != "ok") st = S(Str::OnlineEepromBad);
+        else if (hdd != "ok") st = S(Str::OnlineHddBad) + from_utf8(hdd);
+        else if (online_value("registered") != "1") st = S(Str::OnlineNotRegistered);
+        else {
+            st = S(Str::OnlineOk);
+            auto it = g.online.find("account");
+            if (it != g.online.end()) {
+                st += S(Str::OnlineAccounts);
+                for (size_t i = 0; i < it->second.size(); i++) st += (i ? L", " : L"") + from_utf8(it->second[i]);
+            }
+            good = true;
+        }
+        if (good && online_value("xemu") == "1") st = S(Str::OnlineXemu), good = false;
+        text(st, {cx, y, right, y + 30}, 13, good ? kGold : black_ini("online_eeprom").empty() ? kAsh : kBlood, 1.0f,
+             DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+
+        // DNS
+        D2D1_RECT_F c2 = {c.left, c.bottom + 12, c.right, c.bottom + 12 + 50 + 3 * 40 + 8};
+        y = card(c2, S(Str::DnsCard), help_id(Str::DnsCard));
+        label(Str::DnsConsole);
+        std::string mode = online_value("dns");
+        std::wstring console = mode.empty() ? L"\u2014"
+                             : mode == "manual" ? S(Str::DnsManual) + from_utf8(online_value("dns1")) + L" / " + from_utf8(online_value("dns2"))
+                                                : std::wstring(S(Str::DnsAuto));
+        text(console, {cx, y, right, y + 30}, 13.5f, mode.empty() ? kAsh : kBone);
+        y += 40;
+        label(Str::DnsMode);
+        bool by_console = black_ini("online_dns_mode") == "console";
+        segmented(kHitDnsMode, cx, y, {S(Str::DnsInsignia), S(Str::DnsByConsole)}, by_console ? 1 : 0, 170);
+        text(S(by_console ? Str::DnsConsoleNote : Str::DnsInsigniaNote), {cx + 2 * 176 + 10, y - 4, right, y + 34}, 12, kAsh, 0.8f);
+        y += 40;
+        button(kHitNetCheck, {cx, y, cx + 170, y + 30}, S(Str::NetCheck), false, !g.net_busy);
+        {
+            std::lock_guard<std::mutex> l(g.net_lock);
+            if (!g.net_result.empty())
+                text(g.net_result, {cx + 182, y - 5, right, y + 35}, 12.5f, g.net_busy ? kAsh : g.net_bad ? kBlood : kGold);
+        }
+
+        // how to sign in
+        D2D1_RECT_F c3 = {c.left, c2.bottom + 12, c.right, c2.bottom + 12 + 50 + 48};
+        y = card(c3, S(Str::LoginCard));
+        text(S(Str::LoginHow), {lx, y - 6, right - 160, y + 42}, 12.5f, kBone, 0.9f);
+        button(kHitInsignia, {right - 140, y + 2, right, y + 32}, S(Str::InsigniaSite), false);
+    }
+
     void placeholder_page()
     {
         const float x = kNavW + 56;
@@ -1564,6 +1810,7 @@ struct Painter {
         else if (g.page == kSaves) saves_page();
         else if (g.page == kAbout) about_page();
         else if (g.page == kControls) controls_page();
+        else if (g.page == kOnline) online_page();
         else placeholder_page();
         if (overlay) overlay(); // an open drop-down list, over the page
         if (g.help) help_panel();
@@ -1754,6 +2001,9 @@ void reset_page(Page p)
     } else if (p == kControls) {
         for (int i = 0; i < keys::kInputs; i++) kb_write(i, keys::default_key(i, 0), keys::default_key(i, 1));
         for (int b = 0; b < keys::kButtons; b++) black_ini_set((std::string("padmap_") + keys::input_ini(b)).c_str(), keys::input_ini(b));
+    } else if (p == kOnline) { // the chosen files stay
+        black_ini_set("online", "0");
+        black_ini_set("online_dns_mode", "insignia");
     }
 }
 
@@ -1942,6 +2192,15 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id >= kHitFx && id < kHitFx + 2) black_ini_set("effectsnative", id == kHitFx ? "1" : "0");
         else if (id >= kHitVsync && id < kHitVsync + 2) black_ini_set("vsync", id == kHitVsync ? "1" : "0");
         else if (id >= kHitHud && id < kHitHud + 2) black_ini_set("perfhud", id == kHitHud ? "1" : "0");
+        else if (id >= kHitOnline && id < kHitOnline + 2) black_ini_set("online", id == kHitOnline ? "1" : "0");
+        else if (id >= kHitDnsMode && id < kHitDnsMode + 2) black_ini_set("online_dns_mode", id == kHitDnsMode ? "insignia" : "console");
+        else if (id == kHitPickEeprom || id == kHitPickHdd) {
+            COMDLG_FILTERSPEC spec = {S(Str::OnlineFilter), id == kHitPickEeprom ? L"*.bin;*.rom" : L"*.qcow2;*.img;*.bin"};
+            std::wstring f;
+            if (pick(false, &f, &spec)) black_ini_set(id == kHitPickEeprom ? "online_eeprom" : "online_hdd", to_utf8(f));
+        }
+        else if (id == kHitNetCheck) net_check();
+        else if (id == kHitInsignia) ShellExecuteW(h, L"open", L"https://insignia.live/", nullptr, nullptr, SW_SHOWNORMAL);
         else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso)
             g.list_open = id;
         InvalidateRect(h, nullptr, FALSE);

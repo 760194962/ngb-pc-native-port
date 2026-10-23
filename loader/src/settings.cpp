@@ -41,7 +41,7 @@ void load_file()
 {
     FILE *f = nullptr;
     if (_wfopen_s(&f, ini_file().c_str(), L"r") || !f) return;
-    char line[256];
+    char line[1024];
     while (fgets(line, sizeof line, f)) {
         char key[64] = "", val[128] = "";
         if (line[0] == '#' || sscanf_s(line, " %63[^= ] = %127s", key, (unsigned)sizeof key, val, (unsigned)sizeof val) != 2) continue;
@@ -93,6 +93,7 @@ void load_file()
         else if (k == "fov") g_cfg.fov = std::clamp(v, 50.0f, 120.0f);
         else if (k == "skipanymovie") g_cfg.skip_movies = v != 0;
         else if (k == "online") g_cfg.online = v != 0;
+        else if (k == "online_dns_mode") g_cfg.online_dns_console = !strcmp(val, "console");
         else if (k == "reverb") g_cfg.reverb = v != 0;
         else if (k == "reverb_gain") g_cfg.reverb_gain = std::clamp(v, 0.0f, 8.0f);
         else if (padkeys::load_ini(k.c_str(), val)) {} // kb_<input> = Key[,Key], padmap_<input> = <input> (Ninja Gaiden Black)
@@ -112,7 +113,7 @@ std::vector<std::pair<std::string, std::string>> all_lines()
     write_all(f);
     fclose(f);
     if (_wfopen_s(&f, tmp.c_str(), L"r") || !f) return v;
-    char line[256], key[64];
+    char line[1024], key[64];
     while (fgets(line, sizeof line, f))
         if (line[0] != '#' && sscanf_s(line, " %63[^= ]", key, (unsigned)sizeof key) == 1) v.push_back({key, line});
     fclose(f);
@@ -136,7 +137,7 @@ void settings_save()
     std::lock_guard<std::mutex> g(g_lock);
     std::vector<std::string> file; // black.ini's lines now
     FILE *f = nullptr;
-    char line[256], key[64];
+    char line[1024], key[64];
     if (!_wfopen_s(&f, ini_file().c_str(), L"r") && f) {
         while (fgets(line, sizeof line, f)) file.push_back(line);
         fclose(f);
@@ -183,6 +184,7 @@ void write_all(FILE *f)
     if (!g_cfg.online_eeprom.empty()) fprintf(f, "online_eeprom = %s\n", narrow(g_cfg.online_eeprom).c_str());
     if (!g_cfg.online_hdd.empty()) fprintf(f, "online_hdd = %s\n", narrow(g_cfg.online_hdd).c_str());
     if (!g_cfg.online_dns.empty()) fprintf(f, "online_dns = %s\n", narrow(g_cfg.online_dns).c_str());
+    fprintf(f, "online_dns_mode = %s\n", g_cfg.online_dns_console ? "console" : "insignia");
     fprintf(f, "seamfill = %d\n", g_cfg.seam_fill ? 1 : 0);
     fprintf(f, "effectsnative = %d\n", g_cfg.effects_native ? 1 : 0);
     fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\naniso = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0,

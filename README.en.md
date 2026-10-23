@@ -183,32 +183,39 @@ code runs unchanged, as it does in xemu.
    account with xemu, and check that you can sign in to Xbox Live there. Your EEPROM (`eeprom.bin`) and hard disk image
    (`xbox_hdd.qcow2`) then hold the console's identity and the account.
 2. **Close xemu**: one console cannot sign in twice, and the port stays offline while xemu runs.
-3. **Edit `black.ini`** (next to the game program; the launcher writes it when you save settings, or create it):
+3. **The launcher's Online page**:
+   - Select On, then choose the two files with "Choose file…". Both files are only read.
+   - The Console row shows the check: whether the identity is valid, whether the console is registered, and which accounts it holds.
+   - Press Save.
 
-   ```
-   online = 1
-   online_eeprom = D:\xemu\eeprom.bin
-   online_hdd = D:\xemu\xbox_hdd.qcow2
-   ```
+   The page writes `black.ini` next to the game program (`online = 1`, `online_eeprom = …`, `online_hdd = …`), which you
+   can also edit by hand.
+4. **In the game**: main menu → Ranking, pick your gamertag to sign in, and view the leaderboards. When it connects, the
+   picture's bottom-right corner says so.
 
-   Use your own paths (spaces are fine). Both files are only read. The launcher has no online switch yet.
-4. **In the game**: main menu → Ranking, pick your gamertag to sign in, and view the leaderboards.
+**Do you need InsigniaDNS?** Not by default. The Online page's DNS "Lookups":
 
-**Do you need InsigniaDNS?** It has nothing to do with how fast your connection is; it depends on the network
-settings of the console in xemu:
+- **Insignia's DNS** (the default, recommended): the port sends every DNS lookup of the game to Insignia's DNS
+  (`46.101.64.175`; change it with `online_dns = …`), whatever xemu was set to, with no InsigniaDNS. Only inside the port;
+  the console's files are not changed.
+- **As the console sets**: as in xemu. With automatic DNS it also asks Insignia's; with manual DNS it asks only the
+  addresses entered. If that is a PC running InsigniaDNS.exe (common when registering, e.g. a `192.168.x.x` primary),
+  keep it running there.
 
-- **Automatic DNS**: no. The port relays lookups to Insignia's DNS (`46.101.64.175`; change it with `online_dns = ...`).
-- **Manual DNS**: the game asks only the addresses you entered.
-  - If you entered Insignia's DNS: no.
-  - If you entered a PC that runs InsigniaDNS.exe (common when registering, e.g. a `192.168.x.x` primary): keep
-    InsigniaDNS.exe running on that PC.
-  - If you entered only an ordinary DNS such as `1.1.1.1`: it cannot connect. Change the setting in xemu's system
-    settings to automatic or to Insignia's DNS; the port does not save setting changes.
+The Console setting row shows the DNS setting of the console in xemu (automatic, or manual and the addresses).
 
 **If it cannot connect:**
 
-- A proxy's (Clash etc.) TUN / fake-ip mode captures every DNS lookup; turn TUN off first.
-- At "cannot connect to Xbox Live" press Ⓑ. Ⓐ looks for the online dashboard, and the port can only restart the game.
+- Press Check network on the Online page first. It asks for `AS.XBOXLIVE.COM` the way the lookups are set:
+  - an address: DNS works;
+  - `198.18.x.x`: a proxy's (Clash etc.) TUN / fake-ip mode captures DNS; turn TUN off;
+  - no answer: check the network, or the InsigniaDNS on that PC.
+
+  An InsigniaDNS on a LAN address (`192.168.x.x`) is usually not captured by TUN, so with TUN on, try "As the console sets".
+- The game also shows why it cannot connect in the bottom-right corner: DNS captured, DNS not answering, xemu running,
+  files not valid.
+- In the game's "cannot connect" / "repair gamertag" boxes, Ⓐ now cancels like Ⓑ. Their Ⓐ used to open the Xbox
+  dashboard, which the port does not have.
 - In `black.log`, search for `online:` and `[net]` to see whether the identity was read and what DNS answered.
 
 Details and evidence: `project/docs/09_联网_Insignia.md`.

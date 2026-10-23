@@ -8,24 +8,29 @@ Insignia 后显示真实的中忍榜单，用户的名次也在其中。
 ## 怎么打开
 
 默认关闭，不打开时游戏和以前完全一样（看不到网络，排行榜报无法连接）。需要玩家自己已经在 xemu 里注册过 Insignia
-的那一套文件：
+的那一套文件。启动器的「联网」页（下文「界面」）写的就是这几行：
 
 ```
-# black.ini（路径可以有空格）
+# black.ini（路径可以有空格，UTF-8）
 online = 1
 online_eeprom = E:\games\emu\xemu\xemu\Component\4- Eemprom\eeprom.bin
 online_hdd = E:\games\emu\xemu\xemu\Component\3- Xbox HDD\xbox_hdd.qcow2
-# online_dns = 46.101.64.175   （可选：游戏用 DHCP 给的 DNS 时转发到哪里）
+online_dns_mode = insignia     # 默认：所有 DNS 查询转给 online_dns；console：按主机网络设定
+# online_dns = 46.101.64.175   （可选：Insignia 的 DNS）
 ```
 
-命令行：`--online-eeprom <文件> --online-hdd <文件>`（同时打开联网），`--offline` 关闭。
+命令行：
+- `--online-eeprom <文件> --online-hdd <文件>`：同时打开联网；`--offline`：关闭。
+- `--online-dns-mode insignia|console`：DNS 查询方式。
+- `--online-check <输出文件>`：检查两个文件后退出，给启动器用。
 
 注意：
 
 - 两个文件只读，不写回；硬盘镜像可以是 xemu 的 qcow2（未压缩簇）或原始镜像。
 - 同一台「主机」不能同时登录两次：启动时发现 `xemu.exe` 在运行就不开联网（日志 `online: off (xemu is running…)`）。
-- 主机网络设定里如果是手动 DNS（注册时常见：主 DNS 是跑 InsigniaDNS 的那台电脑，次 DNS 1.1.1.1），游戏就去问这些地址；
-  所以要么在那台电脑上开着 InsigniaDNS.exe，要么那台电脑的地址恰好就是本机。只有主机用自动 DNS 时才转发到 `online_dns`。
+- DNS：默认 `online_dns_mode = insignia`，游戏发出的所有 DNS 查询（不论问哪个地址）都转给 `online_dns`，玩家不用开
+  InsigniaDNS。`console` 时和 xemu 一样：主机网络设定里是手动 DNS 时（注册时常见：主 DNS 是跑 InsigniaDNS 的那台电脑，
+  次 DNS 1.1.1.1），游戏就去问这些地址，那台电脑上要开着 InsigniaDNS.exe；只有发往 DHCP 给的 10.0.2.3 的才转发。
 - 代理软件的 TUN / fake-ip 模式会把所有 DNS 截走、回 198.18.x.x 的假地址，Insignia 连不上（下文「排查记录」）。测试时
   关闭 TUN，或把 `+.xboxlive.com` 加进 fake-ip 过滤、`46.101.64.175` 与 Insignia 服务器直连。
 
@@ -71,11 +76,45 @@ online_hdd = E:\games\emu\xemu\xemu\Component\3- Xbox HDD\xbox_hdd.qcow2
 
 （r440 新版联网关闭 91.1%：那次窗口开在另一块 1920×1200 的显示器上，后台缓冲不同，不作比较，r443 重测。）
 
+## 界面（2026-10-23 第二步）
+
+用户：「让用户可以在界面上操作联网开关，网络必要的设置和登录等等必要信息」。方案经用户确认：
+- DNS 默认「直接用 Insignia DNS」；
+- 不自动读 xemu.toml，只用「选择文件」；
+- 游戏里提示失败原因与「已连接」，Ⓐ 也当取消；
+- 显示玩家代号。
+
+| 部分 | 文件 | 说明 |
+|---|---|---|
+| 启动器「联网」页 | `launcher/src/main.cpp`、`strings.*` | 开关；EEPROM / 硬盘镜像选文件；「主机」行显示检查结果（身份有效、已注册、账号）；DNS 卡：主机设定（自动 / 手动及地址）、查询方式（直接用 Insignia DNS / 按主机设定）、「检查网络」；登录说明与 Insignia 官网链接；两个「?」帮助；保存 / 放弃 / 恢复默认与其他设定页相同 |
+| 检查 | `net/online.cpp` `online_check` | 启动器以 `--online-check` 调游戏程序（隐藏窗口），复用同一套解密与 qcow2 读取；输出只有：EEPROM ok / invalid / unreadable、硬盘 ok / 原因、registered、account（扇区 10–31 偏移 24 的玩家代号）、dns auto / manual 与两个地址、xemu 是否在运行。不含密钥、序列号、MAC |
+| 主机 DNS 设定 | 同上 | 配置区第 8 扇区：偏移 76 的标志位 8 = 手动 DNS，96 / 100 两个 DNS（用户的盘：标志 8、192.168.2.8 / 1.1.1.1，与 InsigniaDNS 窗口里的主机设定一致）。标志位 8 的含义只由这一块盘推断，还没有拿自动 DNS 的盘对照过 |
+| 检查网络 | `launcher/src/main.cpp` `net_check` | 在单独线程里按当前查询方式向那台 DNS 问 `AS.XBOXLIVE.COM`，3 秒超时：答出地址＝正常；198.18.0.0/15＝代理 TUN；无回应＝网络或 InsigniaDNS |
+| 游戏里的提示 | `d3d/perfhud.cpp` `notice`、`net/vnet.cpp`、`ngb/d3d_ngb.cpp` | 画面右下角一行字，8 秒，每种一局一次：DNS 回答 198.18.x.x、DNS 4 秒无回应、安全网关（3074）第一次回包＝「已连接 Insignia」、`online = 1` 但没开成（xemu 在运行、文件无效…）在进排行榜时提示。与性能叠加层共用绘制，没有提示时每帧只多一次原子读 |
+| Ⓐ 当取消 | `ngb_livedash.cpp` | 排行榜三个对话框处理函数 FUN_002FFAB0 / FUN_003023B0 / FUN_00302560（读 0xD219A8 + 端口×0x78 的按键：0x110 Ⓐ、0x220 Ⓑ）里，Ⓐ 去仪表板的 6 段代码（push 0x40 / push 5 / call 音效 → XLaunchNewImageA(NULL)，原因 6 网络设定、7 新账号、8 修复账号）开头改为 jmp 到同一框的 Ⓑ 代码；只有 Ⓐ 的那个框（case 4）跳到各框共用的关闭代码。改之前核对 6 处字节，不符就不改 |
+
+证据：
+- **检查模式：** 用户的文件 → `eeprom = ok`、`registered = 1`、`account = <用户的玩家代号>`、`dns = manual 192.168.2.8 / 1.1.1.1`；错误文件 → `eeprom = invalid`、`hdd = cannot read the file`。
+- **r446：** DNS 指向不可达地址 10.255.255.1，但本机 Clash TUN 开着，查询仍被截走、回 198.18.0.252。提示「DNS 被代理软件截走」出现（日志 `shown to the player`），游戏弹出「此玩家代号无法使用。按Ⓐ修复…」；探针显示这时运行的是 FUN_00302560。
+- **r447：** 同一个框按 Ⓐ 后回到玩家代号列表（截图 r26），没有重启。`--rawvideo` 截到右下角的提示，中文正常。
+- **r448：** `--online-dns-mode console`，经本机 InsigniaDNS（192.168.2.8）登录，排行榜显示用户自己的成绩，日志 `shown to the player: 联网：已连接 Insignia`。
+- **启动器：** `--snap` 中英文截图正常。「检查网络」实测：
+  - 「直接用 Insignia DNS」：本机 TUN 开着，回答 198.18.0.252，判为被截走；
+  - 「按主机设定」：192.168.2.8 答 49.13.57.101，正常。局域网地址不经 TUN。
+- **性能（铁律，集显第 1 章 bench）：**
+
+  | 运行 | 游戏速度 | 超时帧 | 平均帧时间 |
+  |---|---|---|---|
+  | r449 新版 | 97.7% | 0.2% | 8.48 ms |
+  | r450 上一版 | 97.7% | 0.2% | 8.32 ms |
+
+  平均帧时间之差在此前 8.31–8.52 ms 的波动范围内。
+
+待用户实测：TUN 关闭时「直接用 Insignia DNS」能否登录。这时 InsigniaDNS 可以关掉。
+
 ## 未完成 / 已知问题
 
-- 启动器还没有联网的开关和选文件界面，目前只能改 black.ini 或用命令行。
 - 用户测试时切到后台后画面变黑（游戏仍在出帧、能操作；那次是强制集显的测试版，窗口在另一块显示器上）；尚未查明，用户
   说先不管。
 - `XePublicKeyData` 为空：需要它的签名检查都判为失败（登录与排行榜没有用到）。
-- 「无法连接 XBOX LIVE」框里按 Ⓐ 会去找联网仪表板，移植版会重新启动本篇；应按 Ⓑ。
 - 只测了 UDP；TCP 从没出现在线上（服务都走安全网关的 UDP 隧道），出现时日志会记 `IP protocol 6 … not relayed`。

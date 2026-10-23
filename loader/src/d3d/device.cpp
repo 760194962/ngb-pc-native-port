@@ -1700,7 +1700,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     pace_swap();
     upload_cpu_backbuffer();
     present_backbuffer();
-    if (g_cfg.perfhud) { // the performance overlay over the finished picture
+    if (perfhud::active()) { // the performance overlay / an online message over the finished picture
         RECT frame, pic;
         host3d::frame_layout(&frame, &pic);
         perfhud::frame();

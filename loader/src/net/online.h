@@ -4,9 +4,13 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 bool online_enabled();         // set up and running: the NIC, the console identity, the accounts
+const std::wstring &online_off_reason(); // black.ini online = 1 but online_init failed: why, for the player ("" otherwise)
 bool online_init();            // at start, before the game: false = stay offline (the reason is logged)
+// --online-check: checks black.ini's online files and writes what was found (no secrets) to out_path for the launcher
+bool online_check(const std::wstring &out_path);
 
 // The console's factory EEPROM values for ExQueryNonVolatileSetting (0x100 serial, 0x101 MAC, 0x102 online key,
 // 0x103 AV region, 0x104 game region): false = not online / not one of these

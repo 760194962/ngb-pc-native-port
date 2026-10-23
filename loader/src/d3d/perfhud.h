@@ -5,6 +5,8 @@
 // one small quad a frame.
 #include <d3d9.h>
 
+#include <string>
+
 namespace perfhud {
 
 // At device creation: the card's name and PCI ids (to find its engines in Windows' GPU counters). The thread starts
@@ -13,5 +15,10 @@ void start(const char *gpu_name, unsigned vendor_id, unsigned device_id);
 void frame();                                      // a Swap (the frame rate)
 void draw(IDirect3DDevice9 *d, const RECT &pic);   // over the host back buffer, inside the picture
 void release();                                    // before a Reset (a state block must not outlive it)
+
+// A one-line message at the picture's bottom-right for ms milliseconds (online play's status, net/online.cpp), shown
+// whether or not the overlay is on; any thread. Nothing is drawn or checked beyond one atomic load while none shows.
+void notice(const std::wstring &text, unsigned ms = 5000);
+bool active(); // the overlay is on or a message shows: draw() has something to do
 
 } // namespace perfhud

@@ -5,12 +5,14 @@
 // slots) is kept minimal and logged on first use.
 #include "common.h"
 #include "d3d/device.h"
+#include "d3d/perfhud.h"
 #include "d3d/dispatch.h"
 #include "d3d/nv2a_psh.h"
 #include "d3d/pushbuf.h"
 #include "d3d/state.h"
 #include "d3d/xd3d.h"
 #include "kernel/kexports.h"
+#include "net/online.h"
 
 #include <cstdio>
 #include <cstring>
@@ -356,6 +358,7 @@ int __stdcall XNetStartup(const void *pParams)
     if (!noted) {
         noted = true;
         logf("[net] XNetStartup: no network (WSAENETDOWN); the game's online features stay unavailable");
+        if (!online_off_reason().empty()) perfhud::notice(online_off_reason(), 8000); // online = 1 but it could not start
     }
     return 10050; // WSAENETDOWN
 }

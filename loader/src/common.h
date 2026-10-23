@@ -94,6 +94,10 @@ struct Config {
     // and --online-hdd) names the player's registered xemu EEPROM and hard disk image; both are only read.
     bool online = false;
     std::wstring online_eeprom, online_hdd, online_dns; // online_dns: Insignia's DNS server (default 46.101.64.175)
+    // black.ini online_dns_mode: insignia (default) relays every DNS query to online_dns; console sends them where the
+    // console's network settings say (manual DNS such as a PC running InsigniaDNS), as the Xbox / xemu would
+    bool online_dns_console = false;
+    std::wstring online_check; // --online-check FILE: check the online files, write the result there and exit (the launcher)
     bool known_build = false;  // the XBE is the NTSC-U build the address tables are for (main.cpp)
     std::wstring game_override; // --game-override: files there replace the game's of the same relative path
     std::wstring menu_cache;    // the port's rebuilt front-end files (fe/pages.cpp), served like --game-override after it
@@ -174,6 +178,7 @@ void log_init(const std::wstring &path);
 void logf(const char *fmt, ...); // the log file (and the console with --verbose)
 void install_ngb_exitmenu();      // the main menu's EXIT GAME row for Ninja Gaiden Black x2.1 (ngb_exitmenu.cpp)
 void install_ngb_aspect();        // black.ini aspect 16:10 / 21:9 for Ninja Gaiden Black x2.1 (ngb_aspect.cpp)
+void install_ngb_livedash();      // Ⓐ cancels Ranking's Xbox Live boxes instead of opening the dashboard (ngb_livedash.cpp)
 void logv(const char *fmt, va_list ap);
 void logc(const char *fmt, ...); // the log file and the console: startup, setup errors, exit, crashes
 [[noreturn]] void fatal(const char *fmt, ...);

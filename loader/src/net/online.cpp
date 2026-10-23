@@ -22,6 +22,7 @@ constexpr uint32_t CONFIG_AREA = 0x80000;    // the disk's first 1024 sectors
 constexpr uint32_t OVERLAY_START = 8 * 512;  // sectors 8 on; 0-7 (partition info, refurb, cache table) stay the port's
 
 bool g_enabled;
+std::wstring g_off_reason; // online = 1 but not started: why, for the player (online_off_reason)
 uint8_t g_eeprom[256];
 std::vector<uint8_t> g_config; // CONFIG_AREA bytes of the registered disk
 std::mutex g_config_lock;
@@ -163,30 +164,103 @@ bool process_running(const wchar_t *exe)
     return found;
 }
 
+// Config sector 8, the console's network settings as the dashboard writes them (offsets in the sector, read from a
+// registered console's disk, project/docs/09): 76 flags (8 = DNS entered by hand), 96 / 100 the two DNS servers
+constexpr int NET_SECTOR = 8, NET_FLAGS = 76, NET_DNS1 = 96, NET_DNS2 = 100;
+constexpr uint32_t NET_MANUAL_DNS = 8;
+
+std::string ip4(const uint8_t *p)
+{
+    char s[16];
+    snprintf(s, sizeof s, "%u.%u.%u.%u", p[0], p[1], p[2], p[3]);
+    return s;
+}
+
+// The gamertag of an account sector (9 the machine account, 10 on the players'): its name at offset 24, up to 15
+// characters; "" if that is not a name
+std::string account_name(const std::vector<uint8_t> &c, int sector)
+{
+    const char *p = (const char *)&c[sector * 512 + 24];
+    size_t n = strnlen(p, 16);
+    if (!n || n == 16) return "";
+    for (size_t i = 0; i < n; i++)
+        if (p[i] < 0x20 || p[i] > 0x7E) return "";
+    return std::string(p, n);
+}
+
 } // namespace
 
+bool online_check(const std::wstring &out_path)
+{
+    // What the launcher's 联网 page shows, one "key = value" per line: nothing secret (no key, serial or MAC)
+    std::string r;
+    auto put = [&](const char *k, const std::string &v) { r += std::string(k) + " = " + v + "\n"; };
+    put("xemu", process_running(L"xemu.exe") ? "1" : "0");
+    uint8_t e[256];
+    if (g_cfg.online_eeprom.empty()) put("eeprom", "missing");
+    else if (!read_file(g_cfg.online_eeprom, 0, e, sizeof e)) put("eeprom", "unreadable");
+    else {
+        uint8_t dec[28];
+        put("eeprom", kcrypto_selftest() && decrypt_eeprom(e, dec) ? "ok" : "invalid");
+        SecureZeroMemory(dec, sizeof dec);
+    }
+    SecureZeroMemory(e, sizeof e);
+    std::vector<uint8_t> c;
+    std::string why;
+    if (g_cfg.online_hdd.empty()) put("hdd", "missing");
+    else if (!read_config_area(g_cfg.online_hdd, c, why)) put("hdd", why);
+    else {
+        put("hdd", "ok");
+        put("registered", sector_signed(c, 9) ? "1" : "0");
+        for (int s = 10; s < 32; s++)
+            if (sector_signed(c, s) && !account_name(c, s).empty()) put("account", account_name(c, s));
+        if (sector_signed(c, NET_SECTOR)) {
+            const uint8_t *n = &c[NET_SECTOR * 512];
+            uint32_t flags;
+            memcpy(&flags, n + NET_FLAGS, 4);
+            put("dns", flags & NET_MANUAL_DNS ? "manual" : "auto");
+            put("dns1", ip4(n + NET_DNS1));
+            put("dns2", ip4(n + NET_DNS2));
+        } else put("dns", "auto"); // never set up: the dashboard's defaults (DHCP)
+    }
+    SecureZeroMemory(c.data(), c.size());
+    put("dns_relay", g_cfg.online_dns.empty() ? "46.101.64.175" : narrow(g_cfg.online_dns));
+    FILE *f = nullptr;
+    if (_wfopen_s(&f, out_path.c_str(), L"wb") || !f) return false;
+    fputs(r.c_str(), f);
+    fclose(f);
+    return true;
+}
+
 bool online_enabled() { return g_enabled; }
+
+const std::wstring &online_off_reason() { return g_off_reason; }
 
 bool online_init()
 {
     if (!g_cfg.online) return false;
-    auto fail = [](const std::string &why) {
+    auto fail = [](const std::string &why, const wchar_t *player) {
         logc("online: off (%s); the game runs without a network", why.c_str());
+        g_off_reason = std::wstring(L"联网未开启：") + player;
         return false;
     };
-    if (g_cfg.online_eeprom.empty() || g_cfg.online_hdd.empty()) return fail("black.ini needs online_eeprom and online_hdd");
+    if (g_cfg.online_eeprom.empty() || g_cfg.online_hdd.empty())
+        return fail("black.ini needs online_eeprom and online_hdd", L"没有选主机文件（启动器「联网」页）");
     // One console identity must not be on Xbox Live twice: xemu with the same EEPROM would be logged off by this
-    if (process_running(L"xemu.exe")) return fail("xemu is running; close it first (the same console must not sign in twice)");
-    if (!kcrypto_selftest()) return fail("crypto self-test failed");
-    if (!read_file(g_cfg.online_eeprom, 0, g_eeprom, sizeof g_eeprom)) return fail("cannot read online_eeprom " + narrow(g_cfg.online_eeprom));
+    if (process_running(L"xemu.exe"))
+        return fail("xemu is running; close it first (the same console must not sign in twice)", L"xemu 正在运行，请先关掉它再启动游戏");
+    if (!kcrypto_selftest()) return fail("crypto self-test failed", L"加密自检失败（请回报）");
+    if (!read_file(g_cfg.online_eeprom, 0, g_eeprom, sizeof g_eeprom))
+        return fail("cannot read online_eeprom " + narrow(g_cfg.online_eeprom), L"读不到 EEPROM 文件");
     uint8_t dec[28];
     const char *ver = decrypt_eeprom(g_eeprom, dec);
-    if (!ver) return fail("online_eeprom: the security section does not verify (not an Xbox EEPROM?)");
+    if (!ver) return fail("online_eeprom: the security section does not verify (not an Xbox EEPROM?)", L"EEPROM 文件无效");
     std::string why;
-    if (!read_config_area(g_cfg.online_hdd, g_config, why)) return fail("online_hdd: " + why);
+    if (!read_config_area(g_cfg.online_hdd, g_config, why)) return fail("online_hdd: " + why, L"读不了硬盘镜像");
     int accounts = 0;
     for (int s = 9; s < 32; s++) accounts += sector_signed(g_config, s);
-    if (!sector_signed(g_config, 9)) return fail("online_hdd: no machine account in config sector 9 (console not registered?)");
+    if (!sector_signed(g_config, 9))
+        return fail("online_hdd: no machine account in config sector 9 (console not registered?)", L"硬盘镜像里没有注册过的主机（先在 xemu 里注册 Insignia）");
     memcpy(xk::XboxHDKey, dec + 8, 16);
     SecureZeroMemory(dec, sizeof dec);
     logc("online: on - EEPROM verifies (%s kernel states), %d signed account sectors on the disk", ver, accounts);

@@ -99,6 +99,8 @@ void usage()
            "  --no-movie-skip   movies skip only as in the original (default: A / START skip every movie)\n"
            "  --online-eeprom F --online-hdd F  online play through Insignia with this registered EEPROM and xemu disk\n"
            "                    image (both only read; black.ini online = 1, online_eeprom, online_hdd); --offline: off\n"
+           "  --online-check F  check the online files (black.ini or the flags above), write what was found to F, exit\n"
+           "  --online-dns-mode M  insignia (default): every DNS query to Insignia's; console: as the console's settings\n"
            "  --no-pc-menus     no PC SETTINGS pages in the game's Options menu (built at start into cache\\menus\n"
            "                    next to black.exe)\n"
            "  --gain K          output gain after the game's gamma ramp (default 1.0; F5/F6 adjust live)\n"
@@ -180,6 +182,13 @@ bool parse_args()
             settings_mark_cli(a == L"--online-eeprom" ? "online_eeprom" : a == L"--online-hdd" ? "online_hdd" : "online_dns");
         }
         else if (a == L"--offline") { g_cfg.online = false; settings_mark_cli("online"); }
+        else if (a == L"--online-check") { if (!next(g_cfg.online_check)) return false; }
+        else if (a == L"--online-dns-mode") { // insignia / console (black.ini online_dns_mode)
+            std::wstring v;
+            if (!next(v)) return false;
+            g_cfg.online_dns_console = v == L"console";
+            settings_mark_cli("online_dns_mode");
+        }
         else if (a == L"--multicore") g_cfg.multicore = true;
         else if (a == L"--game-cpu") {
             std::wstring v;
@@ -501,6 +510,7 @@ int run(void *reserve, unsigned reserve_size)
         g_xbe.print_info(&kernel_export_name);
         return 0;
     }
+    if (!g_cfg.online_check.empty()) return online_check(g_cfg.online_check) ? 0 : 1; // the launcher's 联网 page
 
     log_init(g_cfg.log_path);
     g_exit_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -579,6 +589,7 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && !black && !profile->aux) install_ngb_aspect();
     else g_cfg.aspect_w = 16, g_cfg.aspect_h = 9;
     if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
+    if (profile && !black && !profile->aux) install_ngb_livedash(); // Ⓐ in Ranking's Live boxes: cancel, not the dashboard
     nvnet_install_trap(); // online play: the NIC's registers (net/nvnet.cpp), after every other exception handler
     if (!profile) g_cfg.fps = 30;
     if (!kdpc_init()) {

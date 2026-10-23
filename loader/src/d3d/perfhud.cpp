@@ -28,14 +28,24 @@ std::atomic<int> g_pic_h{720};    // the picture's height: the text is sized fro
 std::string g_gpu, g_cpu;         // names
 wchar_t g_luid[64];               // "luid_0x%08X_0x%08X" of the card, as in the GPU Engine counters' instance names
 
-// The bitmap the thread drew, waiting for the render thread (premultiplied BGRA, top-down)
+// A text panel: the bitmap drawn for it, waiting for the render thread (premultiplied BGRA, top-down), and its texture
+struct Panel {
+    std::vector<uint32_t> pixels;
+    int bw = 0, bh = 0;
+    bool fresh = false;
+    IDirect3DTexture9 *tex = nullptr;
+    int tw = 0, th = 0;
+};
 std::mutex g_lock;
-std::vector<uint32_t> g_pixels;
-int g_bw, g_bh;
-bool g_fresh;
+Panel g_hud;  // the figures, top-right
+Panel g_note; // a short message (notice()), bottom-right
 
-IDirect3DTexture9 *g_tex;
-int g_tw, g_th;
+// notice(): the text waiting to be drawn and until when it shows (GetTickCount64)
+std::mutex g_note_lock;
+std::wstring g_note_text;
+bool g_note_new;
+std::atomic<uint64_t> g_note_until;
+
 IDirect3DPixelShader9 *g_ps;
 IDirect3DStateBlock9 *g_saved; // just the states the overlay sets (made once; a full state block a frame cost ~0.3 ms, r324)
 
@@ -57,7 +67,7 @@ uint64_t ft(const FILETIME &f) { return ((uint64_t)f.dwHighDateTime << 32) | f.d
 
 // White text over a translucent dark panel, drawn with GDI into a 32-bit DIB: the text is drawn white on black and
 // its brightness becomes both colour and opacity (premultiplied), the panel 60% black.
-void render(const std::vector<std::wstring> &lines)
+void render(const std::vector<std::wstring> &lines, Panel &panel)
 {
     int px = std::clamp(g_pic_h.load() / 52, 12, 30);
     HDC dc = CreateCompatibleDC(nullptr);
@@ -92,10 +102,10 @@ void render(const std::vector<std::wstring> &lines)
         }
         SelectObject(dc, old_bmp);
         std::lock_guard<std::mutex> lk(g_lock);
-        g_pixels.swap(out);
-        g_bw = w;
-        g_bh = h;
-        g_fresh = true;
+        panel.pixels.swap(out);
+        panel.bw = w;
+        panel.bh = h;
+        panel.fresh = true;
     }
     if (bmp) DeleteObject(bmp);
     SelectObject(dc, old_font);
@@ -182,7 +192,7 @@ DWORD WINAPI stats_thread(void *)
                  (ms.ullTotalPhys - ms.ullAvailPhys) / gb, ms.ullTotalPhys / gb, pm.PrivateUsage / gb);
         if (disk_use >= 0) swprintf(l[4], 256, L"Disk  %3.0f%%   (game reads %.1f MB/s)", std::clamp(disk_use, 0.0, 100.0), read_mb);
         else swprintf(l[4], 256, L"Disk    -    (game reads %.1f MB/s)", read_mb);
-        render({l[0], l[1], l[2], l[3], l[4]});
+        render({l[0], l[1], l[2], l[3], l[4]}, g_hud);
         static int updates;
         static ULONGLONG busy;
         busy += GetTickCount64() - t1;
@@ -231,16 +241,39 @@ void frame()
     if (g_cfg.perfhud) g_frames++;
 }
 
-void draw_quad(IDirect3DDevice9 *d, const RECT &pic);
+bool active() { return g_cfg.perfhud || g_note_until.load(std::memory_order_relaxed); }
+
+void notice(const std::wstring &text, unsigned ms)
+{
+    std::lock_guard<std::mutex> lk(g_note_lock);
+    g_note_text = text;
+    g_note_new = true;
+    g_note_until = GetTickCount64() + ms;
+}
+
+void draw_quad(IDirect3DDevice9 *d, const RECT &pic, Panel &panel, bool bottom);
 
 void draw(IDirect3DDevice9 *d, const RECT &pic)
 {
+    if (g_note_until.load(std::memory_order_relaxed)) { // a message (online play): drawn here, on the render thread
+        std::wstring text;
+        {
+            std::lock_guard<std::mutex> lk(g_note_lock);
+            if (g_note_new) text = g_note_text;
+            g_note_new = false;
+        }
+        g_pic_h = pic.bottom - pic.top;
+        if (!text.empty()) render({text}, g_note);
+        if (GetTickCount64() < g_note_until) draw_quad(d, pic, g_note, true);
+        else g_note_until = 0;
+    }
     if (!g_cfg.perfhud) return;
+    start_thread();
     static LARGE_INTEGER f, sum;
     static uint32_t n;
     LARGE_INTEGER a, b;
     QueryPerformanceCounter(&a);
-    draw_quad(d, pic);
+    draw_quad(d, pic, g_hud, false);
     QueryPerformanceCounter(&b);
     if (!f.QuadPart) QueryPerformanceFrequency(&f);
     sum.QuadPart += b.QuadPart - a.QuadPart;
@@ -249,30 +282,31 @@ void draw(IDirect3DDevice9 *d, const RECT &pic)
              sum.QuadPart * 1000.0 / f.QuadPart / n, n);
 }
 
-void draw_quad(IDirect3DDevice9 *d, const RECT &pic)
+void draw_quad(IDirect3DDevice9 *d, const RECT &pic, Panel &panel, bool bottom)
 {
-    start_thread();
     g_pic_h = pic.bottom - pic.top;
     {
         std::lock_guard<std::mutex> lk(g_lock);
-        if (g_fresh) { // a new bitmap from the thread: into the texture (once a second)
-            g_fresh = false;
-            if (g_tex && (g_tw != g_bw || g_th != g_bh)) {
-                g_tex->Release();
-                g_tex = nullptr;
+        if (panel.fresh) { // a new bitmap (the figures once a second, a message once): into the texture
+            panel.fresh = false;
+            if (panel.tex && (panel.tw != panel.bw || panel.th != panel.bh)) {
+                panel.tex->Release();
+                panel.tex = nullptr;
             }
-            if (!g_tex && SUCCEEDED(d->CreateTexture(g_bw, g_bh, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &g_tex, nullptr))) {
-                g_tw = g_bw;
-                g_th = g_bh;
+            if (!panel.tex && SUCCEEDED(d->CreateTexture(panel.bw, panel.bh, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &panel.tex, nullptr))) {
+                panel.tw = panel.bw;
+                panel.th = panel.bh;
             }
             D3DLOCKED_RECT lr;
-            if (g_tex && SUCCEEDED(g_tex->LockRect(0, &lr, nullptr, 0))) {
-                for (int y = 0; y < g_th; y++) memcpy((uint8_t *)lr.pBits + y * lr.Pitch, &g_pixels[(size_t)y * g_tw], g_tw * 4);
-                g_tex->UnlockRect(0);
+            if (panel.tex && SUCCEEDED(panel.tex->LockRect(0, &lr, nullptr, 0))) {
+                for (int y = 0; y < panel.th; y++)
+                    memcpy((uint8_t *)lr.pBits + y * lr.Pitch, &panel.pixels[(size_t)y * panel.tw], panel.tw * 4);
+                panel.tex->UnlockRect(0);
             }
         }
     }
-    if (!g_tex) return;
+    IDirect3DTexture9 *tex = panel.tex;
+    if (!tex) return;
     if (!g_ps) {
         const char src[] = "sampler2D t : register(s0);\n"
                            "float4 main(float2 uv : TEXCOORD0) : COLOR0 { return tex2D(t, uv); }\n";
@@ -283,13 +317,13 @@ void draw_quad(IDirect3DDevice9 *d, const RECT &pic)
         }
         if (!g_ps) return;
     }
-    // One premultiplied quad at the picture's top-right (the game's health bar is at the top-left), 1:1, over the back
-    // buffer; the states it sets are captured first and put back after
+    // One premultiplied quad at the picture's top-right (the game's health bar is at the top-left) or bottom-right, 1:1,
+    // over the back buffer; the states it sets are captured first and put back after
     auto set_states = [&] {
         d->SetVertexShader(nullptr);
         d->SetPixelShader(g_ps);
         d->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
-        d->SetTexture(0, g_tex);
+        d->SetTexture(0, tex);
         d->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
         d->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
         d->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
@@ -319,7 +353,8 @@ void draw_quad(IDirect3DDevice9 *d, const RECT &pic)
     d->SetDepthStencilSurface(nullptr);
     set_states();
     float m = (float)std::max(4L, (pic.bottom - pic.top) / 60);
-    float x0 = pic.right - m - g_tw - 0.5f, y0 = pic.top + m - 0.5f, x1 = x0 + g_tw, y1 = y0 + g_th;
+    float x0 = pic.right - m - panel.tw - 0.5f, y0 = (bottom ? pic.bottom - m - panel.th : pic.top + m) - 0.5f;
+    float x1 = x0 + panel.tw, y1 = y0 + panel.th;
     struct V {
         float x, y, z, rhw, u, v;
     } q[4] = {{x0, y0, 0, 1, 0, 0}, {x1, y0, 0, 1, 1, 0}, {x0, y1, 0, 1, 0, 1}, {x1, y1, 0, 1, 1, 1}};
