@@ -146,20 +146,37 @@ Esc 为 Start……），在启动器的「控制」页可改，也可把手柄�
 - `--shot-every 100000000` 让定时截图实际上不发生，只在你用 `shot:` 要求时才截。默认值 60 是每秒截一张，会造成卡顿。
 - `"Ninja Gaiden Black Hurricane.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
 
-**联网（Insignia 排行榜，可选）**：需要你自己已经在 xemu 里注册好 Insignia 的那一套 EEPROM 与硬盘镜像。在 `black.ini` 里写：
+**联网（Insignia 排行榜，可选）**
 
-```
-online = 1
-online_eeprom = D:\xemu\eeprom.bin
-online_hdd = D:\xemu\xbox_hdd.qcow2
-```
+移植版不自带账号：它借用你在 xemu 里已经注册好的那台「主机」。游戏自己的联网代码原样运行，和在 xemu 里登录一样。
 
-两个文件只读，不会被修改。进「排行榜」选自己的玩家代号即可登录。注意：
+1. **先在 xemu 里注册 Insignia**（只需一次）：按 Insignia 官网的说明，用 xemu 注册主机和账号，并确认在 xemu 里能登录
+   Xbox Live。注册完成后，你的 EEPROM 文件（`eeprom.bin`）和硬盘镜像（`xbox_hdd.qcow2`）里就有了这台主机的身份和账号。
+2. **关掉 xemu**：同一台主机不能同时登录两次。移植版发现 xemu 在运行时不会开联网。
+3. **改 `black.ini`**：它在游戏程序旁边，启动器保存过设定后就会有，没有就新建一个。在里面写：
 
-- 不要同时在 xemu 里联网（同一台主机不能登录两次；移植版发现 xemu 在运行就不开联网）。
-- 主机网络设定是手动 DNS 时（注册时常见：主 DNS 是跑 InsigniaDNS 的那台电脑），那台电脑上要开着 InsigniaDNS.exe。
-- 代理软件的 TUN / fake-ip 模式会截走 DNS，连不上时先关掉 TUN。
-- 出现「无法连接 XBOX LIVE」时按 Ⓑ 取消（Ⓐ 会去找联网仪表板，移植版只能重启本篇）。
+   ```
+   online = 1
+   online_eeprom = D:\xemu\eeprom.bin
+   online_hdd = D:\xemu\xbox_hdd.qcow2
+   ```
+
+   路径换成你自己的文件，可以有空格。两个文件只读，不会被修改。启动器暂时还没有联网的开关。
+4. **进游戏**：主菜单选「排行榜」，选自己的玩家代号即可登录，然后查看榜单。
+
+**要不要开 InsigniaDNS？** 这和网速快慢无关，看的是 xemu 里那台主机的网络设定：
+
+- **DNS 是「自动」**：不需要。移植版自己把查询转给 Insignia 的 DNS（`46.101.64.175`，可用 `online_dns = ...` 改）。
+- **DNS 是「手动」**：游戏只问你填的那几个地址。
+  - 填的是 Insignia 的 DNS：不需要。
+  - 填的是一台跑 InsigniaDNS.exe 的电脑（注册时常见，比如主 DNS 填 `192.168.x.x`）：那台电脑上要开着 InsigniaDNS.exe。
+  - 只填了 `1.1.1.1` 之类的普通 DNS：连不上，要在 xemu 的系统设定里改成自动或 Insignia 的 DNS。移植版不会保存设定的改动。
+
+**连不上时：**
+
+- 代理软件（Clash 等）的 TUN / fake-ip 模式会截走所有 DNS 查询，先关掉 TUN。
+- 出现「无法连接 XBOX LIVE」时按 Ⓑ 取消。按 Ⓐ 会去找联网仪表板，移植版只能重启本篇。
+- 日志 `black.log` 里搜 `online:` 和 `[net]`，能看到身份是否读成功、DNS 问到了什么。
 
 细节与证据见 `project/docs/09_联网_Insignia.md`。
 

@@ -174,22 +174,42 @@ The command `run.bat` runs (you can also type it yourself):
 - `"Ninja Gaiden Black Hurricane.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
   BLACK-only and have no effect on Ninja Gaiden.
 
-**Online (Insignia leaderboards, optional)**: needs the EEPROM and hard disk image you already registered with Insignia
-in xemu. In `black.ini`:
+**Online (Insignia leaderboards, optional)**
 
-```
-online = 1
-online_eeprom = D:\xemu\eeprom.bin
-online_hdd = D:\xemu\xbox_hdd.qcow2
-```
+The port has no account of its own: it borrows the "console" you already registered in xemu, and the game's own online
+code runs unchanged, as it does in xemu.
 
-Both files are only read. Open Ranking and pick your gamertag to sign in. Notes:
+1. **Register with Insignia in xemu first** (once): follow Insignia's own instructions to register your console and
+   account with xemu, and check that you can sign in to Xbox Live there. Your EEPROM (`eeprom.bin`) and hard disk image
+   (`xbox_hdd.qcow2`) then hold the console's identity and the account.
+2. **Close xemu**: one console cannot sign in twice, and the port stays offline while xemu runs.
+3. **Edit `black.ini`** (next to the game program; the launcher writes it when you save settings, or create it):
 
-- Do not be online in xemu at the same time (one console cannot sign in twice; the port stays offline while xemu runs).
-- If the console's network settings use manual DNS (common after registering: the primary is the PC that ran
-  InsigniaDNS), keep InsigniaDNS.exe running on that PC.
-- A proxy's TUN / fake-ip mode captures DNS; turn TUN off if it cannot connect.
-- At "cannot connect to Xbox Live" press Ⓑ (Ⓐ looks for the online dashboard, and the port can only restart the game).
+   ```
+   online = 1
+   online_eeprom = D:\xemu\eeprom.bin
+   online_hdd = D:\xemu\xbox_hdd.qcow2
+   ```
+
+   Use your own paths (spaces are fine). Both files are only read. The launcher has no online switch yet.
+4. **In the game**: main menu → Ranking, pick your gamertag to sign in, and view the leaderboards.
+
+**Do you need InsigniaDNS?** It has nothing to do with how fast your connection is; it depends on the network
+settings of the console in xemu:
+
+- **Automatic DNS**: no. The port relays lookups to Insignia's DNS (`46.101.64.175`; change it with `online_dns = ...`).
+- **Manual DNS**: the game asks only the addresses you entered.
+  - If you entered Insignia's DNS: no.
+  - If you entered a PC that runs InsigniaDNS.exe (common when registering, e.g. a `192.168.x.x` primary): keep
+    InsigniaDNS.exe running on that PC.
+  - If you entered only an ordinary DNS such as `1.1.1.1`: it cannot connect. Change the setting in xemu's system
+    settings to automatic or to Insignia's DNS; the port does not save setting changes.
+
+**If it cannot connect:**
+
+- A proxy's (Clash etc.) TUN / fake-ip mode captures every DNS lookup; turn TUN off first.
+- At "cannot connect to Xbox Live" press Ⓑ. Ⓐ looks for the online dashboard, and the port can only restart the game.
+- In `black.log`, search for `online:` and `[net]` to see whether the identity was read and what DNS answered.
 
 Details and evidence: `project/docs/09_联网_Insignia.md`.
 
