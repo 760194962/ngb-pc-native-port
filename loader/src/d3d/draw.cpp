@@ -1843,11 +1843,19 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
     // only 4 x 255.5 + 0.5 of 1024 host ones); the chapter-2 water refraction reads its 256x256 screen copy up to the
     // edge and showed those as black / white bands (r245). Ninja Gaiden Black also sets 0.03125 for its texture copies
     // (0x314430). BLACK's library is not checked (offset base 0): scaled as before (docs/07 #10).
-    float dx = 0, dy = 0;
+    // An edge on the left / top border still covers the Xbox's first pixel: the NV2A keeps 4 fraction bits, truncated
+    // (xemu vsh.c roundScreenCoords), so a full-screen quad from 0 lies at 0.5 and takes pixel 0, centre on the edge.
+    // Scaled, that edge fell a whole host pixel or two inside the target, and the fades to black / white left the
+    // picture under them showing down the left and along the top (the user, 2026-10-23): such an edge goes to the host
+    // target's edge (edge_x / edge_y below; only vertices at the border move).
+    float dx = 0, dy = 0, ox = 0, oy = 0;
     if (g_dev && g_cfg.rhw_offset && screen_offset_base() != 0.0f) {
-        dx = *(const float *)(g_dev + 0xEF8) * sx - 0.5f;
-        dy = *(const float *)(g_dev + 0xEFC) * sy - 0.5f;
+        ox = *(const float *)(g_dev + 0xEF8);
+        oy = *(const float *)(g_dev + 0xEFC);
+        dx = ox * sx - 0.5f;
+        dy = oy * sy - 0.5f;
     }
+    const bool edges = dx != 0 || dy != 0;
     if (sx == 1 && sy == 1 && !nts && dx == 0 && dy == 0) return src;
     perf::Scope perf_scope(perf::kConvert);
     g_rhw.assign(src + (size_t)first * stride, src + (size_t)(first + count) * stride);
@@ -1879,8 +1887,9 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
     squeeze_169(g_rhw.data(), count, stride, sx, sy);
     for (uint32_t v = 0; v < count; v++) {
         float *p = (float *)&g_rhw[(size_t)v * stride];
-        p[0] = p[0] * sx + dx;
-        p[1] = p[1] * sy + dy;
+        bool edge_x = edges && truncf((p[0] + ox) * 16.0f) <= 8.0f, edge_y = edges && truncf((p[1] + oy) * 16.0f) <= 8.0f;
+        p[0] = edge_x ? std::min(p[0] * sx + dx, -0.5f) : p[0] * sx + dx;
+        p[1] = edge_y ? std::min(p[1] * sy + dy, -0.5f) : p[1] * sy + dy;
     }
     apply_rhw_tex_scales(g_rhw.data(), count, stride, ts, nts);
     return g_rhw.data() - (size_t)first * stride;
