@@ -221,6 +221,32 @@ no longer shown: the port sends every DNS lookup of the game to the address show
   dashboard, which the port does not have.
 - In `black.log`, search for `online:` and `[net]` to see whether the identity was read and what DNS answered.
 
+**How online play works (in plain words)**
+
+The original Xbox Live closed long ago. Insignia is a replacement run by the community: its servers act as the old Xbox
+Live so that old games can go online again. To reach it, the port does four things:
+
+1. **The game's own online code.** The game already has everything for going online (signing in, leaderboards,
+   encrypted traffic). The port rewrites none of it and lets it run as it is, so to the game this is Xbox Live as it
+   always was.
+2. **A pretend network card.** A real Xbox has a network card; a PC port has none. The port imitates the Xbox's card in
+   software: what the game sends to it, the port hands to Windows to send on the internet, and the servers' replies go
+   back into the card for the game. The game posts letters in its own mailbox; the port is the postman.
+3. **The identity of a registered console.** Insignia only accepts registered Xboxes. The virtual Xbox you registered in
+   xemu keeps its identity card (console serial and keys) in the EEPROM file and your account on the hard disk image.
+   The port only reads the two files to sign in with that identity; it changes and uploads nothing. That is also why one
+   console cannot sign in from xemu and the port at the same time, as one ID card cannot be shown in two places at once.
+4. **Another phone book (DNS).** The first step online is looking up where the Xbox Live servers are: DNS, a phone book.
+   In an ordinary phone book, Xbox Live's numbers were disconnected long ago; Insignia's phone book points those names at
+   Insignia's own servers. Whichever book the game asks, the port asks Insignia's instead: "Insignia's DNS" uses
+   Insignia's public one; "InsigniaDNS" uses the copy InsigniaDNS.exe keeps on your PC, for when a proxy captures lookups.
+
+So the game believes it reached the old Xbox Live, and Insignia believes a real Xbox (the one you registered) is calling;
+the two match, and you can sign in and see the leaderboards.
+
+In one sentence: the game stays as it is; the port gives it a network card, borrows your registered console's identity,
+and swaps the phone book for Insignia's.
+
 Details and evidence: `project/docs/09_联网_Insignia.md`.
 
 ## Building
