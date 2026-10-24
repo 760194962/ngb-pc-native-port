@@ -26,10 +26,11 @@ HWND g_hwnd;
 HICON g_icon, g_icon_sm; // load_program_icons
 HANDLE g_window_ready;
 std::atomic<bool> g_closed{false};
-IDirect3D9 *g_d3d;
+IDirect3D9Ex *g_d3d;
 bool g_intz;
 D3DFORMAT g_depth_view_fmt = D3DFMT_A8R8G8B8;
 IDirect3DDevice9 *g_dev;
+IDirect3DDevice9Ex *g_devex; // the same device
 bool g_in_scene;
 std::atomic<int> g_win_w, g_win_h; // client area, follows WM_SIZE
 int g_aspect_w = 4, g_aspect_h = 3; // the picture's shape; the window keeps it when resized
@@ -270,7 +271,15 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_APP_DEVICE: // create_device, reset_device, test_cooperative_level: on this thread
         if (wp == kDeviceCreate) return create_device_here();
         if (wp == kDeviceReset) return reset_device_here();
-        return g_dev->TestCooperativeLevel();
+        {
+            // A 9Ex device is not lost when Windows takes the screen (Alt+Tab in exclusive fullscreen, the lock
+            // screen): CheckDeviceState then says S_PRESENT_OCCLUDED, and S_PRESENT_MODE_CHANGED after the desktop's
+            // mode changed. Only a hung or removed driver loses it (ex9fs, Iris Xe and RTX 3060, 2026-10-24).
+            HRESULT st = g_devex->CheckDeviceState(h);
+            return st == D3DERR_DEVICELOST || st == D3DERR_DEVICEHUNG || st == D3DERR_DEVICEREMOVED || st == D3DERR_OUTOFVIDEOMEMORY
+                       ? st
+                       : D3D_OK;
+        }
     case WM_KILLFOCUS:
         capture_mouse(false);
         break;
@@ -485,13 +494,24 @@ D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp)
     return pp;
 }
 
+// The display mode of an exclusive device (9Ex takes it besides the parameters): the desktop's, as exclusive_params
+D3DDISPLAYMODEEX desktop_mode()
+{
+    D3DDISPLAYMODEEX m = {sizeof m};
+    g_d3d->GetAdapterDisplayModeEx(D3DADAPTER_DEFAULT, &m, nullptr);
+    return m;
+}
+
 namespace {
 
+// Direct3D 9Ex: no lost devices when Windows takes the screen and no D3DPOOL_DEFAULT resources to give up before a
+// Reset (ex9test, ex9fs: Iris Xe and RTX 3060, 2026-10-24). Under plain Direct3D 9 a Reset failed for good while the
+// visibility test's query lived and Alt+Tab crashed (r495); minimised, the frames' work piled up (r528).
 bool create_device_here()
 {
-    g_d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    if (!g_d3d) {
-        logf("host: Direct3DCreate9 failed");
+    HRESULT made = Direct3DCreate9Ex(D3D_SDK_VERSION, &g_d3d);
+    if (FAILED(made)) {
+        logf("host: Direct3DCreate9Ex failed 0x%08lx", made);
         return false;
     }
     SIZE mon = {g_win_w, g_win_h};
@@ -520,16 +540,18 @@ bool create_device_here()
     // Not NOWINDOWCHANGES: with it the runtime does not minimise the window and bring it back around Alt+Tab in
     // exclusive fullscreen (r279). The window is restyled only while the device is windowed instead.
     DWORD flags = D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE | D3DCREATE_MULTITHREADED;
-    HRESULT hr = g_d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd, flags, &pp, &g_dev);
+    D3DDISPLAYMODEEX mode = desktop_mode();
+    HRESULT hr = g_d3d->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd, flags, &pp, pp.Windowed ? nullptr : &mode, &g_devex);
     if (FAILED(hr)) {
-        logf("host: CreateDevice failed 0x%08lx, retrying with software vertex processing", hr);
+        logf("host: CreateDeviceEx failed 0x%08lx, retrying with software vertex processing", hr);
         flags = D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE | D3DCREATE_MULTITHREADED;
-        hr = g_d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd, flags, &pp, &g_dev);
+        hr = g_d3d->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd, flags, &pp, pp.Windowed ? nullptr : &mode, &g_devex);
         if (FAILED(hr)) {
-            logf("host: CreateDevice failed 0x%08lx", hr);
+            logf("host: CreateDeviceEx failed 0x%08lx", hr);
             return false;
         }
     }
+    g_dev = g_devex;
     g_bb_w = (int)pp.BackBufferWidth; // exclusive: the display mode's size
     g_bb_h = (int)pp.BackBufferHeight;
     if (!pp.Windowed)
@@ -557,7 +579,7 @@ bool create_device_here()
         g_depth_view_fmt = D3DFMT_R32F;
     logf("host: depth views %s", g_depth_view_fmt == D3DFMT_R32F ? "R32F (full depth precision)"
                                                                   : "A8R8G8B8 (R32F render target with filtering not supported: 8-bit depth)");
-    logf("host: Direct3D 9 device, back buffer %dx%d on '%s'; INTZ depth textures %s", g_bb_w, g_bb_h, id.Description,
+    logf("host: Direct3D 9Ex device, back buffer %dx%d on '%s'; INTZ depth textures %s", g_bb_w, g_bb_h, id.Description,
          g_intz ? "supported" : "NOT supported (depth-buffer reads return zero)");
     xd3d::prewarm_shaders(g_dev); // the cached shaders' objects now, not in the frame that first draws with them
     return true;
@@ -566,7 +588,8 @@ bool create_device_here()
 bool reset_device_here()
 {
     D3DPRESENT_PARAMETERS pp = g_exclusive_now ? exclusive_params(g_pp) : g_pp;
-    HRESULT hr = g_dev->Reset(&pp);
+    D3DDISPLAYMODEEX mode = desktop_mode();
+    HRESULT hr = g_devex->ResetEx(&pp, pp.Windowed ? nullptr : &mode);
     if (FAILED(hr)) {
         static unsigned failures; // retried every 50 ms until it succeeds (d3d/device.cpp recover_device)
         if (failures++ % 100 < 5)
@@ -589,6 +612,42 @@ bool create_device() { return SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceCreate,
 HRESULT test_cooperative_level() { return (HRESULT)SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceTest, 0); }
 
 IDirect3DDevice9 *dev() { return g_dev; }
+
+bool CpuTexture::make(int width, int height)
+{
+    if (tex && w == width && h == height) return true;
+    release();
+    if (!g_dev || FAILED(g_dev->CreateTexture(width, height, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr)) ||
+        FAILED(g_dev->CreateTexture(width, height, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, nullptr))) {
+        release();
+        return false;
+    }
+    w = width;
+    h = height;
+    return true;
+}
+
+void *CpuTexture::lock(int *pitch)
+{
+    D3DLOCKED_RECT lr;
+    if (!sys || FAILED(sys->LockRect(0, &lr, nullptr, 0))) return nullptr;
+    *pitch = lr.Pitch;
+    return lr.pBits;
+}
+
+void CpuTexture::unlock()
+{
+    sys->UnlockRect(0);
+    g_dev->UpdateTexture(sys, tex);
+}
+
+void CpuTexture::release()
+{
+    if (sys) sys->Release();
+    if (tex) tex->Release();
+    sys = tex = nullptr;
+    w = h = 0;
+}
 bool intz() { return g_intz; }
 D3DFORMAT depth_view_format() { return g_depth_view_fmt; }
 
@@ -614,12 +673,10 @@ HRESULT present()
     begin_scene();
     g_dev->EndScene();
     g_in_scene = false;
-    // Exclusive fullscreen, minimised: no Present. One that waits for vsync waited far longer than a refresh there and
-    // the game ran at 40-45% speed (r324); the device is lost anyway, and noticed once the window is back (its Reset
-    // drops the frames' work). A window or borderless one presents minimised too: skipping it there let the frames'
-    // work pile up, and the first Present after the window came back took 1-10 s, a black window with the game
-    // stopped (the user, 2026-10-24, borderless; r514-r518, the game thread waiting in Present; none so, r519, r520).
-    if (g_exclusive_now && IsIconic(g_hwnd)) return D3D_OK;
+    // Present minimised too (it says S_PRESENT_OCCLUDED there): it also hands the frame's commands to the GPU. Skipped,
+    // they piled up in the driver (32 frames and more, r528) and the first Present after the window came back took
+    // 1-10 s, a black window with the game stopped (the user, 2026-10-24, borderless; r514-r518). Under plain Direct3D 9
+    // an exclusive device was lost there and its Reset dropped the pile; a 9Ex device is not lost.
     if (g_exclusive_now && g_cfg.vsync) return g_dev->Present(nullptr, nullptr, nullptr, nullptr); // flipped (exclusive_params)
     RECT src = {0, 0, g_frame_w ? g_frame_w : g_bb_w, g_frame_h ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)

@@ -33,8 +33,7 @@ struct Panel {
     std::vector<uint32_t> pixels;
     int bw = 0, bh = 0;
     bool fresh = false;
-    IDirect3DTexture9 *tex = nullptr;
-    int tw = 0, th = 0;
+    host3d::CpuTexture tex; // tex.w x tex.h: the size it was made at
 };
 std::mutex g_lock;
 Panel g_hud;  // the figures, top-right
@@ -289,23 +288,16 @@ void draw_quad(IDirect3DDevice9 *d, const RECT &pic, Panel &panel, bool bottom)
         std::lock_guard<std::mutex> lk(g_lock);
         if (panel.fresh) { // a new bitmap (the figures once a second, a message once): into the texture
             panel.fresh = false;
-            if (panel.tex && (panel.tw != panel.bw || panel.th != panel.bh)) {
-                panel.tex->Release();
-                panel.tex = nullptr;
-            }
-            if (!panel.tex && SUCCEEDED(d->CreateTexture(panel.bw, panel.bh, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &panel.tex, nullptr))) {
-                panel.tw = panel.bw;
-                panel.th = panel.bh;
-            }
-            D3DLOCKED_RECT lr;
-            if (panel.tex && SUCCEEDED(panel.tex->LockRect(0, &lr, nullptr, 0))) {
-                for (int y = 0; y < panel.th; y++)
-                    memcpy((uint8_t *)lr.pBits + y * lr.Pitch, &panel.pixels[(size_t)y * panel.tw], panel.tw * 4);
-                panel.tex->UnlockRect(0);
+            int pitch;
+            void *px = panel.tex.make(panel.bw, panel.bh) ? panel.tex.lock(&pitch) : nullptr;
+            if (px) {
+                for (int y = 0; y < panel.tex.h; y++)
+                    memcpy((uint8_t *)px + y * pitch, &panel.pixels[(size_t)y * panel.tex.w], panel.tex.w * 4);
+                panel.tex.unlock();
             }
         }
     }
-    IDirect3DTexture9 *tex = panel.tex;
+    IDirect3DTexture9 *tex = panel.tex.tex;
     if (!tex) return;
     if (!g_ps) {
         const char src[] = "sampler2D t : register(s0);\n"
@@ -353,8 +345,8 @@ void draw_quad(IDirect3DDevice9 *d, const RECT &pic, Panel &panel, bool bottom)
     d->SetDepthStencilSurface(nullptr);
     set_states();
     float m = (float)std::max(4L, (pic.bottom - pic.top) / 60);
-    float x0 = pic.right - m - panel.tw - 0.5f, y0 = (bottom ? pic.bottom - m - panel.th : pic.top + m) - 0.5f;
-    float x1 = x0 + panel.tw, y1 = y0 + panel.th;
+    float x0 = pic.right - m - panel.tex.w - 0.5f, y0 = (bottom ? pic.bottom - m - panel.tex.h : pic.top + m) - 0.5f;
+    float x1 = x0 + panel.tex.w, y1 = y0 + panel.tex.h;
     struct V {
         float x, y, z, rhw, u, v;
     } q[4] = {{x0, y0, 0, 1, 0, 0}, {x1, y0, 0, 1, 1, 0}, {x0, y1, 0, 1, 0, 1}, {x1, y1, 0, 1, 1, 1}};

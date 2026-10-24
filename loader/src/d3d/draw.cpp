@@ -444,15 +444,15 @@ template <typename F> void ts_on_change(int s, int t, F apply)
 // drawn alpha-tested; D3D9 samples an unbound stage as (0,0,0,0) and the sweep vanished, docs/04 §3.9).
 IDirect3DTexture9 *white_texture()
 {
-    static IDirect3DTexture9 *t;
-    if (t) return t;
-    if (FAILED(host3d::dev()->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr))) return nullptr;
-    D3DLOCKED_RECT lr;
-    if (SUCCEEDED(t->LockRect(0, &lr, nullptr, 0))) {
-        *(uint32_t *)lr.pBits = 0xFFFFFFFFu;
-        t->UnlockRect(0);
+    static host3d::CpuTexture t;
+    if (t.tex) return t.tex;
+    if (!t.make(1, 1)) return nullptr;
+    int pitch;
+    if (auto *p = (uint32_t *)t.lock(&pitch)) {
+        *p = 0xFFFFFFFFu;
+        t.unlock();
     }
-    return t;
+    return t.tex;
 }
 
 bool stage_reads_texture(const uint32_t *ts)

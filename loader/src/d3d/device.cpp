@@ -453,7 +453,7 @@ const char kGammaPS[] = "sampler2D f : register(s0);\n"
                         "  return float4(pow(saturate(c * g.y), g.xxx), 1);\n"
                         "}\n";
 IDirect3DPixelShader9 *g_gamma_ps;
-IDirect3DTexture9 *g_ramp_tex;
+host3d::CpuTexture g_ramp; // the gamma ramp, 256x1
 
 // Anti-aliasing: an edge-directed post filter on the final picture (after the gamma ramp, at render
 // resolution, before the scale to the window), written for this project after the published FXAA idea.
@@ -553,8 +553,7 @@ IDirect3DTexture9 *ramp_texture()
 {
     static uint8_t shown[768];
     static bool valid, made;
-    if (!g_ramp_tex && FAILED(host3d::dev()->CreateTexture(256, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &g_ramp_tex, nullptr)))
-        return nullptr;
+    if (!g_ramp.make(256, 1)) return nullptr;
     uint8_t ramp[768];
     if (!valid && g_cfg.ramp)
         valid = dev_field<uint32_t>(DEV_GAMMA_DIRTY) || dev_field<uint32_t>(DEV_GAMMA_DIRTY + 4);
@@ -564,12 +563,12 @@ IDirect3DTexture9 *ramp_texture()
     } else {
         for (int i = 0; i < 256; i++) ramp[i] = ramp[256 + i] = ramp[512 + i] = (uint8_t)i;
     }
-    if (made && !memcmp(ramp, shown, sizeof ramp)) return g_ramp_tex;
-    D3DLOCKED_RECT lr;
-    if (FAILED(g_ramp_tex->LockRect(0, &lr, nullptr, 0))) return nullptr;
-    auto *px = (uint32_t *)lr.pBits;
+    if (made && !memcmp(ramp, shown, sizeof ramp)) return g_ramp.tex;
+    int pitch;
+    auto *px = (uint32_t *)g_ramp.lock(&pitch);
+    if (!px) return nullptr;
     for (int i = 0; i < 256; i++) px[i] = 0xFF000000u | ramp[i] << 16 | ramp[256 + i] << 8 | ramp[512 + i];
-    g_ramp_tex->UnlockRect(0);
+    g_ramp.unlock();
     if (!made || ramp[255] != shown[255] || ramp[127] != shown[127]) {
         static int logged; // the first changes (the boot fades) show the ramp works; then quiet
         if (logged++ < 8)
@@ -578,7 +577,7 @@ IDirect3DTexture9 *ramp_texture()
     }
     memcpy(shown, ramp, sizeof ramp);
     made = true;
-    return g_ramp_tex;
+    return g_ramp.tex;
 }
 
 // D3DSWAP_COPY: the presented frame becomes the front buffer's contents, which the game samples during the next frame.
@@ -1753,7 +1752,9 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
         logf("[d3d] tests: a visibility test made; its occlusion query lives on");
     }
     bool force = g_reset_requested.exchange(false);
-    if (host3d::present() == D3DERR_DEVICELOST || g_device_lost || force) recover_device(force);
+    HRESULT presented = host3d::present();
+    if (presented == D3DERR_DEVICELOST || presented == D3DERR_DEVICEHUNG || presented == D3DERR_DEVICEREMOVED || g_device_lost || force)
+        recover_device(force);
     check_render_size();
     perf::frame_end(host_w(g_width), host_h(g_height));
     apicount::frame(frames);
