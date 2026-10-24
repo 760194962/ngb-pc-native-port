@@ -177,7 +177,7 @@ const int kShadowScales[4] = {1, 4, 8, 16};
 const wchar_t kSite[] = L"https://akirahayabusa.github.io/ngb-hurricane-patch/";
 // The author's links on the About page (the user, 2026-10-22): signed "bilibili 哈雅布撒", with the open-source repository
 // and contacts. Clicking one opens it (kHitWebsite + index).
-const wchar_t *const kLinks[5] = {kSite, L"https://github.com/akirahayabusa/ngb-pc-native-port", L"https://github.com/akirahayabusa",
+const wchar_t *const kLinks[5] = {kSite, L"https://github.com/akirahayabusa/ngb-pc-native-port-release", L"https://github.com/akirahayabusa",
                                   L"https://space.bilibili.com/20292587", L"mailto:2682557218@qq.com"};
 // Brightness and gamma sliders: the loader's range (settings.cpp clamps gain and gamma to 0.5 - 3.0), 0.05 steps
 constexpr float kSliderMin = 0.5f, kSliderMax = 3.0f, kSliderW = 260;
