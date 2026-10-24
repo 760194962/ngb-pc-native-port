@@ -47,7 +47,7 @@ void invalidate_render_state(uint32_t state); // re-send this Xbox render state 
 // --screenshot <dir>: save "<dir>\<tag>.png" now (no-op without the option).
 void screenshot_now(const char *tag);
 void request_screenshot(const char *tag); // tests: "<dir>\<tag>.png" of the next whole frame (any thread)
-void request_device_reset();              // tests: at the next Swap, Reset the device as after a device loss
+void request_device_reset(const char *why = "tests"); // at the next Swap: ResetEx (Alt+Enter, tests) as after a loss
 void request_visibility_test();           // tests: at the next Swap, a visibility test (its query then exists)
 
 } // namespace xd3d

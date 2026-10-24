@@ -294,7 +294,7 @@ void read_press_file(uint32_t now_ms)
                     continue;
                 }
                 if (line == "reset") {
-                    xd3d::request_device_reset();
+                    xd3d::request_device_reset("tests: press-file reset");
                     continue;
                 }
                 if (line == "visquery") {

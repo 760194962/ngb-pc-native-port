@@ -79,7 +79,7 @@ void toggle_fullscreen()
              g_cfg.exclusive ? " (exclusive)" : "");
         if (g_cfg.exclusive) {
             g_exclusive_now = true;
-            if (g_dev) xd3d::request_device_reset(); // at start the device is made exclusive directly (create_device)
+            if (g_dev) xd3d::request_device_reset("Alt+Enter: exclusive fullscreen"); // at start: made exclusive (create_device)
         }
     } else {
         if (g_exclusive_now && g_dev) {
@@ -88,7 +88,7 @@ void toggle_fullscreen()
             // window hook waited on the device (r277, when the render thread did the Reset).
             g_exclusive_now = false;
             g_restyle_pending = true;
-            xd3d::request_device_reset();
+            xd3d::request_device_reset("Alt+Enter: a window");
             return;
         }
         g_exclusive_now = false;

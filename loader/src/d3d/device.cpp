@@ -1594,25 +1594,25 @@ std::map<uint32_t, BOOL> g_lights_on;
 // shaders and vertex declarations survive a Reset.
 bool g_device_lost;
 ULONGLONG g_lost_since;
-std::atomic<bool> g_reset_requested; // tests: press-file "reset" (the same path as a lost device)
+std::atomic<bool> g_reset_requested;          // request_device_reset: Alt+Enter, a mode change, press-file "reset"
+std::atomic<const char *> g_reset_reason{""};
 std::atomic<bool> g_visquery_requested; // tests: press-file "visquery" (a visibility test, as the game's first leaves it)
 
-void recover_device(bool force)
+void recover_device(bool requested)
 {
     IDirect3DDevice9 *d = host3d::dev();
     HRESULT hr = host3d::test_cooperative_level();
-    if (hr == D3D_OK && force) {
+    if (hr == D3D_OK && requested) { // a Reset asked for (request_device_reset), on a device that is fine
         hr = D3DERR_DEVICENOTRESET;
-        logf("[d3d] tests: resetting the device as if it had been lost");
-    }
-    if (hr == D3D_OK) {
+        g_lost_since = GetTickCount64();
+        logf("[d3d] device reset requested (%s)", g_reset_reason.load());
+    } else if (hr == D3D_OK) {
         g_device_lost = false;
         return;
-    }
-    if (!g_device_lost) {
+    } else if (!g_device_lost) {
         g_device_lost = true;
         g_lost_since = GetTickCount64();
-        logf("[d3d] the Direct3D device is lost (0x%08lx: sleep, lock screen...); drawing resumes when it can be reset", hr);
+        logf("[d3d] the Direct3D device is lost (0x%08lx); drawing resumes when it can be reset", hr);
     }
     if (hr != D3DERR_DEVICENOTRESET) return; // still lost (D3DERR_DEVICELOST): ask again next frame
     release_host_targets();
@@ -1751,10 +1751,22 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
         vis_end(0);
         logf("[d3d] tests: a visibility test made; its occlusion query lives on");
     }
-    bool force = g_reset_requested.exchange(false);
     HRESULT presented = host3d::present();
-    if (presented == D3DERR_DEVICELOST || presented == D3DERR_DEVICEHUNG || presented == D3DERR_DEVICEREMOVED || g_device_lost || force)
-        recover_device(force);
+    static HRESULT last_presented = D3D_OK; // a changed result (S_PRESENT_OCCLUDED minimised, S_PRESENT_MODE_CHANGED...)
+    if (presented != last_presented) {
+        static int noted;
+        if (noted++ < 40) logf("[d3d] Present: 0x%08lx (was 0x%08lx), frame %u", presented, last_presented, frames);
+        last_presented = presented;
+    }
+    // S_PRESENT_MODE_CHANGED that stays (a window after Alt+Enter from exclusive fullscreen) cost each Present 0.2-0.3 ms;
+    // a ResetEx to the same window clears it (ex9mode: RTX 3060 1.81 -> 1.62 ms, Iris Xe 1.04 -> 0.78 ms, as a device
+    // made windowed). Back from Alt+Tab in exclusive fullscreen it shows for a frame or two and goes by itself.
+    static uint32_t mode_changed_frames;
+    mode_changed_frames = presented == S_PRESENT_MODE_CHANGED ? mode_changed_frames + 1 : 0;
+    if (mode_changed_frames == 30) request_device_reset("Present said S_PRESENT_MODE_CHANGED for 30 frames");
+    bool requested = g_reset_requested.exchange(false);
+    if (presented == D3DERR_DEVICELOST || presented == D3DERR_DEVICEHUNG || presented == D3DERR_DEVICEREMOVED || g_device_lost || requested)
+        recover_device(requested);
     check_render_size();
     perf::frame_end(host_w(g_width), host_h(g_height));
     apicount::frame(frames);
@@ -2752,7 +2764,11 @@ const Hle *hle_device_table_ngb(size_t *count)
 
 #include "auxtab/device_tables.inc"
 
-void request_device_reset() { g_reset_requested = true; }
+void request_device_reset(const char *why)
+{
+    g_reset_reason = why;
+    g_reset_requested = true;
+}
 void request_visibility_test() { g_visquery_requested = true; }
 
 void request_screenshot(const char *tag)
