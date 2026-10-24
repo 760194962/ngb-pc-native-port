@@ -291,6 +291,8 @@ enum class Str {
     AspectMonitorNote, // the shape list's last row: the monitor's own shape (main.cpp init_monitor_aspect)
     AspectMonitorOff,
     AspectMonitorBox, // the closed box with it chosen
+    SizeScreen,         // the window size box in fullscreen / borderless
+    TooLargeBorderless, // the screen's own size in window mode
     Count
 };
 

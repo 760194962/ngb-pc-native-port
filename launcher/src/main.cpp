@@ -940,6 +940,25 @@ struct ListShape {
     float box_w, list_w, col_b, col_c;
 };
 
+// The icon font: Segoe Fluent Icons comes with Windows 11 only. Windows 10 has the same icons at the same code points in
+// Segoe MDL2 Assets; without it the menu's icons were boxes there (players, 2026-10-24).
+const wchar_t *g_icon_font; // --mdl2 (with --snap): Segoe MDL2 Assets, as on Windows 10
+const wchar_t *icon_font()
+{
+    const wchar_t *&font = g_icon_font;
+    if (!font) {
+        font = L"Segoe MDL2 Assets";
+        IDWriteFontCollection *fc = nullptr;
+        UINT32 index = 0;
+        BOOL found = FALSE;
+        if (g.dw && SUCCEEDED(g.dw->GetSystemFontCollection(&fc, FALSE)) &&
+            SUCCEEDED(fc->FindFamilyName(L"Segoe Fluent Icons", &index, &found)) && found)
+            font = L"Segoe Fluent Icons";
+        if (fc) fc->Release();
+    }
+    return font;
+}
+
 struct Painter {
     ID2D1RenderTarget *rt;
     ID2D1Bitmap *hero = nullptr, *texture = nullptr;
@@ -1062,7 +1081,7 @@ struct Painter {
             }
             uint32_t c = sel || hov ? kBone : i == kSupport ? kGold : kAsh; // Support stands out in gold, heart and all
             text(kIcons[i], {r.left + 18, r.top, r.left + 44, r.bottom}, 17, sel ? kBlood : i == kSupport ? kGold : c, 1.0f,
-                 DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons");
+                 DWRITE_FONT_WEIGHT_NORMAL, icon_font());
             text(S((Str)((int)Str::NavStart + i)), {r.left + 52, r.top, r.right - 8, r.bottom}, 15, c, 1.0f,
                  sel ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
         }
@@ -1119,7 +1138,7 @@ struct Painter {
             stroke(b, kAsh, 0.35f);
         }
         text(L"\xE768", {b.left + 26, b.top, b.left + 56, b.bottom}, 18, ready ? kBone : kAsh, 1.0f, DWRITE_FONT_WEIGHT_NORMAL,
-             L"Segoe Fluent Icons");
+             icon_font());
         text(S(Str::Play), {b.left + 58, b.top, b.right - 16, b.bottom}, 20, ready ? kBone : kAsh, 1.0f, DWRITE_FONT_WEIGHT_BOLD,
              nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, g_lang == Lang::Zh ? 4.0f : 1.0f);
         if (!ready) text(S(Str::NotReady), {b.right + 20, b.top, b.right + 420, b.bottom}, 13.5f, kAsh);
@@ -1537,20 +1556,29 @@ struct Painter {
         }
         auto dims = [](int w, int h) { return std::to_wstring(w) + L"\u00D7" + std::to_wstring(h); };
         std::string cur = black_ini("window");
+        // Fullscreen and borderless show the picture at the screen's size, whatever is chosen here: the box says that
+        // size and the list is for window mode only. "Auto 4352x1836" there read as the size the game would use, and
+        // the screen's own size, too large for a framed window, as one that could not be had (a player at 5120x2160,
+        // 2026-10-24).
+        std::string mode = black_ini("fullscreen");
+        bool screen = !mode.empty() && mode != "0";
         std::vector<ListRow> rows;
         int sel = 0;
         for (int i = 0; i < 5; i++) {
             if (!i) {
                 rows.push_back({S(Str::SizeAuto), S(Str::SizeAutoNote), dims(auto_w, auto_h)});
+                rows.back().off = screen;
                 continue;
             }
             bool fits = sizes[i][0] <= work.right - work.left && sizes[i][1] <= work.bottom - work.top;
-            ListRow r = {dims(sizes[i][0], sizes[i][1]), fits ? L"" : S(Str::TooLarge)};
-            r.off = !fits;
+            bool whole = sizes[i][0] == g_monitor_w && sizes[i][1] == g_monitor_h; // the screen's own size
+            ListRow r = {dims(sizes[i][0], sizes[i][1]), fits ? L"" : whole ? S(Str::TooLargeBorderless) : S(Str::TooLarge)};
+            r.off = !fits || screen;
             rows.push_back(r);
             if (cur == std::to_string(sizes[i][0]) + "x" + std::to_string(sizes[i][1])) sel = i;
         }
         ListRow shown = sel ? rows[sel] : ListRow{S(Str::SizeAuto), L"", dims(auto_w, auto_h)};
+        if (screen && g_monitor_w > 0) shown = {S(Str::SizeScreen), L"", dims(g_monitor_w, g_monitor_h)};
         drop_list(kHitWin, x, y, {200, 380, 110, 270}, shown, rows, sel, S(Str::WindowOnly));
     }
 
@@ -1702,7 +1730,7 @@ struct Painter {
             text(shown.c, {box.left + 12, box.top, box.right - 32, box.bottom}, 12.5f, kAsh, 0.85f, DWRITE_FONT_WEIGHT_NORMAL,
                  nullptr, DWRITE_TEXT_ALIGNMENT_TRAILING, 0.0f, true);
         text(L"\xE70D", {box.right - 28, box.top, box.right - 8, box.bottom}, 11, hov ? kGold : kAsh, 1.0f,
-             DWRITE_FONT_WEIGHT_NORMAL, L"Segoe Fluent Icons", DWRITE_TEXT_ALIGNMENT_CENTER);
+             DWRITE_FONT_WEIGHT_NORMAL, icon_font(), DWRITE_TEXT_ALIGNMENT_CENTER);
         g_hits.push_back({id, box});
         if (!open) return;
         overlay = [this, id, box, sh, rows, sel, note] {
@@ -2573,6 +2601,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
             set_dest(argv[i + 1]);
         }
         if (!wcscmp(argv[i], L"--lang") && i + 1 < argc) g_lang = !wcscmp(argv[i + 1], L"en") ? Lang::En : Lang::Zh;
+        if (!wcscmp(argv[i], L"--mdl2")) g_icon_font = L"Segoe MDL2 Assets";
         if (!wcscmp(argv[i], L"--monitor") && i + 1 < argc) { // with --snap: as if the monitor were WxH (the shape list)
             int w = 0, h = 0;
             if (swscanf_s(argv[i + 1], L"%dx%d", &w, &h) == 2) init_monitor_aspect(w, h);

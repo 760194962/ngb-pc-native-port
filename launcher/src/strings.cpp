@@ -476,6 +476,8 @@ const Pair kText[(int)Str::Count] = {
     {L"跟随显示器（带鱼屏全屏不留黑边）", L"Match the monitor (fills an ultrawide)"},
     {L"跟随显示器：超出支持范围（1.5:1 到 2.5:1）", L"Match the monitor: outside 1.5:1 to 2.5:1"},
     {L"跟随显示器", L"Monitor"},
+    {L"跟随屏幕", L"The screen"},
+    {L"超出屏幕：选无边框可铺满", L"Larger than the screen: borderless fills it"},
 };
 
 } // namespace
