@@ -37,6 +37,7 @@ int backbuffer_height();
 void backbuffer_cpu_lock(); // D3DSurface_LockRect on the back buffer: the title draws it with the CPU
 void vis_begin();                  // NV097_SET_ZPASS_PIXEL_COUNT_ENABLE = 1: start counting (host occlusion query)
 HRESULT vis_end(uint32_t Index);   // D3DDevice_EndVisibilityTest: finish the query, write the report slot
+void vis_release();                // device reset: the query goes (vis_begin makes it again)
 void wait_next_vblank(); // block until the next emulated vblank (D3DDevice_BlockUntilVerticalBlank)
 
 // Render resolution: host render targets are scale_x() x scale_y() times the Xbox size (--scale; in widescreen

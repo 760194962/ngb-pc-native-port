@@ -568,7 +568,11 @@ bool reset_device_here()
     D3DPRESENT_PARAMETERS pp = g_exclusive_now ? exclusive_params(g_pp) : g_pp;
     HRESULT hr = g_dev->Reset(&pp);
     if (FAILED(hr)) {
-        logf("host: Reset failed 0x%08lx", hr);
+        static unsigned failures; // retried every 50 ms until it succeeds (d3d/device.cpp recover_device)
+        if (failures++ % 100 < 5)
+            logf("host: Reset failed 0x%08lx (%s %ux%u; window %s%s; then TestCooperativeLevel 0x%08lx)", hr,
+                 pp.Windowed ? "windowed" : "exclusive", pp.BackBufferWidth, pp.BackBufferHeight, IsIconic(g_hwnd) ? "minimised" : "shown",
+                 GetForegroundWindow() == g_hwnd ? ", in front" : ", not in front", g_dev->TestCooperativeLevel());
         return false;
     }
     g_bb_w = (int)pp.BackBufferWidth; // the exclusive mode's size can differ from the largest monitor's

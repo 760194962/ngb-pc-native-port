@@ -1496,6 +1496,7 @@ void release_host_targets()
 {
     release_cpu_backbuffer();
     perfhud::release();
+    vis_release();
     host3d::end_scene();
     IDirect3DDevice9 *d = host3d::dev();
     d->SetRenderTarget(0, g_host_backbuffer);
@@ -1619,10 +1620,20 @@ void recover_device(bool force)
     if (g_host_backbuffer) g_host_backbuffer->Release();
     if (g_host_depth) g_host_depth->Release();
     g_host_backbuffer = g_host_depth = nullptr;
+    // A failed Reset leaves a device that makes nothing until a Reset succeeds: the game's next render target came
+    // back null and Alt+Tab in exclusive fullscreen crashed in bind_render_target (r495, a query left alive:
+    // vis_release). So the game does not go on until the device is back: Reset again as soon as TestCooperativeLevel
+    // allows (the game waits meanwhile, out of sight in the background anyway).
     bool ok = host3d::reset_device();
+    for (int tries = 1; !ok && !host3d::window_closed(); tries++) {
+        Sleep(50);
+        HRESULT t = host3d::test_cooperative_level();
+        if (t == D3DERR_DEVICENOTRESET || t == D3D_OK) ok = host3d::reset_device();
+        if (ok || tries % 100 == 0) logf("[d3d] Reset %s after %d tries", ok ? "succeeded" : "still failing", tries + 1);
+    }
     d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &g_host_backbuffer);
     d->GetDepthStencilSurface(&g_host_depth);
-    if (!ok) return; // the next frame tries again
+    if (!ok) return; // the window was closed: the game is ending
     forget_sent_state();
     for (int i = 0; i < 10; i++) d->SetTransform(kTransforms[i], &g_st.transforms[i]);
     if (g_material_set) d->SetMaterial(&g_material);
@@ -2155,6 +2166,15 @@ void vis_begin()
     if (g_vis_active) g_vis_query->Issue(D3DISSUE_END);
     g_vis_query->Issue(D3DISSUE_BEGIN);
     g_vis_active = true;
+}
+
+// A Reset fails (D3DERR_INVALIDCALL) while the query exists, as with a D3DPOOL_DEFAULT resource (release_host_targets
+// drops it): in r493-r496 all 49 Resets before the game's first visibility test succeeded and both after it failed
+void vis_release()
+{
+    if (g_vis_query) g_vis_query->Release();
+    g_vis_query = nullptr;
+    g_vis_active = false;
 }
 
 uint32_t *vis_report(uint32_t Index)
