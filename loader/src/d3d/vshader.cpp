@@ -1,5 +1,6 @@
 #include "d3d/vshader.h"
 
+#include "d3d/draw.h"
 #include "d3d/host.h"
 #include "perf.h"
 #include "d3d/nv2a_vsh.h"
@@ -11,7 +12,9 @@
 #include <d3dcompiler.h>
 
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <unordered_set>
 
 namespace xd3d {
 
@@ -42,10 +45,18 @@ uint32_t vsdt_size(uint32_t t)
     }
 }
 
+// Every vertex shader object alive, for a new device (vs_drop_host_all): their host shaders belong to the old one
+std::unordered_set<VertexShader *> g_live_vs;
+std::mutex g_live_lock;
+
 VertexShader *vs_create(const uint32_t *decl, const uint32_t *function, uint32_t usage)
 {
     auto *vs = (VertexShader *)xk::ExAllocatePoolWithTag(sizeof(VertexShader), 'hsVX');
     memset(vs, 0, sizeof *vs);
+    {
+        std::lock_guard<std::mutex> g(g_live_lock);
+        g_live_vs.insert(vs);
+    }
     vs->magic = VSH_MAGIC;
     vs->usage = usage;
     uint32_t stream = 0, offset[16] = {};
@@ -119,11 +130,28 @@ VertexShader *vs_create(const uint32_t *decl, const uint32_t *function, uint32_t
 void vs_delete(VertexShader *vs)
 {
     if (!vs) return;
+    {
+        std::lock_guard<std::mutex> g(g_live_lock);
+        g_live_vs.erase(vs);
+    }
+    decl_forget(vs); // its address may come back as another shader with other inputs
     if (vs->host_vs) vs->host_vs->Release();
     if (vs->host_vs_undivided) vs->host_vs_undivided->Release();
     if (vs->program) xk::ExFreePool(vs->program);
     vs->magic = 0;
     xk::ExFreePool(vs);
+}
+
+void vs_drop_host_all()
+{
+    std::lock_guard<std::mutex> g(g_live_lock);
+    for (VertexShader *vs : g_live_vs) {
+        if (vs->host_vs) vs->host_vs->Release();
+        if (vs->host_vs_undivided) vs->host_vs_undivided->Release();
+        vs->host_vs = vs->host_vs_undivided = nullptr;
+        vs->host_vs_undivided_stages = 0;
+        vs->translate_failed = false; // a failed CreateVertexShader is tried again on the new device
+    }
 }
 
 uint32_t vs_input_mask(const VertexShader *vs)

@@ -78,6 +78,7 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal); // upload/cached
 void texture_mark_dirty(const Resource *r);
 void texture_forget(const Resource *r);
 void texture_drop_device_copies();                                 // before a Reset: the DEFAULT copies (made again)
+void texture_drop_all();                                           // a new device: both copies (made again from Xbox memory)
 IDirect3DBaseTexture9 *texture_system_copy(IDirect3DBaseTexture9 *tex); // a game texture's lockable copy, or null
 uint32_t texture_level_offset(const PixelContainer *pc, uint32_t face, uint32_t level, uint32_t *pitch, uint32_t *w,
                               uint32_t *h);

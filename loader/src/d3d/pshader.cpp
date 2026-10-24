@@ -1,6 +1,7 @@
 #include "d3d/pshader.h"
 
 #include "d3d/device.h"
+#include "d3d/ffp_ps.h"
 #include "d3d/host.h"
 #include "perf.h"
 #include "d3d/nv2a_psh.h"
@@ -18,6 +19,8 @@ namespace xd3d {
 namespace {
 
 std::unordered_map<std::string, IDirect3DPixelShader9 *> g_cache; // key: program dwords (no constants) + cube mask
+uint32_t g_last_key[48], g_last_n; // the previous draw's key and shader: most draws keep it
+IDirect3DPixelShader9 *g_last_ps;
 
 uint32_t cube_mask()
 {
@@ -120,15 +123,13 @@ IDirect3DPixelShader9 *ps_host_shader()
     uint32_t bump_div = bump_divide_stages();
     key[n++] = cube | depth << 8 | shadow << 16 | kill << 24;
     key[n++] = bump_div;
-    static uint32_t last_key[48], last_n;
-    static IDirect3DPixelShader9 *last_ps;
-    if (n == last_n && !memcmp(key, last_key, n * 4)) return last_ps; // most draws keep the previous shader
+    if (n == g_last_n && !memcmp(key, g_last_key, n * 4)) return g_last_ps; // most draws keep the previous shader
     std::string k((const char *)key, n * 4);
     auto it = g_cache.find(k);
     if (it != g_cache.end()) {
-        memcpy(last_key, key, n * 4);
-        last_n = n;
-        return last_ps = it->second;
+        memcpy(g_last_key, key, n * 4);
+        g_last_n = n;
+        return g_last_ps = it->second;
     }
 
     for (int s = 0; s < 4; s++)
@@ -181,9 +182,9 @@ IDirect3DPixelShader9 *ps_host_shader()
     if (code) code->Release();
     if (errors) errors->Release();
     g_cache[k] = ps; // failures are cached too (drawn with the fallback)
-    memcpy(last_key, key, n * 4);
-    last_n = n;
-    return last_ps = ps;
+    memcpy(g_last_key, key, n * 4);
+    g_last_n = n;
+    return g_last_ps = ps;
 }
 
 void linear_texture_scale(int stage, float *sx, float *sy); // d3d/draw.cpp
@@ -230,6 +231,15 @@ void note_alternating_constants(const uint32_t *rs)
     }
 }
 
+void pshader_drop_all()
+{
+    for (auto &kv : g_cache)
+        if (kv.second) kv.second->Release();
+    g_cache.clear();
+    g_last_n = 0;
+    g_last_ps = nullptr;
+}
+
 void upload_ps_constants(IDirect3DDevice9 *d)
 {
     const uint32_t *rs = render_state();
@@ -270,6 +280,7 @@ void upload_ps_constants(IDirect3DDevice9 *d)
         c[23 + s][2] = c[23 + s][3] = 1.0f;
     }
     d->SetPixelShaderConstantF(0, &c[0][0], 27);
+    ffp_forget_constants(); // c0 was the fixed-function pixels' texture factor
 }
 
 void ps_set_constant(const PixelShaderDef *def, uint32_t reg, const float *v)

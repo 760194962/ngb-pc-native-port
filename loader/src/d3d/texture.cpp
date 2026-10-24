@@ -505,6 +505,17 @@ void texture_drop_device_copies()
     LeaveCriticalSection(&g_cs);
 }
 
+void texture_drop_all()
+{
+    EnterCriticalSection(&g_cs);
+    for (auto &kv : g_cache) {
+        if (kv.second.tex) kv.second.tex->Release();
+        if (kv.second.sys) kv.second.sys->Release();
+        kv.second.tex = kv.second.sys = nullptr; // made again from Xbox memory at the next use (a null tex is stale)
+    }
+    LeaveCriticalSection(&g_cs);
+}
+
 IDirect3DBaseTexture9 *texture_system_copy(IDirect3DBaseTexture9 *tex)
 {
     IDirect3DBaseTexture9 *sys = nullptr;

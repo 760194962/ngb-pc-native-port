@@ -368,4 +368,16 @@ void release()
     g_saved = nullptr;
 }
 
+void release_all()
+{
+    release();
+    if (g_ps) g_ps->Release();
+    g_ps = nullptr;
+    std::lock_guard<std::mutex> lk(g_lock);
+    for (Panel *p : {&g_hud, &g_note}) {
+        p->tex.release();
+        p->fresh = !p->pixels.empty(); // the bitmap goes into the new device's texture
+    }
+}
+
 } // namespace perfhud

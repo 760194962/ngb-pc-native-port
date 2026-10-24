@@ -154,7 +154,8 @@ void show_hint(int id)
 
 // --press-file: a test driver appends lines while the game runs: a press as in --press without the time ("k:Enter",
 // "a", "lx+80*500"), "shot:NAME" for a screenshot of the next whole frame, "reset" (a Direct3D device Reset as after
-// sleep), "visquery" (a visibility test: the query a Reset must not find), "audio-lost" (the XAudio2 device gone) or
+// sleep), "visquery" (a visibility test: the query a Reset must not find), "recreate" (a new Direct3D device),
+// "audio-lost" (the XAudio2 device gone) or
 // "hint:N" (show_hint). Presses read together are 250 ms apart.
 void read_press_file(uint32_t now_ms)
 {
@@ -299,6 +300,10 @@ void read_press_file(uint32_t now_ms)
                 }
                 if (line == "visquery") {
                     xd3d::request_visibility_test();
+                    continue;
+                }
+                if (line == "recreate") {
+                    xd3d::request_device_recreate();
                     continue;
                 }
                 if (line == "audio-lost") {

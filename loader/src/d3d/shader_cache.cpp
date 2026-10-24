@@ -205,6 +205,13 @@ void prewarm_shaders(IDirect3DDevice9 *d)
          (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart, bad ? " (some entries unreadable)" : "");
 }
 
+void warm_drop_all()
+{
+    std::lock_guard<std::mutex> g(g_lock);
+    for (auto &kv : g_warm) kv.second.obj->Release();
+    g_warm.clear();
+}
+
 HRESULT create_vertex_shader(IDirect3DDevice9 *d, ID3DBlob *code, IDirect3DVertexShader9 **out)
 {
     {

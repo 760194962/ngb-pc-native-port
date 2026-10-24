@@ -31,6 +31,9 @@ uint32_t g_ffp_edge_stages;
 namespace {
 
 std::unordered_map<std::string, IDirect3DPixelShader9 *> g_ffp_cache;
+std::string g_ffp_last_key; // the previous draw's key and shader
+IDirect3DPixelShader9 *g_ffp_last_ps;
+float g_ffp_c0[4] = {-1, -1, -1, -1}; // the texture factor last put in c0 (upload_ffp_constants)
 
 struct StageKey {
     uint32_t cop, c0, c1, c2, aop, a0, a1, a2, result;
@@ -210,13 +213,11 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
     key.push_back((char)((specular ? 1 : 0) | (def_diffuse ? 2 : 0) | (def_specular ? 4 : 0)));
     key.push_back((char)g_cfg.ffp_debug);
     key.push_back((char)g_cfg.untex);
-    static std::string last_key;
-    static IDirect3DPixelShader9 *last_ps;
-    if (key == last_key) return last_ps;
+    if (key == g_ffp_last_key) return g_ffp_last_ps;
     auto it = g_ffp_cache.find(key);
     if (it != g_ffp_cache.end()) {
-        last_key = key;
-        return last_ps = it->second;
+        g_ffp_last_key = key;
+        return g_ffp_last_ps = it->second;
     }
     std::string hlsl = build_hlsl(k, specular, def_diffuse, def_specular, first);
     perf::Scope perf_scope(perf::kCompile);
@@ -243,18 +244,30 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
     if (code) code->Release();
     if (errors) errors->Release();
     g_ffp_cache[key] = ps; // a failure is cached too: the host pipeline draws those
-    last_key = key;
-    return last_ps = ps;
+    g_ffp_last_key = key;
+    return g_ffp_last_ps = ps;
 }
 
 void upload_ffp_constants(IDirect3DDevice9 *d)
 {
     uint32_t c = render_state()[XRS_TEXTUREFACTOR];
     float f[4] = {((c >> 16) & 255) / 255.0f, ((c >> 8) & 255) / 255.0f, (c & 255) / 255.0f, (c >> 24) / 255.0f};
-    static float last[4] = {-1, -1, -1, -1};
-    if (memcmp(f, last, sizeof f) == 0) return;
-    memcpy(last, f, sizeof f);
+    if (memcmp(f, g_ffp_c0, sizeof f) == 0) return;
+    memcpy(g_ffp_c0, f, sizeof f);
     d->SetPixelShaderConstantF(0, f, 1);
+}
+
+// c0 rewritten by another (the combiners' constants, pshader.cpp) or a new device: the next upload sends it
+void ffp_forget_constants() { g_ffp_c0[0] = -1; }
+
+void ffp_drop_all()
+{
+    for (auto &kv : g_ffp_cache)
+        if (kv.second) kv.second->Release();
+    g_ffp_cache.clear();
+    g_ffp_last_key.clear();
+    g_ffp_last_ps = nullptr;
+    ffp_forget_constants();
 }
 
 } // namespace xd3d

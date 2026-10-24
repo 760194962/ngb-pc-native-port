@@ -53,6 +53,9 @@ bool reset_device();
 // The device's state on the window's thread (as reset_device): D3D_OK, or D3DERR_DEVICELOST / DEVICEHUNG /
 // DEVICEREMOVED / OUTOFVIDEOMEMORY when it cannot draw (a hidden window or a changed mode is no loss on 9Ex)
 HRESULT test_cooperative_level();
+// A new device for the old one (whose objects must all be released first: d3d/device.cpp drop_device_objects); the
+// references the old one still had are logged. The new one is made as at the start (window or exclusive fullscreen).
+bool recreate_device();
 bool window_closed();
 
 } // namespace host3d

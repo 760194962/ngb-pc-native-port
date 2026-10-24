@@ -442,9 +442,11 @@ template <typename F> void ts_on_change(int s, int t, F apply)
 // A 1x1 opaque white texture for fixed-function stages that use D3DTA_TEXTURE without a texture bound: that reads
 // as (1,1,1,1) on the Xbox (Ninja Gaiden Black's nunchaku sweep modulates its alpha by an unset stage 1 and is
 // drawn alpha-tested; D3D9 samples an unbound stage as (0,0,0,0) and the sweep vanished, docs/04 §3.9).
+host3d::CpuTexture g_white;
+
 IDirect3DTexture9 *white_texture()
 {
-    static host3d::CpuTexture t;
+    host3d::CpuTexture &t = g_white;
     if (t.tex) return t.tex;
     if (!t.make(1, 1)) return nullptr;
     int pitch;
@@ -834,6 +836,15 @@ void decode_run(uint8_t t, const uint8_t *p, uint32_t sstride, float *o, uint32_
 std::vector<float> g_conv; // only grows: a resize per draw zero-filled it every time
 std::unordered_map<const VertexShader *, IDirect3DVertexDeclaration9 *> g_decls;
 IDirect3DVertexDeclaration9 *g_decl_imm16; // immediate mode: all 16 attributes
+
+// A deleted shader's declaration (vs_delete): its address may be given to another shader with other inputs
+void forget_decl(const VertexShader *vs)
+{
+    auto it = g_decls.find(vs);
+    if (it == g_decls.end()) return;
+    if (it->second) it->second->Release();
+    g_decls.erase(it);
+}
 
 IDirect3DVertexDeclaration9 *decl_for(const VertexShader *vs)
 {
@@ -2343,6 +2354,24 @@ void release_draw_buffers()
     g_ring_ib = nullptr;
     g_ring_vpos = g_ring_ipos = 0;
 }
+
+void draw_drop_all()
+{
+    release_draw_buffers();
+    g_ring_failed = false; // tried again on the new device
+    for (auto &kv : g_decls)
+        if (kv.second) kv.second->Release();
+    g_decls.clear();
+    for (auto &kv : g_decl_imm)
+        if (kv.second) kv.second->Release();
+    g_decl_imm.clear();
+    if (g_decl_imm16) g_decl_imm16->Release();
+    g_decl_imm16 = nullptr;
+    g_white.release();
+    forget_sent_state();
+}
+
+void decl_forget(const VertexShader *vs) { forget_decl(vs); }
 
 #include "auxtab/draw_tables.inc"
 

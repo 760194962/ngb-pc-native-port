@@ -58,9 +58,10 @@ std::atomic<bool> g_restyle_pending{false}; // out of exclusive fullscreen: rest
 // DEVICELOST for ever. Only with both on the window thread did it say DEVICENOTRESET and Reset succeed (a minimal
 // D3D9 program, 2 runs each on the Iris Xe, 2026-10-22; the loader itself r282/r283).
 constexpr UINT WM_APP_DEVICE = WM_APP + 0x54; // wParam: kDeviceCreate / kDeviceReset / kDeviceTest
-enum { kDeviceCreate, kDeviceReset, kDeviceTest };
+enum { kDeviceCreate, kDeviceReset, kDeviceTest, kDeviceRecreate };
 bool create_device_here();
 bool reset_device_here();
+bool recreate_device_here();
 
 // Borderless window over the whole monitor, or back to the window it was.
 void toggle_fullscreen()
@@ -271,6 +272,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_APP_DEVICE: // create_device, reset_device, test_cooperative_level: on this thread
         if (wp == kDeviceCreate) return create_device_here();
         if (wp == kDeviceReset) return reset_device_here();
+        if (wp == kDeviceRecreate) return recreate_device_here();
         {
             // A 9Ex device is not lost when Windows takes the screen (Alt+Tab in exclusive fullscreen, the lock
             // screen): CheckDeviceState then says S_PRESENT_OCCLUDED, and S_PRESENT_MODE_CHANGED after the desktop's
@@ -509,7 +511,7 @@ namespace {
 // visibility test's query lived and Alt+Tab crashed (r495); minimised, the frames' work piled up (r528).
 bool create_device_here()
 {
-    HRESULT made = Direct3DCreate9Ex(D3D_SDK_VERSION, &g_d3d);
+    HRESULT made = g_d3d ? S_OK : Direct3DCreate9Ex(D3D_SDK_VERSION, &g_d3d);
     if (FAILED(made)) {
         logf("host: Direct3DCreate9Ex failed 0x%08lx", made);
         return false;
@@ -585,6 +587,18 @@ bool create_device_here()
     return true;
 }
 
+// The old device's last reference released (what it still counts are objects d3d/device.cpp drop_device_objects
+// left out: the device then stays in memory), and a new one made as at the start
+bool recreate_device_here()
+{
+    ULONG left = g_dev ? g_dev->Release() : 0;
+    g_dev = nullptr;
+    g_devex = nullptr;
+    g_in_scene = false;
+    logf("host: the old device released: %lu references left%s", left, left ? " (objects not let go: it stays in memory)" : "");
+    return create_device_here();
+}
+
 bool reset_device_here()
 {
     D3DPRESENT_PARAMETERS pp = g_exclusive_now ? exclusive_params(g_pp) : g_pp;
@@ -610,6 +624,7 @@ bool reset_device_here()
 
 bool create_device() { return SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceCreate, 0) != 0; }
 HRESULT test_cooperative_level() { return (HRESULT)SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceTest, 0); }
+bool recreate_device() { return SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceRecreate, 0) != 0; }
 
 IDirect3DDevice9 *dev() { return g_dev; }
 

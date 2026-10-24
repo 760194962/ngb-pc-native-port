@@ -9,6 +9,8 @@
 #include "d3d/dispatch.h"
 #include "d3d/draw.h"
 #include "d3d/host.h"
+#include "d3d/shader_cache.h"
+#include "d3d/ffp_ps.h"
 #include "d3d/nv2a_psh.h"
 #include "d3d/perfhud.h"
 #include "d3d/pshader.h"
@@ -86,6 +88,14 @@ IDirect3DPixelShader9 *g_zview_ps, *g_zfill_ps;
 enum class Owner : uint8_t { None, Color, Depth };
 std::unordered_map<uint64_t, Owner> g_owner;
 IDirect3DTexture9 *g_cur_rt; // host texture currently bound as render target
+uint32_t g_device_gen;       // new devices made (recreate_device): statics holding host objects check it
+// Objects some debug paths keep in statics of their own (--rawvideo, flash_watch, --debug-frame): let go with the rest
+// of the device (drop_device_objects) and made again by those paths
+std::vector<IUnknown **> g_debug_objects;
+void keep_for_drop(IUnknown **p)
+{
+    if (std::find(g_debug_objects.begin(), g_debug_objects.end(), p) == g_debug_objects.end()) g_debug_objects.push_back(p);
+}
 uint32_t g_cur_xw, g_cur_xh; // its Xbox size
 uint64_t g_cur_key;          // and its key (mem_key)
 uint64_t g_cur_zkey;         // key of the depth surface currently bound (0: none)
@@ -546,6 +556,7 @@ const char kSeamPS[] = "sampler2D col : register(s0);\n"
                        "  return n > 0 ? sum / n : c;\n"
                        "}\n";
 IDirect3DPixelShader9 *g_seam_ps;
+bool g_seam_tried, g_box_tried, g_soft_tried; // made once (a failed compile is not tried every frame); reset for a new device
 Surface *g_main_z; // the depth surface the game uses with its back buffer
 
 // The ramp texture from the game's current gamma ramp (identity until the game has written one).
@@ -553,7 +564,9 @@ IDirect3DTexture9 *ramp_texture()
 {
     static uint8_t shown[768];
     static bool valid, made;
+    bool fresh = !g_ramp.tex; // made again (a new device): filled even when the ramp is the one shown
     if (!g_ramp.make(256, 1)) return nullptr;
+    if (fresh) made = false;
     uint8_t ramp[768];
     if (!valid && g_cfg.ramp)
         valid = dev_field<uint32_t>(DEV_GAMMA_DIRTY) || dev_field<uint32_t>(DEV_GAMMA_DIRTY + 4);
@@ -623,9 +636,8 @@ void present_backbuffer()
     }
     IDirect3DTexture9 *src = bb.tex; // the frame, with seams filled when that is on
     if (g_cfg.seam_fill && g_main_z) {
-        static bool tried;
-        if (!g_seam_ps && !tried) {
-            tried = true;
+        if (!g_seam_ps && !g_seam_tried) {
+            g_seam_tried = true;
             g_seam_ps = compile_ps(kSeamPS, "seamfill", "ps_2_a");
             if (!g_seam_ps) logf("[d3d] seam fill shader not available");
         }
@@ -884,9 +896,8 @@ IDirect3DTexture9 *smoothed_rt(HostRT &h, uint32_t draw_serial)
 {
     bool bound = h.tex == g_cur_rt; // sampled while being drawn into: its contents change with every draw
     if (h.smooth && h.smooth_epoch == h.epoch && (!bound || h.smooth_serial == draw_serial)) return h.smooth;
-    static bool tried;
-    if (!g_box_ps && !tried) {
-        tried = true;
+    if (!g_box_ps && !g_box_tried) {
+        g_box_tried = true;
         g_box_ps = compile_ps(kBoxPS, "box");
     }
     if (!g_box_ps) return h.tex;
@@ -913,9 +924,8 @@ IDirect3DTexture9 *smoothed_rt(HostRT &h, uint32_t draw_serial)
 IDirect3DTexture9 *reduced_rt(HostRT &h)
 {
     if (h.reduced && h.reduced_epoch == h.epoch) return h.reduced;
-    static bool tried;
-    if (!g_box_ps && !tried) {
-        tried = true;
+    if (!g_box_ps && !g_box_tried) {
+        g_box_tried = true;
         g_box_ps = compile_ps(kBoxPS, "box");
     }
     if (!g_box_ps) return h.tex;
@@ -948,9 +958,8 @@ IDirect3DPixelShader9 *g_soft_ps;
 IDirect3DTexture9 *softened_rt(HostRT &h)
 {
     if (h.soft && h.soft_epoch == h.epoch) return h.soft;
-    static bool tried;
-    if (!g_soft_ps && !tried) {
-        tried = true;
+    if (!g_soft_ps && !g_soft_tried) {
+        g_soft_tried = true;
         g_soft_ps = compile_ps(kSoftPS, "soft");
     }
     if (!g_soft_ps) return h.tex;
@@ -1010,13 +1019,15 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
         static int view_mode;
         static uint32_t view_made_at; // g_zbind_count when the view was made
         static IDirect3DTexture9 *view;
+        static uint32_t view_gen;
         // A depth surface only changes while it is bound: a view made after its last bind stays valid while another
         // surface is bound. Ninja Gaiden Black's ~200 shadow-receiver draws a frame sample the 128x128 shadow map,
         // which was rebuilt for each of them (a full-screen pass per draw, ~10% of the frame in r069).
         bool stale = view_key != key || view_mode != mode || (g_zbind_at[key] > view_made_at) ||
-                     (key == g_cur_zkey && view_serial != draw_serial);
+                     (key == g_cur_zkey && view_serial != draw_serial) || view_gen != g_device_gen;
         if (stale) {
             view = depth_view(key, zi->second, w, h, mode);
+            view_gen = g_device_gen;
             view_serial = draw_serial;
             view_key = key;
             view_mode = mode;
@@ -1469,11 +1480,13 @@ void capture_frame()
     if (!shrunk) {
         if (FAILED(d->CreateRenderTarget(w, h, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &shrunk, nullptr)) ||
             FAILED(d->CreateOffscreenPlainSurface(w, h, D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr)) ||
-            _wfopen_s(&fp, g_cfg.rawvideo.c_str(), L"wb")) {
+            (!fp && _wfopen_s(&fp, g_cfg.rawvideo.c_str(), L"wb"))) { // a new device keeps the file
             done = true;
             logf("[capture] could not start");
             return;
         }
+        keep_for_drop((IUnknown **)&shrunk);
+        keep_for_drop((IUnknown **)&sys);
         logf("[capture] %ux%u BGRX frames at %d fps to %s", w, h, g_cfg.fps, narrow(g_cfg.rawvideo).c_str());
     }
     RECT src = {pic.left, pic.top, pic.left + (LONG)w, pic.top + (LONG)h};
@@ -1598,6 +1611,91 @@ std::atomic<bool> g_reset_requested;          // request_device_reset: Alt+Enter
 std::atomic<const char *> g_reset_reason{""};
 std::atomic<bool> g_visquery_requested; // tests: press-file "visquery" (a visibility test, as the game's first leaves it)
 
+std::atomic<bool> g_recreate_requested; // tests: press-file "recreate"
+
+// The loader's own pixel shaders (made on demand)
+void release_loader_shaders()
+{
+    for (IDirect3DPixelShader9 **ps : {&g_zfill_ps, &g_zview_ps, &g_zdepth_ps, &g_gamma_ps, &g_fxaa_ps, &g_seam_ps, &g_box_ps, &g_soft_ps})
+        if (*ps) {
+            (*ps)->Release();
+            *ps = nullptr;
+        }
+    g_seam_tried = g_box_tried = g_soft_tried = false;
+}
+
+// What the game set that the device keeps (a Reset or a new device forgets it), sent again: the draws forget what they
+// sent, and the transforms, material, lights, target, viewport and scissor are set here
+void resend_game_state(IDirect3DDevice9 *d)
+{
+    forget_sent_state();
+    for (int i = 0; i < 10; i++) d->SetTransform(kTransforms[i], &g_st.transforms[i]);
+    if (g_material_set) d->SetMaterial(&g_material);
+    for (auto &kv : g_lights) d->SetLight(kv.first, &kv.second);
+    for (auto &kv : g_lights_on) d->LightEnable(kv.first, kv.second);
+    rebind_game_target();
+}
+
+// Every object of the device let go, for a new one (recreate_device), and every cache holding one emptied: what is
+// made on demand comes back by itself, game textures from Xbox memory. Afterwards only the loader holds the device:
+// the references its Release leaves (host3d::recreate_device logs them) are objects left out here.
+void drop_device_objects()
+{
+    IDirect3DDevice9 *d = host3d::dev();
+    host3d::end_scene();
+    for (DWORD s = 0; s < 16; s++) d->SetTexture(s, nullptr); // what the device has bound stays alive
+    for (DWORD s = 0; s < 4; s++) d->SetTexture(D3DVERTEXTEXTURESAMPLER0 + s, nullptr);
+    for (UINT i = 0; i < 16; i++) d->SetStreamSource(i, nullptr, 0, 0);
+    d->SetIndices(nullptr);
+    d->SetVertexShader(nullptr);
+    d->SetPixelShader(nullptr);
+    d->SetVertexDeclaration(nullptr);
+    for (DWORD i = 1; i < 4; i++) d->SetRenderTarget(i, nullptr);
+    release_host_targets(); // targets, depth, views, copies, AA, the CPU back buffer's copy, the overlay's state block, the query
+    if (g_bb_cpu_sys) g_bb_cpu_sys->Release();
+    g_bb_cpu_sys = nullptr;
+    g_ramp.release();
+    release_loader_shaders();
+    for (IUnknown **p : g_debug_objects)
+        if (*p) {
+            (*p)->Release();
+            *p = nullptr;
+        }
+    texture_drop_all();
+    pshader_drop_all();
+    ffp_drop_all();
+    vs_drop_host_all();
+    warm_drop_all();
+    perfhud::release_all();
+    draw_drop_all();
+    if (g_host_backbuffer) g_host_backbuffer->Release();
+    if (g_host_depth) g_host_depth->Release();
+    g_host_backbuffer = g_host_depth = nullptr;
+    g_device_gen++;
+}
+
+// A new device: for a hung or removed driver, a Reset that does not succeed, or press-file "recreate". Everything of the
+// old one dropped, the device made again as at the start (the game waits until it is), and what the game set sent again.
+void recreate_device(const char *why)
+{
+    ULONGLONG t0 = GetTickCount64();
+    logf("[d3d] making a new Direct3D device (%s)", why);
+    drop_device_objects();
+    bool ok = host3d::recreate_device();
+    for (int tries = 1; !ok && !host3d::window_closed(); tries++) { // no device at all: nothing can be drawn until there is one
+        Sleep(500);
+        ok = host3d::recreate_device();
+        if (ok || tries % 20 == 0) logf("[d3d] a new device %s after %d tries", ok ? "made" : "still not made", tries + 1);
+    }
+    if (!ok) return; // the window was closed: the game is ending
+    IDirect3DDevice9 *d = host3d::dev();
+    d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &g_host_backbuffer);
+    d->GetDepthStencilSurface(&g_host_depth);
+    resend_game_state(d);
+    g_device_lost = false;
+    logf("[d3d] the new device draws, after %.1f s", (GetTickCount64() - t0) / 1000.0);
+}
+
 void recover_device(bool requested)
 {
     IDirect3DDevice9 *d = host3d::dev();
@@ -1612,9 +1710,18 @@ void recover_device(bool requested)
     } else if (!g_device_lost) {
         g_device_lost = true;
         g_lost_since = GetTickCount64();
-        logf("[d3d] the Direct3D device is lost (0x%08lx); drawing resumes when it can be reset", hr);
+        logf("[d3d] the Direct3D device is lost (0x%08lx)", hr);
     }
-    if (hr != D3DERR_DEVICENOTRESET) return; // still lost (D3DERR_DEVICELOST): ask again next frame
+    // A 9Ex device is lost only to a hung or removed driver (host3d::test_cooperative_level), and a Reset does not
+    // bring it back: a new device. Any other loss that lasts 2 s gets one too.
+    if (hr == D3DERR_DEVICEHUNG || hr == D3DERR_DEVICEREMOVED ||
+        (hr != D3DERR_DEVICENOTRESET && GetTickCount64() - g_lost_since >= 2000)) {
+        char why[64];
+        snprintf(why, sizeof why, "the device is lost: 0x%08lx", hr);
+        recreate_device(why);
+        return;
+    }
+    if (hr != D3DERR_DEVICENOTRESET) return; // lost for less than 2 s: asked again next frame
     release_host_targets();
     release_draw_buffers();
     for (DWORD s = 0; s < 8; s++) d->SetTexture(s, nullptr); // the device's own references keep a released texture alive
@@ -1626,24 +1733,21 @@ void recover_device(bool requested)
     g_host_backbuffer = g_host_depth = nullptr;
     // A failed Reset leaves a device that makes nothing until a Reset succeeds: the game's next render target came
     // back null and Alt+Tab in exclusive fullscreen crashed in bind_render_target (r495, a query left alive:
-    // vis_release). So the game does not go on until the device is back: Reset again as soon as TestCooperativeLevel
-    // allows (the game waits meanwhile, out of sight in the background anyway).
+    // vis_release). So the game does not go on until the device is back: Reset again for 2 s, then a new device.
     bool ok = host3d::reset_device();
-    for (int tries = 1; !ok && !host3d::window_closed(); tries++) {
+    for (int tries = 1; !ok && tries < 40 && !host3d::window_closed(); tries++) {
         Sleep(50);
         HRESULT t = host3d::test_cooperative_level();
         if (t == D3DERR_DEVICENOTRESET || t == D3D_OK) ok = host3d::reset_device();
-        if (ok || tries % 100 == 0) logf("[d3d] Reset %s after %d tries", ok ? "succeeded" : "still failing", tries + 1);
+        if (ok) logf("[d3d] Reset succeeded after %d tries", tries + 1);
+    }
+    if (!ok) {
+        if (!host3d::window_closed()) recreate_device("Reset kept failing for 2 s");
+        return;
     }
     d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &g_host_backbuffer);
     d->GetDepthStencilSurface(&g_host_depth);
-    if (!ok) return; // the window was closed: the game is ending
-    forget_sent_state();
-    for (int i = 0; i < 10; i++) d->SetTransform(kTransforms[i], &g_st.transforms[i]);
-    if (g_material_set) d->SetMaterial(&g_material);
-    for (auto &kv : g_lights) d->SetLight(kv.first, &kv.second);
-    for (auto &kv : g_lights_on) d->LightEnable(kv.first, kv.second);
-    rebind_game_target();
+    resend_game_state(d);
     g_device_lost = false;
     logf("[d3d] the Direct3D device was reset; drawing again after %.1f s", (GetTickCount64() - g_lost_since) / 1000.0);
 }
@@ -1764,6 +1868,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     static uint32_t mode_changed_frames;
     mode_changed_frames = presented == S_PRESENT_MODE_CHANGED ? mode_changed_frames + 1 : 0;
     if (mode_changed_frames == 30) request_device_reset("Present said S_PRESENT_MODE_CHANGED for 30 frames");
+    if (g_recreate_requested.exchange(false)) recreate_device("tests: press-file recreate");
     bool requested = g_reset_requested.exchange(false);
     if (presented == D3DERR_DEVICELOST || presented == D3DERR_DEVICEHUNG || presented == D3DERR_DEVICEREMOVED || g_device_lost || requested)
         recover_device(requested);
@@ -2044,6 +2149,8 @@ void flash_check(uint32_t frame)
     if (!fl_small) {
         d->CreateRenderTarget(W, H, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &fl_small, nullptr);
         d->CreateOffscreenPlainSurface(W, H, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr);
+        keep_for_drop((IUnknown **)&fl_small);
+        keep_for_drop((IUnknown **)&sys);
     }
     FlashStats s = g_fl_cur;
     s.frame = frame;
@@ -2136,6 +2243,7 @@ void log_frame_mean_color(uint32_t frame)
     if (!sys && SUCCEEDED(d->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr))) {
         sw = desc.Width;
         sh = desc.Height;
+        keep_for_drop((IUnknown **)&sys);
     }
     if (sys && SUCCEEDED(d->GetRenderTargetData(bb, sys))) {
         D3DLOCKED_RECT lr;
@@ -2770,6 +2878,7 @@ void request_device_reset(const char *why)
     g_reset_requested = true;
 }
 void request_visibility_test() { g_visquery_requested = true; }
+void request_device_recreate() { g_recreate_requested = true; }
 
 void request_screenshot(const char *tag)
 {

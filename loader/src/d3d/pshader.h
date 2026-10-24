@@ -14,6 +14,7 @@ struct PixelShaderDef;
 IDirect3DPixelShader9 *ps_host_shader();
 // c0-c17 combiner constants, c18 fog color, c19-c22 bump-env matrices.
 void upload_ps_constants(IDirect3DDevice9 *d);
+void pshader_drop_all(); // a new device: every shader made (made again on demand)
 // What the library's SetPixelShaderConstant does: pack to ARGB8 and route through the shader's
 // PSC0/PSC1/final-combiner mappings into the PSCONSTANT render states.
 void ps_set_constant(const PixelShaderDef *def, uint32_t reg, const float *v);

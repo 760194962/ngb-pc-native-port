@@ -7,6 +7,7 @@ namespace xd3d {
 
 VertexShader *vs_create(const uint32_t *declaration, const uint32_t *function, uint32_t usage);
 void vs_delete(VertexShader *vs);
+void vs_drop_host_all(); // a new device: every live shader's host shaders (translated again on demand)
 uint32_t vsdt_size(uint32_t xtype); // bytes of one Xbox D3DVSDT_* element
 
 // Translate the NV2A program to a host vertex shader (vs_2_0). Returns null if not possible.

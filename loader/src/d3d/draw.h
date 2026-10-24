@@ -33,6 +33,9 @@ void forget_sent_shaders();
 // After a device Reset: Direct3D is back at its defaults, so every state, texture and shader the draws remember
 // having sent is unknown again.
 void forget_sent_state();
+struct VertexShader;
+void decl_forget(const VertexShader *vs); // vs_delete: its vertex declaration
+void draw_drop_all();                     // a new device: the draw ring, declarations, white texel; sent state forgotten
 // Another path set the host's D3DTS_TEXTUREn: the stage texture-scale cache sends its matrix again (d3d/draw.cpp).
 void host_texture_transform_changed(int stage, const D3DMATRIX *m = nullptr);
 uint32_t texture_matrix_stale_count(); // since the last call (diagnosis, logged with --api-count)
@@ -49,5 +52,6 @@ void screenshot_now(const char *tag);
 void request_screenshot(const char *tag); // tests: "<dir>\<tag>.png" of the next whole frame (any thread)
 void request_device_reset(const char *why = "tests"); // at the next Swap: ResetEx (Alt+Enter, tests) as after a loss
 void request_visibility_test();           // tests: at the next Swap, a visibility test (its query then exists)
+void request_device_recreate();           // tests: at the next Swap, a new device as for a hung or removed driver
 
 } // namespace xd3d

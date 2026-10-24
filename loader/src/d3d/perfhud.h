@@ -15,6 +15,7 @@ void start(const char *gpu_name, unsigned vendor_id, unsigned device_id);
 void frame();                                      // a Swap (the frame rate)
 void draw(IDirect3DDevice9 *d, const RECT &pic);   // over the host back buffer, inside the picture
 void release();                                    // before a Reset (a state block must not outlive it)
+void release_all();                                // a new device: every object of the overlay (made again)
 
 // A one-line message at the picture's bottom-right for ms milliseconds (online play's status, net/online.cpp), shown
 // whether or not the overlay is on; any thread. Nothing is drawn or checked beyond one atomic load while none shows.

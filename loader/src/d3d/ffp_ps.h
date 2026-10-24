@@ -19,5 +19,7 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
 extern uint32_t g_ffp_edge_stages;
 // c0 = TEXTUREFACTOR for the shader above.
 void upload_ffp_constants(IDirect3DDevice9 *d);
+void ffp_forget_constants(); // c0 rewritten elsewhere: the next upload sends it
+void ffp_drop_all();         // a new device: every shader made (made again on demand)
 
 } // namespace xd3d
