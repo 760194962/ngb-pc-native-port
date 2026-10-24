@@ -1591,7 +1591,8 @@ std::map<uint32_t, BOOL> g_lights_on;
 // last frame (the game went on running). Once TestCooperativeLevel says the device can be reset, the host targets
 // and the back buffer references are released, the device is Reset, and what the game set is sent again: the draws
 // forget the states they sent, and the transforms, material, lights, target, viewport and scissor are set here.
-// Game textures (D3DPOOL_MANAGED), shaders and vertex declarations survive a Reset.
+// Game textures drop their DEFAULT copies, made again from their system copies at the next use (texture.cpp);
+// shaders and vertex declarations survive a Reset.
 bool g_device_lost;
 ULONGLONG g_lost_since;
 std::atomic<bool> g_reset_requested; // tests: press-file "reset" (the same path as a lost device)
@@ -1617,6 +1618,8 @@ void recover_device(bool force)
     if (hr != D3DERR_DEVICENOTRESET) return; // still lost (D3DERR_DEVICELOST): ask again next frame
     release_host_targets();
     release_draw_buffers();
+    for (DWORD s = 0; s < 8; s++) d->SetTexture(s, nullptr); // the device's own references keep a released texture alive
+    texture_drop_device_copies();
     d->SetRenderTarget(0, g_host_backbuffer);
     d->SetDepthStencilSurface(g_host_depth);
     if (g_host_backbuffer) g_host_backbuffer->Release();

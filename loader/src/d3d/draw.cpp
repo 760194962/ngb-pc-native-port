@@ -1100,10 +1100,13 @@ static void dump_bound_texture(int s, const Resource *r)
     if (g_cfg.screenshot_dir.empty() || !g_tex_sent[s] || g_tex_sent[s]->GetType() != D3DRTYPE_TEXTURE) return;
     if (std::find(dumped.begin(), dumped.end(), r) != dumped.end()) return;
     dumped.push_back(r);
-    auto *t = (IDirect3DTexture9 *)g_tex_sent[s];
+    // a game texture is read from its system copy (texture.cpp): the DEFAULT one the draws sample cannot be locked
+    IDirect3DBaseTexture9 *sys = texture_system_copy(g_tex_sent[s]);
+    auto *t = (IDirect3DTexture9 *)(sys ? sys : g_tex_sent[s]);
     D3DSURFACE_DESC desc;
     t->GetLevelDesc(0, &desc);
-    if (desc.Pool == D3DPOOL_MANAGED && (desc.Format == D3DFMT_DXT1 || desc.Format == D3DFMT_DXT3 || desc.Format == D3DFMT_DXT5)) {
+    const bool readable = desc.Pool == D3DPOOL_MANAGED || desc.Pool == D3DPOOL_SYSTEMMEM;
+    if (readable && (desc.Format == D3DFMT_DXT1 || desc.Format == D3DFMT_DXT3 || desc.Format == D3DFMT_DXT5)) {
         // compressed: the raw blocks of level 0 as the host holds them (tools/dxt_decode.py decodes them)
         D3DLOCKED_RECT lr;
         if (FAILED(t->LockRect(0, &lr, nullptr, D3DLOCK_READONLY))) return;
@@ -1120,7 +1123,7 @@ static void dump_bound_texture(int s, const Resource *r)
         t->UnlockRect(0);
         return;
     }
-    if (desc.Pool != D3DPOOL_MANAGED || (desc.Format != D3DFMT_A8R8G8B8 && desc.Format != D3DFMT_X8R8G8B8)) {
+    if (!readable || (desc.Format != D3DFMT_A8R8G8B8 && desc.Format != D3DFMT_X8R8G8B8)) {
         logf("[draw]   tex%d %p not dumped (pool %u format %u)", s, r, desc.Pool, desc.Format);
         return;
     }

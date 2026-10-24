@@ -2,6 +2,10 @@
 // A8R8G8B8, DXT data is uploaded as is. Host copies are cached per resource header and re-uploaded when
 // the header changes, the game locks the texture, or a sampled hash of the texel data changes (checked at the
 // first use in a frame, every 16th frame for textures that have not changed for a while).
+// Each is a D3DPOOL_SYSTEMMEM texture the Xbox data is decoded into and a D3DPOOL_DEFAULT copy the draws sample,
+// brought up to date by UpdateTexture. A Direct3D 9Ex device has no D3DPOOL_MANAGED; the system copy also makes the
+// DEFAULT one again after a Reset drops it (texture_drop_device_copies). Uploads cost the same as from MANAGED
+// textures (ex9test: Iris Xe and RTX 3060, 200 textures of five formats and sizes, new and rewritten, 2026-10-24).
 #include "d3d/device.h"
 #include "d3d/dispatch.h"
 #include "d3d/host.h"
@@ -17,7 +21,8 @@ namespace xd3d {
 namespace {
 
 struct Entry {
-    IDirect3DBaseTexture9 *tex = nullptr;
+    IDirect3DBaseTexture9 *tex = nullptr; // D3DPOOL_DEFAULT: what the draws sample
+    IDirect3DBaseTexture9 *sys = nullptr; // D3DPOOL_SYSTEMMEM: the decoded Xbox data, copied into tex
     uint32_t data = 0, format = 0, size = 0;
     const void *palette = nullptr;
     uint32_t hash = 0;
@@ -238,8 +243,9 @@ uint32_t total_bytes(const PixelContainer *pc)
     return last + pitch * (fi.compressed ? (lh + 3) / 4 : lh);
 }
 
-// Refill an existing host texture (same size/format) from Xbox memory.
-void refill(IDirect3DBaseTexture9 *base, Resource *r, Palette *pal)
+// Decode the Xbox data of `r` into the system copy `base` (every face and level). Locking whole levels marks them
+// dirty, so the next UpdateTexture copies them.
+void fill(IDirect3DBaseTexture9 *base, Resource *r, Palette *pal)
 {
     auto *pc = (PixelContainer *)r;
     const uint32_t *palette = pal ? (const uint32_t *)phys_to_virt(pal->Data) : nullptr;
@@ -265,48 +271,64 @@ void refill(IDirect3DBaseTexture9 *base, Resource *r, Palette *pal)
     }
 }
 
-IDirect3DBaseTexture9 *create_and_upload(Resource *r, Palette *pal)
+// An empty system copy of the shape of `r` (cube or 2D; volume textures are not made)
+IDirect3DBaseTexture9 *new_system_copy(Resource *r)
 {
     auto *pc = (PixelContainer *)r;
     uint32_t fmt = fmt_of(pc);
     uint32_t w, h, d, levels;
     pixel_container_dims(pc, &w, &h, &d, &levels);
     if (levels == 0) levels = 1;
-    bool cube = (pc->Format & FMT_CUBEMAP) != 0;
     uint32_t dim = (pc->Format >> FMT_DIMENSION_SHIFT) & 0xF;
     if (dim == 3) {
         KNOTE_ONCE("volume textures are not uploaded yet (%ux%ux%u fmt %s)", w, h, d, format_info(fmt).name);
         return nullptr;
     }
-    const uint32_t *palette = pal ? (const uint32_t *)phys_to_virt(pal->Data) : nullptr;
     D3DFORMAT hf = host_format(fmt);
     IDirect3DDevice9 *dev = host3d::dev();
-    if (cube) {
+    if (pc->Format & FMT_CUBEMAP) {
         IDirect3DCubeTexture9 *t = nullptr;
-        if (FAILED(dev->CreateCubeTexture(w, levels, 0, hf, D3DPOOL_MANAGED, &t, nullptr))) return nullptr;
-        for (uint32_t f = 0; f < 6; f++)
-            for (uint32_t l = 0; l < levels; l++) {
-                D3DLOCKED_RECT lr;
-                if (SUCCEEDED(t->LockRect((D3DCUBEMAP_FACES)f, l, &lr, nullptr, 0))) {
-                    upload_level(pc, f, l, (uint8_t *)lr.pBits, lr.Pitch, palette);
-                    t->UnlockRect((D3DCUBEMAP_FACES)f, l);
-                }
-            }
+        if (FAILED(dev->CreateCubeTexture(w, levels, 0, hf, D3DPOOL_SYSTEMMEM, &t, nullptr))) return nullptr;
         return t;
     }
     IDirect3DTexture9 *t = nullptr;
-    if (FAILED(dev->CreateTexture(w, h, levels, 0, hf, D3DPOOL_MANAGED, &t, nullptr))) {
+    if (FAILED(dev->CreateTexture(w, h, levels, 0, hf, D3DPOOL_SYSTEMMEM, &t, nullptr))) {
         logf("[tex] CreateTexture %ux%u x%u %s failed", w, h, levels, format_info(fmt).name);
         return nullptr;
     }
-    for (uint32_t l = 0; l < levels; l++) {
-        D3DLOCKED_RECT lr;
-        if (SUCCEEDED(t->LockRect(l, &lr, nullptr, 0))) {
-            upload_level(pc, 0, l, (uint8_t *)lr.pBits, lr.Pitch, palette);
-            t->UnlockRect(l);
+    return t;
+}
+
+// The system copy `sys` into its DEFAULT copy `tex`, made when null (a new texture, or after a Reset). UpdateTexture
+// copies only the regions locked since the last one, so a new DEFAULT copy has the whole system copy marked first.
+IDirect3DBaseTexture9 *push(IDirect3DBaseTexture9 *sys, IDirect3DBaseTexture9 *tex)
+{
+    IDirect3DDevice9 *dev = host3d::dev();
+    if (!tex) {
+        if (sys->GetType() == D3DRTYPE_CUBETEXTURE) {
+            auto *s = (IDirect3DCubeTexture9 *)sys;
+            D3DSURFACE_DESC desc;
+            IDirect3DCubeTexture9 *t = nullptr;
+            if (FAILED(s->GetLevelDesc(0, &desc)) ||
+                FAILED(dev->CreateCubeTexture(desc.Width, s->GetLevelCount(), 0, desc.Format, D3DPOOL_DEFAULT, &t, nullptr)))
+                return nullptr;
+            for (uint32_t f = 0; f < 6; f++) s->AddDirtyRect((D3DCUBEMAP_FACES)f, nullptr);
+            tex = t;
+        } else {
+            auto *s = (IDirect3DTexture9 *)sys;
+            D3DSURFACE_DESC desc;
+            IDirect3DTexture9 *t = nullptr;
+            if (FAILED(s->GetLevelDesc(0, &desc)) ||
+                FAILED(dev->CreateTexture(desc.Width, desc.Height, s->GetLevelCount(), 0, desc.Format, D3DPOOL_DEFAULT, &t, nullptr))) {
+                logf("[tex] DEFAULT copy %ux%u x%lu failed", desc.Width, desc.Height, s->GetLevelCount());
+                return nullptr;
+            }
+            s->AddDirtyRect(nullptr);
+            tex = t;
         }
     }
-    return t;
+    dev->UpdateTexture(sys, tex);
+    return tex;
 }
 
 } // namespace
@@ -371,6 +393,7 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
     auto *pc = (PixelContainer *)r;
     EnterCriticalSection(&g_cs);
     Entry &e = g_cache[r];
+    if (e.sys && !e.tex) e.tex = push(e.sys, nullptr); // dropped by a Reset (texture_drop_device_copies)
     uint32_t frame = g_frame_count.load(std::memory_order_relaxed);
     write_watch_update(frame);
     // Texture data is always read through the write-watched contiguous block (phys_to_virt), so with the write watch
@@ -414,7 +437,8 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
     bool stale = !same_shape || e.dirty || e.hash != hash || (fmt_of(pc) == XFMT_P8 && e.palette != palptr);
     e.stable = stale ? 0 : std::min<uint32_t>(e.stable + 1, kStableChecks);
     if (stale && same_shape) { // contents changed (video frames, render-to-memory): refill in place
-        refill(e.tex, r, pal);
+        fill(e.sys, r, pal);
+        push(e.sys, e.tex);
         perf::add_texture_upload(bytes);
         e.palette = palptr;
         e.hash = hash;
@@ -423,7 +447,13 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
     }
     if (stale) {
         if (e.tex) e.tex->Release();
-        e.tex = create_and_upload(r, pal);
+        if (e.sys) e.sys->Release();
+        e.tex = nullptr;
+        e.sys = new_system_copy(r);
+        if (e.sys) {
+            fill(e.sys, r, pal);
+            e.tex = push(e.sys, nullptr);
+        }
         perf::add_texture_upload(bytes);
         e.data = pc->Data;
         e.format = pc->Format;
@@ -458,9 +488,31 @@ void texture_forget(const Resource *r)
     auto it = g_cache.find(r);
     if (it != g_cache.end()) {
         if (it->second.tex) it->second.tex->Release();
+        if (it->second.sys) it->second.sys->Release();
         g_cache.erase(it);
     }
     LeaveCriticalSection(&g_cs);
+}
+
+void texture_drop_device_copies()
+{
+    EnterCriticalSection(&g_cs);
+    for (auto &kv : g_cache)
+        if (kv.second.tex) {
+            kv.second.tex->Release();
+            kv.second.tex = nullptr;
+        }
+    LeaveCriticalSection(&g_cs);
+}
+
+IDirect3DBaseTexture9 *texture_system_copy(IDirect3DBaseTexture9 *tex)
+{
+    IDirect3DBaseTexture9 *sys = nullptr;
+    EnterCriticalSection(&g_cs);
+    for (auto &kv : g_cache)
+        if (kv.second.tex == tex) sys = kv.second.sys;
+    LeaveCriticalSection(&g_cs);
+    return sys;
 }
 
 } // namespace xd3d

@@ -77,6 +77,8 @@ DWORD conv_colorwrite(uint32_t v);
 IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal); // upload/cached host copy
 void texture_mark_dirty(const Resource *r);
 void texture_forget(const Resource *r);
+void texture_drop_device_copies();                                 // before a Reset: the DEFAULT copies (made again)
+IDirect3DBaseTexture9 *texture_system_copy(IDirect3DBaseTexture9 *tex); // a game texture's lockable copy, or null
 uint32_t texture_level_offset(const PixelContainer *pc, uint32_t face, uint32_t level, uint32_t *pitch, uint32_t *w,
                               uint32_t *h);
 void pixel_container_dims(const PixelContainer *pc, uint32_t *w, uint32_t *h, uint32_t *d, uint32_t *levels);
