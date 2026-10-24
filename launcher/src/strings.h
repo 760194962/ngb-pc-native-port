@@ -293,6 +293,10 @@ enum class Str {
     AspectMonitorBox, // the closed box with it chosen
     SizeScreen,         // the window size box in fullscreen / borderless
     TooLargeBorderless, // the screen's own size in window mode
+    Aspect6427Note,     // the ultrawide shapes in the shape list
+    Aspect4318Note,
+    Aspect125Note,
+    SavesDoneNoneMoved, // a restore / import / export where nothing was there to move away
     Count
 };
 

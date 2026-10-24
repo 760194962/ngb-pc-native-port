@@ -128,8 +128,12 @@ constexpr int kMaxScale = 10;
 // keeps the HUD and menus 16:9: loader ngb_aspect.cpp, d3d/draw.cpp scale_rhw), 4:3 (widescreen = 0), and the
 // monitor's own shape (init_monitor_aspect): an ultrawide is seldom exactly 21:9 (5120x2160 and 2560x1080 are 64:27,
 // 3440x1440 43:18, 3840x1600 12:5), and at 21:9 one showed thin black bars at its sides (the user, 2026-10-24)
-int kAspects[5][2] = {{16, 9}, {16, 10}, {21, 9}, {4, 3}, {16, 9}};
+// 5-7: the common ultrawides by name, whatever this PC's monitor (a player at 5120x2160 saw only 64:27 under "Match
+// the monitor" and took 3440x1440 and 3840x1600 for unsupported, 2026-10-24)
+int kAspects[8][2] = {{16, 9}, {16, 10}, {21, 9}, {4, 3}, {16, 9}, {64, 27}, {43, 18}, {12, 5}};
 constexpr int kAspectMonitor = 4;
+constexpr int kAspectCount = 8;
+const int kAspectShown[kAspectCount] = {0, 1, 2, 5, 6, 7, 3, 4}; // the list's order (index into kAspects)
 bool g_monitor_aspect_ok; // within the shapes the game program takes (loader settings.cpp: 1.5:1 to 2.5:1)
 int g_monitor_w, g_monitor_h;
 std::wstring render_size(double scale, int aspect)
@@ -188,11 +192,15 @@ const wchar_t *const kLinks[5] = {kSite, L"https://github.com/akirahayabusa/ngb-
 constexpr float kSliderMin = 0.5f, kSliderMax = 3.0f, kSliderW = 260;
 // The window sizes offered (client area) for each shape; 0 x 0 = auto (the largest that fits the screen). The
 // monitor's shape: half, two thirds, three quarters and all of the monitor's height (init_monitor_aspect).
-int kWins[5][5][2] = {{{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}},
-                      {{0, 0}, {1280, 800}, {1440, 900}, {1680, 1050}, {1920, 1200}},
-                      {{0, 0}, {1680, 720}, {2240, 960}, {2560, 1080}, {3440, 1440}},
-                      {{0, 0}, {960, 720}, {1280, 960}, {1440, 1080}, {1920, 1440}},
-                      {{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}}};
+// 21:9 had 2560x1080 and 3440x1440, which are 64:27 and 43:18: the picture had bars inside such a window.
+int kWins[kAspectCount][5][2] = {{{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}},
+                                 {{0, 0}, {1280, 800}, {1440, 900}, {1680, 1050}, {1920, 1200}},
+                                 {{0, 0}, {1680, 720}, {2240, 960}, {2520, 1080}, {3360, 1440}},
+                                 {{0, 0}, {960, 720}, {1280, 960}, {1440, 1080}, {1920, 1440}},
+                                 {{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}},
+                                 {{0, 0}, {1280, 540}, {1920, 810}, {2560, 1080}, {5120, 2160}},
+                                 {{0, 0}, {1290, 540}, {1720, 720}, {2580, 1080}, {3440, 1440}},
+                                 {{0, 0}, {1920, 800}, {2400, 1000}, {2880, 1200}, {3840, 1600}}};
 
 // The primary monitor's shape in pixels (not scaled by DPI), as the nearest W:H with H up to 64: the game program
 // steps the window in whole multiples of H (loader d3d/host.cpp open_window), so 1366x768 is 16:9, not 683:384
@@ -1158,7 +1166,9 @@ struct Painter {
                  DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
             if (i < 2) fill({c.left + 26, y + 46, c.right - 20, y + 47}, kInk3);
         }
-        text(S(Str::Footer), {x, kH - 44, x + 700, kH - 20}, 12, kAsh, 0.75f);
+        wchar_t foot[160];
+        swprintf(foot, 160, S(Str::Footer), L"" GAME_VERSION);
+        text(foot, {x, kH - 44, x + 700, kH - 20}, 12, kAsh, 0.75f);
     }
 
     // A button: primary = blood red, else outlined. Registers its hit when enabled.
@@ -1527,14 +1537,19 @@ struct Painter {
     // Aspect ratio: black.ini widescreen = 1 (16:9) / 0 (4:3); the window sizes below follow it
     void aspect_list(float x, float y, float right)
     {
-        std::vector<ListRow> rows = {{L"16:9", S(Str::Aspect169Note)}, {L"16:10", S(Str::Aspect1610Note)},
-                                     {L"21:9", S(Str::Aspect219Note)}, {L"4:3", S(Str::Aspect43Note)}};
-        ListRow mon = {aspect_name(kAspectMonitor), g_monitor_aspect_ok ? S(Str::AspectMonitorNote) : S(Str::AspectMonitorOff)};
-        mon.off = !g_monitor_aspect_ok;
-        rows.push_back(mon);
-        int sel = aspect_index();
-        drop_list(kHitAspect, x, y, {200, 340, 80, 0}, {rows[sel].a, L"", sel == kAspectMonitor ? S(Str::AspectMonitorBox) : rows[sel].b},
-                  rows, sel, S(Str::AspectSoon));
+        const Str notes[kAspectCount] = {Str::Aspect169Note, Str::Aspect1610Note, Str::Aspect219Note, Str::Aspect43Note,
+                                         Str::AspectMonitorNote, Str::Aspect6427Note, Str::Aspect4318Note, Str::Aspect125Note};
+        std::vector<ListRow> rows;
+        int chosen = aspect_index(), sel = 0;
+        for (int i = 0; i < kAspectCount; i++) {
+            int a = kAspectShown[i];
+            ListRow r = {aspect_name(a), S(notes[a])};
+            if (a == kAspectMonitor && !g_monitor_aspect_ok) r = {aspect_name(a), S(Str::AspectMonitorOff)}, r.off = true;
+            rows.push_back(r);
+            if (a == chosen) sel = i;
+        }
+        drop_list(kHitAspect, x, y, {200, 340, 80, 0},
+                  {rows[sel].a, L"", chosen == kAspectMonitor ? S(Str::AspectMonitorBox) : rows[sel].b}, rows, sel, S(Str::AspectSoon));
     }
 
     // Window size (the client area, used in window mode): auto = what the game picks, the largest whole multiple of
@@ -1545,7 +1560,6 @@ struct Painter {
         int asp = aspect_index();
         const int(*sizes)[2] = kWins[asp];
         int aw = kAspects[asp][0], ah = kAspects[asp][1];
-        if (aw == 16 && ah == 10) aw = 8, ah = 5; // the game program steps in whole multiples of the reduced shape
         RECT work;
         SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
         int avail_w = (work.right - work.left) * 9 / 10, avail_h = (work.bottom - work.top) * 9 / 10;
@@ -1888,7 +1902,7 @@ struct Painter {
             y += 31;
         };
         wchar_t ver[128];
-        swprintf(ver, 128, S(Str::AboutVersion), L"0.1", L"" GAME_VERSION);
+        swprintf(ver, 128, S(Str::AboutVersion), L"" GAME_VERSION, L"" GAME_VERSION);
         row(Str::AboutVersionLabel, ver, -1);
         row(Str::AboutAuthorLabel, L"bilibili \u54C8\u96C5\u5E03\u6492", -1);
         row(Str::AboutSiteLabel, kLinks[0], 0);
@@ -2152,7 +2166,8 @@ void saves_action(int what)
     if (what == kAskImport) ok = saves::replace(xr, ours, backup_root(), L"before-import", &made, &err), done = Str::ImportDone;
     if (what == kAskExport) ok = saves::replace(ours, xr, backup_root(), L"xrevive-before-export", &made, &err), done = Str::ExportDone;
     wchar_t b[1024];
-    swprintf(b, 1024, S(ok ? done : Str::SavesFailed), ok ? made.c_str() : err.c_str());
+    swprintf(b, 1024, S(ok ? (made.empty() && done != Str::BackupDone ? Str::SavesDoneNoneMoved : done) : Str::SavesFailed),
+             ok ? made.c_str() : err.c_str());
     saves_result(ok, b);
     refresh_saves();
 }
@@ -2197,7 +2212,8 @@ int pad_source(int button)
     return button;
 }
 
-// The shape chosen: 0 16:9, 1 16:10, 2 21:9, 3 4:3, 4 the monitor's (black.ini widescreen, aspect)
+// The shape chosen: 0 16:9, 1 16:10, 2 21:9, 3 4:3, 4 the monitor's, 5 64:27, 6 43:18, 7 12:5 (black.ini widescreen,
+// aspect); a named shape before the monitor's when they are the same
 int aspect_index(bool saved)
 {
     std::string wide = saved ? black_ini_saved("widescreen") : black_ini("widescreen");
@@ -2205,6 +2221,8 @@ int aspect_index(bool saved)
     if (wide == "0") return 3;
     if (a == "16:10") return 1;
     if (a == "21:9") return 2;
+    for (int i = 5; i < kAspectCount; i++)
+        if (a == std::to_string(kAspects[i][0]) + ":" + std::to_string(kAspects[i][1])) return i;
     if (a != "16:9" && a == std::to_string(kAspects[kAspectMonitor][0]) + ":" + std::to_string(kAspects[kAspectMonitor][1]))
         return kAspectMonitor;
     return 0;
@@ -2223,6 +2241,7 @@ void reset_page(Page p)
         black_ini_set("gamma", "1.00");
     } else if (p == kGraphics) {
         black_ini_set("render", "scale");
+        black_ini_set("render_factor", "1.00");
         black_ini_set("scale", "3");
         black_ini_set("shadow", "4");
         black_ini_set("aniso", "1");
@@ -2301,6 +2320,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SYSKEYDOWN: // a key box waiting: Esc cancels, Delete clears, any other key binds
         if (g.capture >= 0) {
             uint16_t k = keys::from_message(wp, lp);
+            if (k == VK_LMENU || k == VK_RMENU) return 0; // Alt: the game drops every key while it is held; still waiting
             if (k != VK_ESCAPE) kb_set(g.capture / 2, g.capture % 2, k == VK_DELETE ? 0 : k);
             g.capture = -1;
             InvalidateRect(h, nullptr, FALSE);
@@ -2355,7 +2375,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (g.list_open == kHitGpu && row >= 0 && row < (int)gpu_choices().size())
                 set_gpu_preference(gpu_choices()[row].pref);
             if (g.list_open == kHitMode && row >= 0 && row < 3) black_ini_set("fullscreen", row == 0 ? "0" : row == 1 ? "2" : "1");
-            if (g.list_open == kHitAspect && row >= 0 && row < 5 && row != aspect_index() && (row != kAspectMonitor || g_monitor_aspect_ok)) {
+            if (g.list_open == kHitAspect && row >= 0 && row < kAspectCount) row = kAspectShown[row]; // the list's order
+            if (g.list_open == kHitAspect && row >= 0 && row < kAspectCount && row != aspect_index() && (row != kAspectMonitor || g_monitor_aspect_ok)) {
                 black_ini_set("widescreen", row == 3 ? "0" : "1");
                 if (row != 3) black_ini_set("aspect", std::to_string(kAspects[row][0]) + ":" + std::to_string(kAspects[row][1]));
                 black_ini_set("window", "auto"); // a fixed size belongs to the other shape
@@ -2368,7 +2389,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 black_ini_set((std::string("padmap_") + keys::input_ini((g.list_open - kHitPadMap) / 16)).c_str(), keys::input_ini(row));
             if (g.list_open == kHitAniso && row >= 0 && row < 5) black_ini_set("aniso", std::to_string(kAnisoLevels[row]));
             if (g.list_open == kHitShadow && row >= 0 && row < 4) black_ini_set("shadow", std::to_string(kShadowScales[row]));
-            if (g.list_open == kHitResList && row == 0) black_ini_set("render", "native");
+            if (g.list_open == kHitResList && row == 0) {
+                black_ini_set("render", "native");
+                black_ini_set("render_factor", "1.00"); // the in-game PC SETTINGS can leave 1.5 or 2 (x the window)
+            }
             if (g.list_open == kHitResList && row >= 1 && row <= kMaxScale) {
                 black_ini_set("render", "scale");
                 black_ini_set("scale", std::to_string(row));

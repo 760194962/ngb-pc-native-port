@@ -23,7 +23,8 @@ const Pair kText[(int)Str::Count] = {
     {L"忍者龙剑传  黑之章", L"NINJA GAIDEN BLACK"},
     {L"飓风版 · 中英文版 · PC 原生移植", L"Hurricane edition · Chinese / English · native PC port"},
     {L"开始游戏", L"PLAY"},
-    {L"还没有找到游戏：请先在「安装」页安装。", L"The game is not installed yet: see Install."},
+    {L"还没有找到游戏，或缺少游戏程序：请在「安装」页安装；缺少游戏程序时请重新解压下载的压缩包。",
+     L"The game is not installed yet, or the game program is missing: install on the Install page; if the program is missing, extract the download again."},
     {L"游戏", L"Game"},
     {L"未安装", L"Not installed"},
     {L"显卡", L"Graphics card"},
@@ -33,7 +34,7 @@ const Pair kText[(int)Str::Count] = {
     {L"画面", L"Display"},
     {L"全屏", L"Fullscreen"},
     {L"窗口", L"Windowed"},
-    {L"非官方粉丝移植 · 需要自备游戏镜像 · 启动器 0.1", L"Unofficial fan port · your own game image required · launcher 0.1"},
+    {L"非官方粉丝移植 · 需要自备游戏镜像 · 版本 %ls", L"Unofficial fan port · your own game image required · version %ls"},
     {L"此页面将在接下来的步骤中实现。", L"This page comes in the next steps."},
     {L"从镜像安装", L"Install from a disc image"},
     {L"镜像", L"Image"},
@@ -59,14 +60,14 @@ const Pair kText[(int)Str::Count] = {
     {L"不是 Xbox 光盘镜像", L"Not an Xbox disc image"},
     {L"Xbox 光盘镜像 (*.iso)", L"Xbox disc image (*.iso)"},
     {L"选择你自己的《忍者龙剑传 黑之章 飓风版》x2.1 中英文版光盘镜像（.iso）。extract-xiso 做的精简镜像和完整的 redump 镜像都可以。\n\n"
-     L"安装会把镜像里的全部文件（约 5.9 GB）写到下方「游戏安装路径」的文件夹，写完后核对 default.xbe 与 4 个附带程序（街机版、FC 与 SFC 三部曲）的 SHA-256，"
+     L"安装会把镜像里的全部文件（约 5.9 GB）写到下方「游戏安装路径」的文件夹，写完后核对 default.xbe 与 4 个附带程序（街机版与 SFC 三部曲，日版、美版各一）的 SHA-256，"
      L"确认是支持的版本。\n\n"
      L"安装中可以随时取消；已经写出的文件会留在文件夹里，再次安装时会被覆盖。\n\n"
      L"核对通过后，可以把镜像移到回收站来节省空间；以后需要时，还能从回收站还原。",
      L"Choose your own disc image (.iso) of NINJA GAIDEN BLACK, Hurricane edition x2.1 (Chinese / English). Both an "
      L"extract-xiso image and a full redump image will do.\n\n"
      L"Installing writes every file of the image (about 5.9 GB) to the game folder below, then checks the SHA-256 of "
-     L"default.xbe and the 4 bundled programs (the arcade version, the NES and SNES trilogies) to make sure this is the "
+     L"default.xbe and the 4 bundled programs (the arcade version and the SNES trilogy, a Japanese and a US build of each) to make sure this is the "
      L"supported build.\n\n"
      L"You can cancel at any time; the files written so far stay in the folder and are overwritten by the next install.\n\n"
      L"Once the check passes you can move the image to the Recycle Bin to save space, and restore it from there later."},
@@ -101,7 +102,8 @@ const Pair kText[(int)Str::Count] = {
     {L"窗口", L"Window"},
     {L"无边框", L"Borderless"},
     {L"画面比例", L"Aspect ratio"},
-    {L"HUD、文字与菜单保持 16:9 比例；21:9 为实验性。", L"The HUD, text and menus keep a 16:9 shape; 21:9 is experimental."},
+    {L"比 16:9 宽时，HUD、文字与菜单保持 16:9 比例；比 16:9 宽的比例为实验性。",
+     L"Wider than 16:9, the HUD, text and menus keep a 16:9 shape; shapes wider than 16:9 are experimental."},
     {L"渲染分辨率", L"Render resolution"},
     {L"跟随窗口", L"Window size"},
     {L"当前：Xbox 分辨率的 %g 倍", L"Now: %g\u00D7 the Xbox resolution"},
@@ -128,7 +130,7 @@ const Pair kText[(int)Str::Count] = {
     {L"倍数越高越清晰，也越吃显卡。宽度最多 8192（Direct3D 9 的上限）。", L"Higher is sharper and heavier on the graphics card. The width tops out at 8192 (Direct3D 9's limit)."},
     {L"带边框的窗口，可拖动、改大小", L"A framed window you can move and resize"},
     {L"独占屏幕，按桌面分辨率显示", L"Takes over the screen at the desktop resolution"},
-    {L"铺满屏幕的无边框窗口，切换程序更快", L"Borderless, fills the screen; quicker to switch programs"},
+    {L"铺满屏幕的无边框窗口", L"Borderless, fills the screen"},
     {L"宽屏", L"Widescreen"},
     {L"原版画面比例", L"The original shape"},
     {L"按屏幕大小自动选择", L"Picked to fit the screen"},
@@ -151,8 +153,8 @@ const Pair kText[(int)Str::Count] = {
     {L"恢复默认设定", L"Restore the defaults"},
     {L"把「显示」页恢复为默认：窗口模式、16:9、自动窗口大小、亮度与伽马 1.00。\n\n按「保存」后才会生效；其他页的设定不受影响。",
      L"Back to the Display page's defaults: window mode, 16:9, automatic window size, brightness and gamma 1.00.\n\nIt takes effect once saved; the other pages keep their settings."},
-    {L"把「图形」页恢复为默认：渲染 3×、阴影「中」、抗锯齿开、垂直同步关、填补接缝开、特效原尺寸关、性能参数关、显卡高性能。\n\n按「保存」后才会生效；其他页的设定不受影响。",
-     L"Back to the Graphics page's defaults: 3\u00D7 rendering, medium shadows, anti-aliasing on, vertical sync off, seam fill on, effects at Xbox size off, performance overlay off, the high-performance graphics card.\n\nIt takes effect once saved; the other pages keep their settings."},
+    {L"把「图形」页恢复为默认：渲染 3×、阴影「中」、抗锯齿开、纹理过滤关、垂直同步关、填补接缝开、特效原尺寸关、性能参数关、显卡高性能。\n\n按「保存」后才会生效；其他页的设定不受影响。",
+     L"Back to the Graphics page's defaults: 3\u00D7 rendering, medium shadows, anti-aliasing on, texture filtering off, vertical sync off, seam fill on, effects at Xbox size off, performance overlay off, the high-performance graphics card.\n\nIt takes effect once saved; the other pages keep their settings."},
     {L"恢复", L"Restore"},
     {L"保存", L"Save"},
     {L"放弃更改", L"Discard"},
@@ -184,7 +186,7 @@ const Pair kText[(int)Str::Count] = {
     {L"选择…", L"Choose\u2026"},
     {L"从 xRevive 导入", L"Import from xRevive"},
     {L"导出到 xRevive", L"Export to xRevive"},
-    {L"游戏正在运行：请先关闭游戏，再还原、导入或导出存档。", L"The game is running: close it before restoring, importing or exporting saves."},
+    {L"游戏正在运行：请先关闭游戏，再备份、还原、导入或导出存档。", L"The game is running: close it before backing up, restoring, importing or exporting saves."},
     {L"已备份到 %ls", L"Backed up to %ls"},
     {L"已还原。原来的存档移到了 %ls", L"Restored. The saves that were there are now in %ls"},
     {L"已导入。原来的存档移到了 %ls", L"Imported. The saves that were there are now in %ls"},
@@ -209,7 +211,7 @@ const Pair kText[(int)Str::Count] = {
     {L"启动器 %ls · 游戏程序 %ls", L"Launcher %ls \u00B7 game program %ls"},
     {L"网站", L"Website"},
     {L"作者", L"Author"},
-    {L"开源仓库", L"Source code"},
+    {L"发布页", L"Downloads"},
     {L"GitHub", L"GitHub"},
     {L"B 站", L"bilibili"},
     {L"邮箱", L"Email"},
@@ -252,15 +254,17 @@ const Pair kText[(int)Str::Count] = {
     {L"把「控制」页恢复为默认：键盘用默认键位（WASD 移动、方向键视角、J/K 攻击、空格跳……），手柄按钮不重映射。\n\n按「保存」后才会生效；其他页的设定不受影响。",
      L"Back to the Controls page\u2019s defaults: the default keys (WASD to move, arrows for the camera, J/K to attack, Space to jump\u2026) and no remapped controller buttons.\n\nIt takes effect once saved; the other pages keep their settings."},
     {L"游戏本身只认手柄。这里的每个按键会直接按下手柄上对应的输入：按钮、扳机、十字键，或把摇杆推到底。每个输入可以设两个键。"
-     L"键盘与手柄可以同时使用；只有游戏窗口在最前面时按键才有效。\n\n性能：没有影响（每帧只读一次按键状态）。",
+     L"键盘与手柄可以同时使用；只有游戏窗口在最前面时按键才有效。\n\n性能：没有影响（按键状态在游戏读手柄时一起读取，开销可以忽略）。",
      L"The game itself only reads its controller. Each key here simply presses that controller input: a button, a trigger, a D-pad "
      L"direction, or a stick pushed all the way. Every input can have two keys. Keyboard and controller work together; keys count only "
-     L"while the game\u2019s window is in front.\n\nPerformance: none (the keys are read once a frame)."},
-    {L"把手柄上的按钮换成别的按钮，例如交换 A 与 B，或把防御移到 LB/RB 习惯的位置。改动只对这个游戏有效，不影响 Windows 和其他游戏。\n\n"
+     L"while the game\u2019s window is in front.\n\nPerformance: none (the keys are read along with the controller, at a negligible cost)."},
+    {L"指定游戏里的每个按钮由手柄上的哪个按钮来按，例如把防御移到 LB/RB 习惯的位置。要交换两个按钮（如 A 与 B），两行都要改：A 行选 B，B 行选 A；只改一行时，那个手柄按钮会同时按下两个游戏按钮。改动只对这个游戏有效，不影响 Windows 和其他游戏。\n\n"
      L"Xbox 手柄的黑键 / 白键对应 PC 手柄的 RB / LB（肩键）。\n\n"
      L"支持的手柄：Xbox 与其他 XInput 手柄；PS3 / PS4 / PS5 手柄（PS3 需装驱动）、Switch Pro 手柄、Joy-Con（一对或单只）、"
      L"DirectInput 手柄与老手柄的 USB 转接器。按键按位置对应 Xbox 布局：最下面的键是 A、右边的键是 B，PS 手柄的触摸板按下等于 Back。",
-     L"Swaps controller buttons, for example A and B, or moves guard to where your hands expect it. It applies to this game only, not to "
+     L"Chooses which controller button presses each of the game\u2019s buttons, for example moving guard to where your hands expect it. To "
+     L"swap two buttons (A and B, say) change both rows: B for A and A for B; with one row changed, that controller button presses "
+     L"both game buttons. It applies to this game only, not to "
      L"Windows or other games.\n\nThe Xbox controller\u2019s Black / White buttons are the PC controller\u2019s RB / LB (shoulder buttons).\n\n"
      L"Supported controllers: Xbox and other XInput pads; PS3 / PS4 / PS5 controllers (PS3 needs its driver), the Switch Pro "
      L"Controller, Joy-Cons (a pair or one), DirectInput pads and USB adapters for older pads. Buttons follow the Xbox layout by "
@@ -289,37 +293,38 @@ const Pair kText[(int)Str::Count] = {
     {L"视角 下", L"Camera down"},
     {L"视角 左", L"Camera left"},
     {L"视角 右", L"Camera right"},
-    {L"「立即备份」把本作的存档复制到启动器旁的 savedata_backups 文件夹，每份以日期时间命名。「还原」用选中的备份替换现在的存档。\n\n"
-     L"还原、导入、导出都不会删除任何存档：被替换的存档会先移到一份新的备份里。游戏运行中不能还原、导入或导出。",
+    {L"「立即备份」把本作的存档复制到启动器旁的 savedata_backups 文件夹，每份以日期时间命名。列表里是最近 3 份备份，「还原」用选中的那份替换现在的存档；更早的备份在「打开备份文件夹」里。\n\n"
+     L"还原、导入、导出都不会删除任何存档：被替换的存档会先移到一份新的备份里。游戏运行中不能备份、还原、导入或导出。",
      L"\u201CBack up now\u201D copies the game\u2019s saves into the savedata_backups folder beside the launcher, one dated folder "
-     L"each. \u201CRestore\u201D replaces the saves in use with the chosen backup.\n\nRestoring, importing and exporting never "
-     L"delete a save: what is replaced is first moved into a new backup. None of them runs while the game is running."},
+     L"each. The 3 newest are listed; \u201CRestore\u201D replaces the saves in use with the chosen one (older backups are in "
+     L"\u201COpen backups\u201D).\n\nRestoring, importing and exporting never delete a save: what is replaced is first moved "
+     L"into a new backup. None of these runs while the game is running."},
     {L"xRevive 是另一个 PC 版移植器，用同样的 Xbox 存档格式，存档在它的游戏文件夹下 SaveData\\Ninja Gaiden_ Black\\HddData。"
      L"选择 xRevive 的游戏文件夹后，可以把那边的存档导入这里，或把这里的存档导出过去（已实测互通）。\n\n"
      L"被替换的一方都会先备份到这里的 savedata_backups，不会丢失。",
      L"xRevive is another PC port that uses the same Xbox save format, under its game folder\u2019s SaveData\\Ninja Gaiden_ "
      L"Black\\HddData. Choose xRevive\u2019s game folder to import its saves here or export these to it (tested to work both "
      L"ways).\n\nWhichever side is replaced is first backed up to savedata_backups here, so nothing is lost."},
-    {L"窗口：带边框的窗口，可拖动、改大小。\n全屏：独占屏幕，按桌面的分辨率与刷新率显示。Alt+Tab 切出再切回时，画面要稍等一下才恢复。\n无边框：铺满屏幕的无边框窗口，切换到其他程序是即时的。\n游戏中按 Alt+Enter 可以在窗口与全屏之间切换。\n\n性能：模式本身几乎没有影响。但渲染分辨率选「跟随窗口」时，画面越大（全屏、无边框）要画的像素越多，越吃显卡。",
-     L"Window: a framed window you can move and resize.\nFullscreen: takes over the screen at the desktop\u2019s resolution and refresh rate. After Alt+Tab away and back the picture takes a moment to return.\nBorderless: a borderless window over the whole screen; switching to other programs is instant.\nIn the game, Alt+Enter switches between window and fullscreen.\n\nPerformance: the mode itself costs next to nothing. With the render resolution at \u201CWindow size\u201D, a bigger picture (fullscreen, borderless) means more pixels to draw and more GPU time."},
-    {L"画面的形状：16:9、16:10、21:9 宽屏，4:3 原版，或「跟随显示器」。下方「窗口大小」的选项会跟着改变。\n"
-     L"21:9 时游戏的 3D 视野左右变宽（上下不变），16:10 时左右略窄；HUD、文字、菜单、标题画面与片头视频保持 16:9 的比例："
-     L"21:9 时放在中央、左右留黑边，16:10 时上下留黑边。21:9 为实验性：商店、游戏结束等画面还没有逐一检查。\n"
-     L"带鱼屏多数不正好是 21:9（5120×2160、2560×1080 为 64:27，3440×1440 为 43:18），选 21:9 两侧会留一点黑边："
-     L"选「跟随显示器」就按显示器的比例画，全屏正好铺满。\n\n"
+    {L"窗口：带边框的窗口，可拖动、改大小。\n全屏：独占屏幕，按桌面的分辨率与刷新率显示。\n无边框：铺满屏幕的无边框窗口。\n游戏中按 Alt+Enter 在窗口与全屏之间切换：这里选的是「全屏」时切到独占全屏，否则切到无边框；退出游戏时记住最后的状态。\n\n性能：模式本身几乎没有影响。但渲染分辨率选「跟随窗口」时，画面越大（全屏、无边框）要画的像素越多，越吃显卡。",
+     L"Window: a framed window you can move and resize.\nFullscreen: takes over the screen at the desktop\u2019s resolution and refresh rate.\nBorderless: a borderless window over the whole screen.\nIn the game, Alt+Enter switches between a window and fullscreen: exclusive fullscreen when \u201CFullscreen\u201D is chosen here, borderless otherwise; the game keeps the last one when it quits.\n\nPerformance: the mode itself costs next to nothing. With the render resolution at \u201CWindow size\u201D, a bigger picture (fullscreen, borderless) means more pixels to draw and more GPU time."},
+    {L"画面的形状：16:9、16:10、21:9 宽屏，三种带鱼屏（64:27、43:18、12:5），4:3 原版，或「跟随显示器」。下方「窗口大小」的选项会跟着改变。\n"
+     L"比 16:9 宽时游戏的 3D 视野左右变宽（上下不变），16:10 时左右略窄；HUD、文字、菜单、标题画面与片头视频保持 16:9 的比例："
+     L"比 16:9 宽时放在中央、左右留黑边，16:10 时上下留黑边。比 16:9 宽的比例为实验性：商店、游戏结束等画面还没有逐一检查。\n"
+     L"带鱼屏多数不正好是 21:9：5120×2160、2560×1080 选 64:27，3440×1440 选 43:18，3840×1600 选 12:5，3D 画面正好铺满；"
+     L"「跟随显示器」按这台电脑主显示器的比例。\n\n"
      L"性能：同样的渲染倍数下，画面越宽像素越多（3× 时 16:9 为 2880×1440，21:9 为 3780×1440，多约 31%），稍吃显卡。",
-     L"The picture\u2019s shape: 16:9, 16:10 or 21:9 widescreen, the original 4:3, or \u201CMatch the monitor\u201D. The "
-     L"window sizes below follow it.\n"
-     L"At 21:9 the game\u2019s 3D view widens (the height stays), at 16:10 it is a little narrower; the HUD, text, menus, the "
-     L"title screen and the intro movie keep a 16:9 shape: at 21:9 in the centre with black at the sides, at 16:10 with black "
-     L"above and below. 21:9 is experimental: screens such as the shop and game over have not all been checked yet.\n"
-     L"Most ultrawides are not exactly 21:9 (5120\u00D72160 and 2560\u00D71080 are 64:27, 3440\u00D71440 is 43:18), so "
-     L"21:9 leaves thin black bars at their sides: \u201CMatch the monitor\u201D draws the monitor\u2019s own shape and "
-     L"fills it in fullscreen.\n\n"
+     L"The picture\u2019s shape: 16:9, 16:10 or 21:9 widescreen, three ultrawide shapes (64:27, 43:18, 12:5), the original 4:3, "
+     L"or \u201CMatch the monitor\u201D. The window sizes below follow it.\n"
+     L"Wider than 16:9 the game\u2019s 3D view widens (the height stays), at 16:10 it is a little narrower; the HUD, text, "
+     L"menus, the title screen and the intro movie keep a 16:9 shape: when wider in the centre with black at the sides, at "
+     L"16:10 with black above and below. Shapes wider than 16:9 are experimental: screens such as the shop and game over "
+     L"have not all been checked yet.\nMost ultrawides are not exactly 21:9: choose 64:27 for 5120\u00D72160 and "
+     L"2560\u00D71080, 43:18 for 3440\u00D71440, 12:5 for 3840\u00D71600, and the 3D picture fills them; "
+     L"\u201CMatch the monitor\u201D takes this PC\u2019s main monitor\u2019s shape.\n\n"
      L"Performance: at the same render scale a wider picture has more pixels (at 3\u00D7, 2880\u00D71440 for 16:9 and "
      L"3780\u00D71440 for 21:9, about 31% more): a little more GPU time."},
-    {L"窗口模式下游戏画面的大小。「自动」选能放进屏幕的最大尺寸；超出屏幕的尺寸不能选。全屏与无边框按屏幕大小显示，不使用这一项。\n\n性能：只有渲染分辨率选「跟随窗口」时，窗口越大越吃显卡；其他情况下窗口大小只影响最后的缩放，几乎没有代价。",
-     L"The picture\u2019s size in window mode. \u201CAuto\u201D picks the largest that fits the screen; sizes larger than the screen cannot be chosen. Fullscreen and borderless use the screen\u2019s size instead.\n\nPerformance: only with the render resolution at \u201CWindow size\u201D does a bigger window cost more GPU time; otherwise the window size only changes the final scaling, which costs next to nothing."},
+    {L"窗口模式下游戏画面的大小。「自动」选能放进桌面可用区域（不含任务栏）九成以内的最大尺寸；比可用区域大的尺寸不能选。全屏与无边框按屏幕大小显示，不使用这一项。\n\n性能：只有渲染分辨率选「跟随窗口」时，窗口越大越吃显卡；其他情况下窗口大小只影响最后的缩放，几乎没有代价。",
+     L"The picture\u2019s size in window mode. \u201CAuto\u201D picks the largest within 90% of the desktop\u2019s usable area (without the taskbar); sizes larger than that area cannot be chosen. Fullscreen and borderless use the screen\u2019s size instead.\n\nPerformance: only with the render resolution at \u201CWindow size\u201D does a bigger window cost more GPU time; otherwise the window size only changes the final scaling, which costs next to nothing."},
     {L"把整个画面按比例调亮或调暗。它在游戏自己的亮度设定之上再调整，1.00 为不调整；调得太高时，亮的地方会过曝变白。\n\n性能：没有影响，这一步每帧本来就会做。",
      L"Makes the whole picture brighter or darker in proportion. It applies on top of the game\u2019s own brightness setting; 1.00 changes nothing. Set too high, bright areas wash out to white.\n\nPerformance: none; this step runs every frame anyway."},
     {L"主要调整中间调与暗部，纯黑与纯白基本不变，适合「暗处看不清」的情况。它在游戏自己的亮度设定之上再调整，1.00 为不调整。\n\n性能：没有影响，这一步每帧本来就会做。",
@@ -405,7 +410,7 @@ const Pair kText[(int)Str::Count] = {
     {L"登录",
      L"Signing in"},
     {L"进游戏后：主菜单「排行榜」→ 选自己的玩家代号，登录和榜单都在游戏里。还没有账号：按「注册步骤」在 xemu 里注册一次。",
-     L"In the game: main menu → Ranking → your gamertag; signing in happens there. No account yet: register once in xemu."},
+     L"In the game: main menu → Ranking → your gamertag; signing in happens there. No account yet: register once in xemu (\u201CHow to register\u201D)."},
     {L"Insignia 官网",
      L"Insignia website"},
     {L"联网关闭，DNS 查询方式改回「Insignia 公网 DNS」。选好的 EEPROM 与硬盘镜像保留。",
@@ -417,13 +422,13 @@ const Pair kText[(int)Str::Count] = {
      L"· 本地 InsigniaDNS.exe：从 Insignia 下载、在你电脑上运行的小程序，在这台电脑的局域网地址（如 192.168.x.x）上回答查询，127.0.0.1 不行。\n\n"
      L"查询方式选「Insignia 公网 DNS」（推荐）：所有查询都转给它，不用开 InsigniaDNS.exe，也不管 xemu 里怎么设定。\n\n"
      L"选「本地 InsigniaDNS.exe」：所有查询转给一台运行它的电脑，地址在这里填（「找本机」自动找）；换了电脑或网络只要改这里。\n\n"
-     L"开着代理（Clash 等）的 TUN 时，公网 DNS 会被截走（「检查网络」答出 198.18.x.x）。办法：先关 TUN，启动 InsigniaDNS.exe，再开 TUN，然后选「本地 InsigniaDNS.exe」。或者直接关掉 TUN。",
+     L"开着代理（Clash 等）的 TUN 时，公网 DNS 会被截走（「检查网络」答出 198.18.x.x / 198.19.x.x）。办法：先关 TUN，启动 InsigniaDNS.exe，再开 TUN，然后选「本地 InsigniaDNS.exe」。或者直接关掉 TUN。",
      L"Before signing in the game looks up Insignia’s servers through DNS. Two things have nearly the same name:\n"
      L"· Insignia’s public DNS: Insignia’s DNS server on the internet (46.101.64.175); nothing to install.\n"
      L"· Local InsigniaDNS.exe: a small program from Insignia running on your PC; it answers on that PC’s LAN address (such as 192.168.x.x), not on 127.0.0.1.\n\n"
      L"“Insignia public DNS” (recommended): every lookup goes to it, with no InsigniaDNS.exe and whatever xemu was set to.\n\n"
      L"“Local InsigniaDNS.exe”: every lookup goes to a PC running it, at the address entered here (“This PC” finds it); on another PC or network, change it here.\n\n"
-     L"With a proxy’s (Clash etc.) TUN on, public DNS is captured (Check network answers 198.18.x.x). Turn TUN off, start InsigniaDNS.exe, turn TUN back on, then choose “Local InsigniaDNS.exe”. Or just turn TUN off."},
+     L"With a proxy’s (Clash etc.) TUN on, public DNS is captured (Check network answers 198.18.x.x / 198.19.x.x). Turn TUN off, start InsigniaDNS.exe, turn TUN back on, then choose “Local InsigniaDNS.exe”. Or just turn TUN off."},
     {L"选择文件…", L"Choose file…"},
     {L"InsigniaDNS.exe 地址",
      L"InsigniaDNS.exe address"},
@@ -468,16 +473,20 @@ const Pair kText[(int)Str::Count] = {
     {L"请作者喝杯奶茶",
      L"Buy the author a milk tea"},
     {L"《黑之章》的中文汉化、飓风补丁，还有这个 PC 原生移植版，都是我做的。移植版从拆解原版程序做起，画面、声音、存档、联网，到最近修好的手柄震动，一点点接到了 PC 上。它们都免费，以后也一直免费，赞不赞助都不影响你玩到的任何内容。\n\n"
-     L"如果它让你又一次握起了龙剑，觉得值一杯奶茶，扫下面任意一个码就好。转账时请备注姓名或昵称，好让我知道这份心意来自谁。\n\n"
+     L"如果它让你又一次握起了龙剑，觉得值一杯奶茶，扫下面任意一个码就好（微信、支付宝）。转账时请备注姓名或昵称，好让我知道这份心意来自谁。\n\n"
      L"不方便也完全没关系：玩得开心，遇到问题告诉我，一样是在帮它变得更好。",
      L"The Chinese translation of Ninja Gaiden Black, the Hurricane patch and this native PC port are all my work. The port was built up from the original program piece by piece: graphics, sound, saves, online play, and lately the controller’s rumble. All of it is free and will stay free; nothing in it depends on a donation.\n\n"
      L"If it put the Dragon Sword back in your hands and feels worth a milk tea, either code below works (WeChat Pay, Alipay). Please put your name or nickname in the note, so I know who it came from.\n\n"
      L"If not, that is perfectly fine: enjoy the game, and tell me about anything that goes wrong. That helps just as much."},
-    {L"跟随显示器（带鱼屏全屏不留黑边）", L"Match the monitor (fills an ultrawide)"},
+    {L"跟随显示器（3D 画面铺满这台显示器）", L"Match the monitor (the 3D picture fills it)"},
     {L"跟随显示器：超出支持范围（1.5:1 到 2.5:1）", L"Match the monitor: outside 1.5:1 to 2.5:1"},
     {L"跟随显示器", L"Monitor"},
     {L"跟随屏幕", L"The screen"},
     {L"超出屏幕：选无边框可铺满", L"Larger than the screen: borderless fills it"},
+    {L"带鱼屏 5120×2160、2560×1080", L"Ultrawide 5120\u00D72160, 2560\u00D71080"},
+    {L"带鱼屏 3440×1440", L"Ultrawide 3440\u00D71440"},
+    {L"带鱼屏 3840×1600", L"Ultrawide 3840\u00D71600"},
+    {L"完成。原来没有存档，所以没有移走任何东西。", L"Done. There were no saves there, so nothing was moved."},
 };
 
 } // namespace
