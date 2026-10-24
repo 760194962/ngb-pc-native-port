@@ -1768,7 +1768,7 @@ void apply_rhw_tex_scales(uint8_t *verts, uint32_t count, uint32_t stride, const
 //    16:9 shape, with black on either side.
 // 16:10 is narrower than 16:9: there the same 16:9 shape is kept by lowering the 2D instead (see the end).
 // Works on Xbox-pixel positions (x, y at the start of each vertex), before the render scale (sx, sy) is applied.
-void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, float sy)
+void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, float sy, uint32_t fvf)
 {
     g_rhw_clip = {}; // none left from a draw that was not made
     if (!g_cfg.widescreen || g_cfg.aspect_w * 9 == g_cfg.aspect_h * 16 || !g_st.render_target || !is_backbuffer(g_st.render_target)) return;
@@ -1782,6 +1782,27 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
     bool art = t0 && (resource_type(t0) == RTYPE_TEXTURE || resource_type(t0) == RTYPE_SURFACE) && !((PixelContainer *)t0)->Size &&
                !g_stage0_rendered;
     bool full_h = mxy - mny >= 0.9f * h, squeeze = art || !(mnx <= 0.5f || mxx >= w - 2.0f || full_h), clip = art;
+    if (g_stage0_rendered && (fvf >> 8 & 0xF) && !(fvf & 0x30000)) {
+        // A piece of the picture put back where it was: every vertex samples the screen copy at its own place (u, v =
+        // x / 720, y / 480). The underwater wobble (FUN_0031B460) draws the screen as 12 x 8 tiles of 60 x 60; the ones
+        // in the middle, reaching neither side, were each squeezed (two seams down the screen at x 60 and 660, the
+        // user, 2026-10-24). The game's 2D never samples the picture so.
+        uint32_t uv = 16 + (fvf & D3DFVF_DIFFUSE ? 4 : 0) + (fvf & D3DFVF_SPECULAR ? 4 : 0);
+        bool in_place = uv + 8 <= stride;
+        for (uint32_t v = 0; v < count && in_place; v++) {
+            const float *p = (const float *)&verts[(size_t)v * stride], *t = (const float *)&verts[(size_t)v * stride + uv];
+            in_place = fabsf(t[0] - (p[0] + 0.5f) / w) < 0.01f && fabsf(t[1] - (p[1] + 0.5f) / h) < 0.01f;
+        }
+        if (in_place) return;
+    }
+    if (art && full_h && mnx <= 0.5f && mxx >= w - 2.0f) {
+        // A picture over the whole 3D view is no 2D: the underwater ripples (FUN_0013A050, its draw returning to
+        // 0x13A8E6: a 128x128 DXT5 picture, -0.5..719.5 at full height) were squeezed and cut to the 16:9 middle,
+        // the picture beside them left without (the user, 2026-10-24, r503 at 64:27)
+        uint32_t by[1] = {};
+        first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 1);
+        if (by[0] == 0x0013A8E6) return;
+    }
     if (!squeeze) {
         uint32_t by[3] = {};
         first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 3);
@@ -1884,7 +1905,7 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
                                   g_frame_count.load(), tw, th, fx ? "x" : "", fy ? "y" : "");
         }
     }
-    squeeze_169(g_rhw.data(), count, stride, sx, sy);
+    squeeze_169(g_rhw.data(), count, stride, sx, sy, ctx.fvf);
     for (uint32_t v = 0; v < count; v++) {
         float *p = (float *)&g_rhw[(size_t)v * stride];
         bool edge_x = edges && truncf((p[0] + ox) * 16.0f) <= 8.0f, edge_y = edges && truncf((p[1] + oy) * 16.0f) <= 8.0f;
@@ -1924,7 +1945,7 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
     std::vector<uint8_t> squeezed; // screen-space lines: squeezed to 16:9 as the other 2D (squeeze_169)
     if (rhw) {
         squeezed.assign((const uint8_t *)data, (const uint8_t *)data + (size_t)count * stride);
-        squeeze_169(squeezed.data(), count, stride, sx, sy);
+        squeeze_169(squeezed.data(), count, stride, sx, sy, ctx.fvf);
         data = squeezed.data();
     }
     struct SV { float x, y, z, rhw; uint32_t c; bool ok; };
