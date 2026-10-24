@@ -125,8 +125,13 @@ enum {
 // texture limit (loader d3d/device.cpp setup_render_scale: 10x widescreen renders 8192x4800, r289).
 constexpr int kMaxScale = 10;
 // The picture shapes (black.ini widescreen + aspect): 16:9, 16:10, 21:9 (the game program widens its projection and
-// keeps the HUD and menus 16:9: loader ngb_aspect.cpp, d3d/draw.cpp scale_rhw), 4:3 (widescreen = 0)
-const int kAspects[4][2] = {{16, 9}, {16, 10}, {21, 9}, {4, 3}};
+// keeps the HUD and menus 16:9: loader ngb_aspect.cpp, d3d/draw.cpp scale_rhw), 4:3 (widescreen = 0), and the
+// monitor's own shape (init_monitor_aspect): an ultrawide is seldom exactly 21:9 (5120x2160 and 2560x1080 are 64:27,
+// 3440x1440 43:18, 3840x1600 12:5), and at 21:9 one showed thin black bars at its sides (the user, 2026-10-24)
+int kAspects[5][2] = {{16, 9}, {16, 10}, {21, 9}, {4, 3}, {16, 9}};
+constexpr int kAspectMonitor = 4;
+bool g_monitor_aspect_ok; // within the shapes the game program takes (loader settings.cpp: 1.5:1 to 2.5:1)
+int g_monitor_w, g_monitor_h;
 std::wstring render_size(double scale, int aspect)
 {
     // the 720x480 buffer widened to the shape: x 0.75 x aw / ah (16:9: 4/3, 4:3: 1; loader setup_render_scale)
@@ -181,11 +186,41 @@ const wchar_t *const kLinks[5] = {kSite, L"https://github.com/akirahayabusa/ngb-
                                   L"https://space.bilibili.com/20292587", L"mailto:2682557218@qq.com"};
 // Brightness and gamma sliders: the loader's range (settings.cpp clamps gain and gamma to 0.5 - 3.0), 0.05 steps
 constexpr float kSliderMin = 0.5f, kSliderMax = 3.0f, kSliderW = 260;
-// The window sizes offered (client area) for 16:9 and for 4:3; 0 x 0 = auto (the largest that fits the screen)
-const int kWins[4][5][2] = {{{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}},
-                            {{0, 0}, {1280, 800}, {1440, 900}, {1680, 1050}, {1920, 1200}},
-                            {{0, 0}, {1680, 720}, {2240, 960}, {2560, 1080}, {3440, 1440}},
-                            {{0, 0}, {960, 720}, {1280, 960}, {1440, 1080}, {1920, 1440}}};
+// The window sizes offered (client area) for each shape; 0 x 0 = auto (the largest that fits the screen). The
+// monitor's shape: half, two thirds, three quarters and all of the monitor's height (init_monitor_aspect).
+int kWins[5][5][2] = {{{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}},
+                      {{0, 0}, {1280, 800}, {1440, 900}, {1680, 1050}, {1920, 1200}},
+                      {{0, 0}, {1680, 720}, {2240, 960}, {2560, 1080}, {3440, 1440}},
+                      {{0, 0}, {960, 720}, {1280, 960}, {1440, 1080}, {1920, 1440}},
+                      {{0, 0}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}}};
+
+// The primary monitor's shape in pixels (not scaled by DPI), as the nearest W:H with H up to 64: the game program
+// steps the window in whole multiples of H (loader d3d/host.cpp open_window), so 1366x768 is 16:9, not 683:384
+// (8:5 is named 16:10, as the list's own row)
+void init_monitor_aspect(int test_w = 0, int test_h = 0) // test_w x test_h: --monitor (with --snap)
+{
+    DEVMODEW dm = {};
+    dm.dmSize = sizeof dm;
+    if (test_w > 0 && test_h > 0) dm.dmPelsWidth = test_w, dm.dmPelsHeight = test_h;
+    else if (!EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm)) return;
+    if (!dm.dmPelsWidth || !dm.dmPelsHeight) return;
+    g_monitor_w = (int)dm.dmPelsWidth;
+    g_monitor_h = (int)dm.dmPelsHeight;
+    double r = (double)g_monitor_w / g_monitor_h, best = 1e9;
+    for (int h = 1; h <= 64; h++) {
+        int w = (int)std::lround(r * h);
+        if (fabs((double)w / h - r) < best - 1e-9) best = fabs((double)w / h - r), kAspects[kAspectMonitor][0] = w, kAspects[kAspectMonitor][1] = h;
+    }
+    if (kAspects[kAspectMonitor][0] == 8 && kAspects[kAspectMonitor][1] == 5) kAspects[kAspectMonitor][0] = 16, kAspects[kAspectMonitor][1] = 10;
+    int aw = kAspects[kAspectMonitor][0], ah = kAspects[kAspectMonitor][1];
+    g_monitor_aspect_ok = aw * 10 >= ah * 15 && aw * 10 <= ah * 25;
+    const int parts[4][2] = {{1, 2}, {2, 3}, {3, 4}, {1, 1}};
+    for (int i = 0; i < 4; i++) {
+        int h = std::max(1, (int)std::lround((double)g_monitor_h * parts[i][0] / parts[i][1] / ah)) * ah;
+        kWins[kAspectMonitor][i + 1][0] = h / ah * aw;
+        kWins[kAspectMonitor][i + 1][1] = h;
+    }
+}
 constexpr UINT_PTR kTimerInstall = 1;
 struct Hit {
     int id;
@@ -1475,8 +1510,12 @@ struct Painter {
     {
         std::vector<ListRow> rows = {{L"16:9", S(Str::Aspect169Note)}, {L"16:10", S(Str::Aspect1610Note)},
                                      {L"21:9", S(Str::Aspect219Note)}, {L"4:3", S(Str::Aspect43Note)}};
+        ListRow mon = {aspect_name(kAspectMonitor), g_monitor_aspect_ok ? S(Str::AspectMonitorNote) : S(Str::AspectMonitorOff)};
+        mon.off = !g_monitor_aspect_ok;
+        rows.push_back(mon);
         int sel = aspect_index();
-        drop_list(kHitAspect, x, y, {200, 340, 80, 0}, {rows[sel].a, L"", rows[sel].b}, rows, sel, S(Str::AspectSoon));
+        drop_list(kHitAspect, x, y, {200, 340, 80, 0}, {rows[sel].a, L"", sel == kAspectMonitor ? S(Str::AspectMonitorBox) : rows[sel].b},
+                  rows, sel, S(Str::AspectSoon));
     }
 
     // Window size (the client area, used in window mode): auto = what the game picks, the largest whole multiple of
@@ -2130,13 +2169,17 @@ int pad_source(int button)
     return button;
 }
 
-// The shape chosen: 0 16:9, 1 16:10, 2 21:9, 3 4:3 (black.ini widescreen, aspect)
+// The shape chosen: 0 16:9, 1 16:10, 2 21:9, 3 4:3, 4 the monitor's (black.ini widescreen, aspect)
 int aspect_index(bool saved)
 {
     std::string wide = saved ? black_ini_saved("widescreen") : black_ini("widescreen");
     std::string a = saved ? black_ini_saved("aspect") : black_ini("aspect");
     if (wide == "0") return 3;
-    return a == "16:10" ? 1 : a == "21:9" ? 2 : 0;
+    if (a == "16:10") return 1;
+    if (a == "21:9") return 2;
+    if (a != "16:9" && a == std::to_string(kAspects[kAspectMonitor][0]) + ":" + std::to_string(kAspects[kAspectMonitor][1]))
+        return kAspectMonitor;
+    return 0;
 }
 
 // "Restore defaults" on a settings page: that page's settings only, back to what the game uses with no black.ini
@@ -2284,7 +2327,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (g.list_open == kHitGpu && row >= 0 && row < (int)gpu_choices().size())
                 set_gpu_preference(gpu_choices()[row].pref);
             if (g.list_open == kHitMode && row >= 0 && row < 3) black_ini_set("fullscreen", row == 0 ? "0" : row == 1 ? "2" : "1");
-            if (g.list_open == kHitAspect && row >= 0 && row < 4 && row != aspect_index()) {
+            if (g.list_open == kHitAspect && row >= 0 && row < 5 && row != aspect_index() && (row != kAspectMonitor || g_monitor_aspect_ok)) {
                 black_ini_set("widescreen", row == 3 ? "0" : "1");
                 if (row != 3) black_ini_set("aspect", std::to_string(kAspects[row][0]) + ":" + std::to_string(kAspects[row][1]));
                 black_ini_set("window", "auto"); // a fixed size belongs to the other shape
@@ -2470,6 +2513,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    init_monitor_aspect();
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     g.dir = exe;
@@ -2529,6 +2573,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
             set_dest(argv[i + 1]);
         }
         if (!wcscmp(argv[i], L"--lang") && i + 1 < argc) g_lang = !wcscmp(argv[i + 1], L"en") ? Lang::En : Lang::Zh;
+        if (!wcscmp(argv[i], L"--monitor") && i + 1 < argc) { // with --snap: as if the monitor were WxH (the shape list)
+            int w = 0, h = 0;
+            if (swscanf_s(argv[i + 1], L"%dx%d", &w, &h) == 2) init_monitor_aspect(w, h);
+        }
     }
     check_game();
     for (int i = 1; i < argc; i++)

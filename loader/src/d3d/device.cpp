@@ -1225,9 +1225,10 @@ HRESULT __stdcall Direct3D_CreateDevice(uint32_t Adapter, uint32_t DeviceType, u
     g_native_w = pic.right - pic.left;
     g_native_h = pic.bottom - pic.top;
     setup_render_scale(g_native_w, g_native_h);
+    char shape[32] = "4:3";
+    if (g_cfg.widescreen) snprintf(shape, sizeof shape, "widescreen %d:%d", g_cfg.aspect_w, g_cfg.aspect_h);
     logf("[d3d] rendering at %ux%u (x%.4g by x%.4g the Xbox's %dx%d, %s), picture in the window %ldx%ld", host_w(g_width),
-         host_h(g_height), scale_x(), scale_y(), g_width, g_height, g_cfg.widescreen ? (g_cfg.aspect_w * 9 == g_cfg.aspect_h * 16 ? "widescreen 16:9" : g_cfg.aspect_w * 10 == g_cfg.aspect_h * 16 ? "widescreen 16:10" : "widescreen 21:9") : "4:3",
-         pic.right - pic.left, pic.bottom - pic.top);
+         host_h(g_height), scale_x(), scale_y(), g_width, g_height, shape, pic.right - pic.left, pic.bottom - pic.top);
     host3d::dev()->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &g_host_backbuffer);
     host3d::dev()->GetDepthStencilSurface(&g_host_depth);
 

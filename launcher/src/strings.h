@@ -288,6 +288,9 @@ enum class Str {
     HelpRegister,
     SponsorTitle, // the Support page
     SponsorText,
+    AspectMonitorNote, // the shape list's last row: the monitor's own shape (main.cpp init_monitor_aspect)
+    AspectMonitorOff,
+    AspectMonitorBox, // the closed box with it chosen
     Count
 };
 
