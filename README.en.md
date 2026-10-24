@@ -152,7 +152,10 @@ corner (off by default); `aniso` anisotropic texture filtering (1 = off, 2-16). 
 line `--aspect W:H`; `widescreen = 0` is 4:3. At 21:9 the 3D view widens (the height stays), at 16:10 it is a little
 narrower; the HUD, text, menus, the title screen and the intro movie keep a 16:9 shape (black at the sides at 21:9, above
 and below at 16:10); at 21:9 screens such as the shop and game over have not all been checked yet. Ninja Gaiden Black
-itself only: the bundled SNES / arcade programs stay 16:9.
+itself only: the bundled SNES / arcade programs stay 16:9. Most ultrawides are not exactly 21:9: the launcher's
+"Match the monitor" shape writes the primary monitor's own shape to `aspect` (`43:18` for 3440×1440, `12:5` for
+3840×1600, `64:27` for 5120×2160 and 2560×1080), which fills it in fullscreen without bars; 1.5:1 to 2.5:1 are
+supported, wider ones such as 32:9 are not.
 
 **Keyboard and controller**: the game itself reads only its controller; each key presses one controller input (by
 default WASD to move, arrows for the camera, J / K to attack, Space to jump, Esc for Start...). The launcher's Controls
