@@ -614,9 +614,12 @@ HRESULT present()
     begin_scene();
     g_dev->EndScene();
     g_in_scene = false;
-    // Minimised, nothing is shown: no Present. With vsync it waited far longer than a refresh there and the game ran
-    // at 40-45% speed (r324, --background starts minimised); a lost device is still noticed once the window is back.
-    if (IsIconic(g_hwnd)) return D3D_OK;
+    // Exclusive fullscreen, minimised: no Present. One that waits for vsync waited far longer than a refresh there and
+    // the game ran at 40-45% speed (r324); the device is lost anyway, and noticed once the window is back (its Reset
+    // drops the frames' work). A window or borderless one presents minimised too: skipping it there let the frames'
+    // work pile up, and the first Present after the window came back took 1-10 s, a black window with the game
+    // stopped (the user, 2026-10-24, borderless; r514-r518, the game thread waiting in Present; none so, r519, r520).
+    if (g_exclusive_now && IsIconic(g_hwnd)) return D3D_OK;
     if (g_exclusive_now && g_cfg.vsync) return g_dev->Present(nullptr, nullptr, nullptr, nullptr); // flipped (exclusive_params)
     RECT src = {0, 0, g_frame_w ? g_frame_w : g_bb_w, g_frame_h ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)
