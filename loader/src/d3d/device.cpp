@@ -1595,6 +1595,7 @@ std::map<uint32_t, BOOL> g_lights_on;
 bool g_device_lost;
 ULONGLONG g_lost_since;
 std::atomic<bool> g_reset_requested; // tests: press-file "reset" (the same path as a lost device)
+std::atomic<bool> g_visquery_requested; // tests: press-file "visquery" (a visibility test, as the game's first leaves it)
 
 void recover_device(bool force)
 {
@@ -1743,6 +1744,11 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     if (debug_frame_active() && g_cfg.debug_frame_end) log_frame_mean_color(frames);
     if (g_cfg.flash_watch) flash_check(frames);
     logvar_check(frames);
+    if (g_visquery_requested.exchange(false)) { // Resets after this failed until vis_release (r495, r496)
+        vis_begin();
+        vis_end(0);
+        logf("[d3d] tests: a visibility test made; its occlusion query lives on");
+    }
     bool force = g_reset_requested.exchange(false);
     if (host3d::present() == D3DERR_DEVICELOST || g_device_lost || force) recover_device(force);
     check_render_size();
@@ -2743,6 +2749,7 @@ const Hle *hle_device_table_ngb(size_t *count)
 #include "auxtab/device_tables.inc"
 
 void request_device_reset() { g_reset_requested = true; }
+void request_visibility_test() { g_visquery_requested = true; }
 
 void request_screenshot(const char *tag)
 {
