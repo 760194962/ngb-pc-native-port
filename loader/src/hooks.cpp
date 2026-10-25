@@ -331,7 +331,10 @@ LONG CALLBACK vectored_handler(EXCEPTION_POINTERS *ep)
     // Privileged instructions in game or XAPI code that are no-ops in a user-mode process: wbinvd / invd (cache
     // flushes, Ninja Gaiden Black's resource flush 0x31E0D0 after D3D_BlockOnResource), cli / sti (interrupt masking
     // around XAPI's kernel-version workarounds). Skip them and count; the first few are logged with the site.
-    if (code == EXCEPTION_PRIV_INSTRUCTION && in_image(ep->ContextRecord->Eip)) {
+    // Windows raises PRIVILEGED_INSTRUCTION; Proton (32-bit Wine) raised ACCESS_VIOLATION, read of ffffffff, for
+    // the wbinvd at 0x31E13E (a Steam Deck log, 2026-10-25). None of these four touches memory, so an access
+    // violation on one of them is the same fault.
+    if ((code == EXCEPTION_PRIV_INSTRUCTION || code == EXCEPTION_ACCESS_VIOLATION) && in_image(ep->ContextRecord->Eip)) {
         CONTEXT *c = ep->ContextRecord;
         const uint8_t *p = (const uint8_t *)(uintptr_t)c->Eip;
         int len = 0;
