@@ -197,7 +197,9 @@ bool native_size(uint32_t xw, uint32_t xh) { return g_cfg.effects_native && smal
 // Shadow maps: a small target drawn together with a small depth buffer (Ninja Gaiden Black's 128x128 one, whose depth
 // ~200 shadow-receiver draws a frame sample). Kept square at g_cfg.shadow_scale times the Xbox size instead of the
 // render scale (which made it 512x384 at 4 x 3): the shadow quality setting. Keys of the colour target and the depth
-// buffer (mem_key), recorded when they are first bound together (bind_render_target).
+// buffer (mem_key), recorded when they are first bound together (bind_render_target). Boss fights add a second shadow
+// map with its own depth buffer but the same colour target (Data 0, 128x128): its depth buffer counts too, or it was
+// made at the render scale, smaller than the target, and nothing drew into it (Murai without a shadow, 2026-10-25).
 std::unordered_set<uint64_t> g_shadow_keys;
 
 // Buffers the game fills by drawing a bigger one into them (the glow's 256x256, 256x128 and 128x128, screen copies):
@@ -704,7 +706,8 @@ void bind_render_target(Surface *rt, Surface *z)
         uint32_t zw, zh;
         surface_size(z, &zw, &zh);
         uint64_t rkey = mem_key(rt->Data, rw, rh), zkey = mem_key(z->Data, std::max(zw, rw), std::max(zh, rh));
-        if (rt != g_backbuffer && small_buffer(rw, rh) && small_buffer(zw, zh) && !g_shadow_keys.count(rkey)) {
+        if (rt != g_backbuffer && small_buffer(rw, rh) && small_buffer(zw, zh) &&
+            (!g_shadow_keys.count(rkey) || !g_shadow_keys.count(zkey))) {
             g_shadow_keys.insert(rkey);
             g_shadow_keys.insert(zkey);
             logf("[d3d] shadow map: target 0x%08x %ux%u with depth 0x%08x %ux%u, made at %dx", rt->Data, rw, rh, z->Data, zw, zh,
