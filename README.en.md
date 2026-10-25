@@ -120,6 +120,13 @@ If the program or the game is missing, `run.bat`'s window says what is missing.
 In the game, **Alt+Enter** switches between window and fullscreen, and the setting is saved. Fullscreen is either
 exclusive (`fullscreen = 2` in `black.ini`) or borderless (`fullscreen = 1`); the launcher's Display page chooses.
 
+On a slow machine, set **Fullscreen size** on the Display page to "Window size" (`fullscreen_res = window`, default
+`screen`): fullscreen and borderless then show the picture at the window size (the screen's shape, shrunk to fit it)
+and scale it up over the screen with linear filtering, so the last full-screen passes of each frame have fewer pixels;
+with the render resolution at "Window size" the 3D picture is drawn at that size too. The display's resolution stays:
+borderless, Windows scales it; exclusive, the graphics card does before showing it. Measured on integrated graphics
+(1920x1200 screen, 3x render, 1280x720 window): borderless 9.37 -> 8.47 ms a frame on average.
+
 **Graphics card**: the dedicated one by default, the integrated one where there is none. On its first run, if Windows'
 graphics settings have no preference for the program yet, it registers "high performance" for itself; to change it
 later, use the launcher's Graphics page or Windows Settings > System > Display > Graphics, and the program never

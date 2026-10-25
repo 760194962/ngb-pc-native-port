@@ -66,6 +66,7 @@ struct Config {
     float render_factor = 1.0f;     // with native: render at this multiple of the window
     std::wstring rescale_at;        // tests: --rescale-at "S:factor,..." = native at that factor from S seconds
     int window_w = 0, window_h = 0; // window client size; 0 = fit the screen
+    bool fs_window_res = false;     // black.ini fullscreen_res = window: fullscreen at the window size (host frame_layout)
     // The console's video settings report a widescreen TV (EEPROM XC_VIDEO bit 16), as the Xbox Series does
     // for original Xbox games: BLACK then uses a 16:9 projection and its `_wide` UI layouts in the same 640x480
     // buffer (anamorphic), and the loader renders and shows that buffer at 16:9. --normal-aspect turns it off.

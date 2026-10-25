@@ -115,7 +115,7 @@ enum {
     kHitSave, kHitDiscard, kHitAskAlt,
     kHitHelpSet = 400, // + the setting's index in kSettingHelp: its "?"
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
-    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitResList = 300, kHitShadow = 320, kHitAniso = 340,
+    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister
@@ -152,6 +152,7 @@ const struct {
     {Str::DisplayMode, Str::HelpDisplayMode},
     {Str::Aspect, Str::HelpAspect},
     {Str::WindowSize, Str::HelpWindowSize},
+    {Str::FsRes, Str::HelpFsRes},
     {Str::Brightness, Str::HelpBrightness},
     {Str::Gamma, Str::HelpGamma},
     {Str::Resolution, Str::HelpResolution},
@@ -1479,7 +1480,7 @@ struct Painter {
     void display_page()
     {
         D2D1_RECT_F c;
-        float y = settings_page(Str::NavDisplay, Str::Picture, 6, &c); // 5 rows and the note under the sliders
+        float y = settings_page(Str::NavDisplay, Str::Picture, 7, &c); // 6 rows and the note under the sliders
         const float lx = c.left + 26, cx = c.left + 210;
         auto label = [&](Str s) { setting_label(s, lx, y, cx); };
         const float right = c.right - 26;
@@ -1491,6 +1492,12 @@ struct Painter {
         y += 40;
         label(Str::WindowSize);
         window_list(cx, y - 2, right);
+        y += 40;
+        // black.ini fullscreen_res: fullscreen and borderless at the screen's size (default) or at the window size,
+        // scaled up (loader d3d/host.cpp frame_layout, exclusive_mode), for slow machines
+        label(Str::FsRes);
+        segmented(kHitFsRes, cx, y, {S(Str::SizeScreen), S(Str::FsAtWindow)}, black_ini("fullscreen_res") == "window" ? 1 : 0, 96);
+        text(S(Str::FsResNote), {cx + 2 * 102 + 12, y, right, y + 30}, 12, kAsh, 0.7f);
         y += 40;
         label(Str::Brightness);
         slider(kHitGain, cx, y, slider_value(kHitGain));
@@ -1576,6 +1583,10 @@ struct Painter {
         // 2026-10-24).
         std::string mode = black_ini("fullscreen");
         bool screen = !mode.empty() && mode != "0";
+        // With "Fullscreen size" at the window size, fullscreen shows the picture at this size scaled up: chosen as in
+        // window mode
+        bool at_window = screen && black_ini("fullscreen_res") == "window";
+        if (at_window) screen = false;
         std::vector<ListRow> rows;
         int sel = 0;
         for (int i = 0; i < 5; i++) {
@@ -1593,7 +1604,7 @@ struct Painter {
         }
         ListRow shown = sel ? rows[sel] : ListRow{S(Str::SizeAuto), L"", dims(auto_w, auto_h)};
         if (screen && g_monitor_w > 0) shown = {S(Str::SizeScreen), L"", dims(g_monitor_w, g_monitor_h)};
-        drop_list(kHitWin, x, y, {200, 380, 110, 270}, shown, rows, sel, S(Str::WindowOnly));
+        drop_list(kHitWin, x, y, {200, 380, 110, 270}, shown, rows, sel, S(at_window ? Str::WindowFsRes : Str::WindowOnly));
     }
 
     // Graphics: how the picture is made
@@ -2237,6 +2248,7 @@ void reset_page(Page p)
         black_ini_set("widescreen", "1");
         black_ini_set("aspect", "16:9");
         black_ini_set("window", "auto");
+        black_ini_set("fullscreen_res", "screen");
         black_ini_set("gain", "1.00");
         black_ini_set("gamma", "1.00");
     } else if (p == kGraphics) {
@@ -2473,6 +2485,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id >= kHitSeam && id < kHitSeam + 2) black_ini_set("seamfill", id == kHitSeam ? "1" : "0");
         else if (id >= kHitFx && id < kHitFx + 2) black_ini_set("effectsnative", id == kHitFx ? "1" : "0");
         else if (id >= kHitVsync && id < kHitVsync + 2) black_ini_set("vsync", id == kHitVsync ? "1" : "0");
+        else if (id >= kHitFsRes && id < kHitFsRes + 2) black_ini_set("fullscreen_res", id == kHitFsRes ? "screen" : "window");
         else if (id >= kHitHud && id < kHitHud + 2) black_ini_set("perfhud", id == kHitHud ? "1" : "0");
         else if (id >= kHitOnline && id < kHitOnline + 2) black_ini_set("online", id == kHitOnline ? "1" : "0");
         else if (id >= kHitDnsMode && id < kHitDnsMode + 2) {

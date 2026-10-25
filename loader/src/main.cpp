@@ -86,6 +86,8 @@ void usage()
            "  --window WxH      window client size (default: largest size of the game's aspect that fits the screen)\n"
            "  --normal-aspect   4:3 like an original Xbox on a standard TV (default: widescreen 16:9)\n"
            "  --fullscreen      start in borderless fullscreen\n"
+           "  --fullscreen-res window|screen  fullscreen and borderless at the window size scaled up to the screen\n"
+           "                    (the screen's shape within it; the display mode stays), or at the screen's (default)\n"
            "  --fps 30|60       frame rate (default 60; 30 is the original)\n"
            "  --no-reverb       do not mix the room reverb\n"
            "  --reverb-gain K   room reverb level (default 1.0)\n"
@@ -213,6 +215,12 @@ bool parse_args()
         }
         else if (a == L"--fullscreen") { g_cfg.fullscreen = true; settings_mark_cli("fullscreen"); }
         else if (a == L"--windowed") { g_cfg.fullscreen = false; settings_mark_cli("fullscreen"); }
+        else if (a == L"--fullscreen-res") {
+            settings_mark_cli("fullscreen_res");
+            std::wstring v;
+            if (!next(v)) return false;
+            g_cfg.fs_window_res = v == L"window";
+        }
         else if (a == L"--no-reverb") { g_cfg.reverb = false; settings_mark_cli("reverb"); }
         else if (a == L"--no-fog") g_cfg.no_fog = true;
         else if (a == L"--host-ffp") g_cfg.host_ffp = true;
@@ -527,10 +535,10 @@ int run(void *reserve, unsigned reserve_size)
     logf("address-space stub: reserve %p + 0x%x", reserve, reserve_size);
     // What black.ini (the launcher's pages) and the command line set, as read: the launcher's choices can be checked here
     logf("settings: render %s, scale %.2f, aa %d, seamfill %d, effectsnative %d, shadow %d, vsync %d, perfhud %d, aniso %d, widescreen %d, fullscreen %d, "
-         "window %dx%d, gain %.2f, gamma %.2f",
+         "window %dx%d, fullscreen_res %s, gain %.2f, gamma %.2f",
          g_cfg.render_native ? "native" : g_cfg.render_h ? std::to_string(g_cfg.render_h).c_str() : "scale", g_cfg.scale,
          g_cfg.aa, g_cfg.seam_fill, g_cfg.effects_native, g_cfg.shadow_scale, g_cfg.vsync, g_cfg.perfhud, g_cfg.aniso, g_cfg.widescreen, g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0,
-         g_cfg.window_w, g_cfg.window_h, g_cfg.gain, g_cfg.gamma);
+         g_cfg.window_w, g_cfg.window_h, g_cfg.fs_window_res ? "window" : "screen", g_cfg.gain, g_cfg.gamma);
 
     std::string err;
     if (!g_xbe.load(g_cfg.xbe_path, err)) {

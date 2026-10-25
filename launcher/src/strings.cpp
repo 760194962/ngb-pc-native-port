@@ -151,8 +151,8 @@ const Pair kText[(int)Str::Count] = {
     {L"游戏画面右上角显示帧率、显卡、CPU、内存与磁盘", L"Frame rate, GPU, CPU, memory and disk in the game's top-right corner"},
     {L"恢复默认", L"Restore defaults"},
     {L"恢复默认设定", L"Restore the defaults"},
-    {L"把「显示」页恢复为默认：窗口模式、16:9、自动窗口大小、亮度与伽马 1.00。\n\n按「保存」后才会生效；其他页的设定不受影响。",
-     L"Back to the Display page's defaults: window mode, 16:9, automatic window size, brightness and gamma 1.00.\n\nIt takes effect once saved; the other pages keep their settings."},
+    {L"把「显示」页恢复为默认：窗口模式、16:9、自动窗口大小、全屏分辨率跟随屏幕、亮度与伽马 1.00。\n\n按「保存」后才会生效；其他页的设定不受影响。",
+     L"Back to the Display page's defaults: window mode, 16:9, automatic window size, fullscreen at the screen\u2019s size, brightness and gamma 1.00.\n\nIt takes effect once saved; the other pages keep their settings."},
     {L"把「图形」页恢复为默认：渲染 3×、阴影「中」、抗锯齿开、纹理过滤关、垂直同步关、填补接缝开、特效原尺寸关、性能参数关、显卡高性能。\n\n按「保存」后才会生效；其他页的设定不受影响。",
      L"Back to the Graphics page's defaults: 3\u00D7 rendering, medium shadows, anti-aliasing on, texture filtering off, vertical sync off, seam fill on, effects at Xbox size off, performance overlay off, the high-performance graphics card.\n\nIt takes effect once saved; the other pages keep their settings."},
     {L"恢复", L"Restore"},
@@ -323,8 +323,8 @@ const Pair kText[(int)Str::Count] = {
      L"\u201CMatch the monitor\u201D takes this PC\u2019s main monitor\u2019s shape.\n\n"
      L"Performance: at the same render scale a wider picture has more pixels (at 3\u00D7, 2880\u00D71440 for 16:9 and "
      L"3780\u00D71440 for 21:9, about 31% more): a little more GPU time."},
-    {L"窗口模式下游戏画面的大小。「自动」选能放进桌面可用区域（不含任务栏）九成以内的最大尺寸；比可用区域大的尺寸不能选。全屏与无边框按屏幕大小显示，不使用这一项。\n\n性能：只有渲染分辨率选「跟随窗口」时，窗口越大越吃显卡；其他情况下窗口大小只影响最后的缩放，几乎没有代价。",
-     L"The picture\u2019s size in window mode. \u201CAuto\u201D picks the largest within 90% of the desktop\u2019s usable area (without the taskbar); sizes larger than that area cannot be chosen. Fullscreen and borderless use the screen\u2019s size instead.\n\nPerformance: only with the render resolution at \u201CWindow size\u201D does a bigger window cost more GPU time; otherwise the window size only changes the final scaling, which costs next to nothing."},
+    {L"窗口模式下游戏画面的大小。「自动」选能放进桌面可用区域（不含任务栏）九成以内的最大尺寸；比可用区域大的尺寸不能选。全屏与无边框按屏幕大小显示，不使用这一项（下面「全屏分辨率」选「窗口大小」时除外）。\n\n性能：只有渲染分辨率选「跟随窗口」时，窗口越大越吃显卡；其他情况下窗口大小只影响最后的缩放，几乎没有代价。",
+     L"The picture\u2019s size in window mode. \u201CAuto\u201D picks the largest within 90% of the desktop\u2019s usable area (without the taskbar); sizes larger than that area cannot be chosen. Fullscreen and borderless use the screen\u2019s size instead (unless \u201CFullscreen size\u201D below is \u201CWindow size\u201D).\n\nPerformance: only with the render resolution at \u201CWindow size\u201D does a bigger window cost more GPU time; otherwise the window size only changes the final scaling, which costs next to nothing."},
     {L"把整个画面按比例调亮或调暗。它在游戏自己的亮度设定之上再调整，1.00 为不调整；调得太高时，亮的地方会过曝变白。\n\n性能：没有影响，这一步每帧本来就会做。",
      L"Makes the whole picture brighter or darker in proportion. It applies on top of the game\u2019s own brightness setting; 1.00 changes nothing. Set too high, bright areas wash out to white.\n\nPerformance: none; this step runs every frame anyway."},
     {L"主要调整中间调与暗部，纯黑与纯白基本不变，适合「暗处看不清」的情况。它在游戏自己的亮度设定之上再调整，1.00 为不调整。\n\n性能：没有影响，这一步每帧本来就会做。",
@@ -487,6 +487,12 @@ const Pair kText[(int)Str::Count] = {
     {L"带鱼屏 3440×1440", L"Ultrawide 3440\u00D71440"},
     {L"带鱼屏 3840×1600", L"Ultrawide 3840\u00D71600"},
     {L"完成。原来没有存档，所以没有移走任何东西。", L"Done. There were no saves there, so nothing was moved."},
+    {L"全屏分辨率", L"Fullscreen size"},
+    {L"窗口大小", L"Window size"},
+    {L"配置较低时选它：画面按窗口大小输出再放大，更省显卡", L"For slow machines: shown at the window size, scaled up"},
+    {L"全屏与无边框时画面按多大的分辨率输出。\n「跟随屏幕」（默认）：按屏幕的分辨率输出，最清晰。\n「窗口大小」：按上面「窗口大小」选的尺寸输出（保持屏幕的比例，不会变形），再放大到整个屏幕，画面会软一些，但显卡要处理的像素少。无边框时由系统放大，全屏（独占）时由显卡在交给显示器前放大，都不切换显示器的分辨率。窗口大小不小于屏幕时没有区别。\n\n性能：给配置较低的电脑用。省下的是每帧最后几道全屏处理（伽马、抗锯齿、接缝填补）；「图形」页的渲染分辨率选「跟随窗口」时，3D 画面本身也按这个尺寸画，省得更多。屏幕越大（2K、4K）省得越多。想减轻显卡负担，先调低「图形」页的渲染分辨率，效果最明显。",
+     L"The resolution the picture is shown at in fullscreen and borderless.\n\u201CThe screen\u201D (default): the screen\u2019s own, the sharpest.\n\u201CWindow size\u201D: the window size chosen above (kept at the screen\u2019s shape, so nothing is stretched), scaled up to the whole screen: a little softer, but fewer pixels for the graphics card. Borderless, Windows scales it; in (exclusive) fullscreen the graphics card scales it before the display shows it. The display\u2019s resolution is not changed. With a window size no smaller than the screen nothing changes.\n\nPerformance: for slow machines. It saves the last full-screen passes of each frame (gamma, anti-aliasing, seam fill); with the render resolution at \u201CWindow size\u201D on the Graphics page the 3D picture itself is drawn at this size too, saving more. The larger the screen (1440p, 4K), the more it saves. To lighten the load, lower the render resolution on the Graphics page first: that matters most."},
+    {L"全屏与无边框也按这个大小输出，再放大到整个屏幕。", L"Fullscreen and borderless show the picture at this size too, scaled up to the screen."},
 };
 
 } // namespace

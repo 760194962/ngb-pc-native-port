@@ -38,7 +38,9 @@ int g_bb_w, g_bb_h;                 // host back buffer: the largest monitor, so
 // Exclusive fullscreen (black.ini fullscreen = 2): the device runs with Windowed = FALSE at the desktop's display mode
 // while the window is fullscreen. Alt+Enter switches by a Reset at the next Swap (d3d/device.cpp recover_device).
 std::atomic<bool> g_exclusive_now{false};
+std::atomic<bool> g_dev_exclusive{false}; // the device is exclusive now (g_exclusive_now leads it until the next Reset)
 int g_frame_w, g_frame_h;           // the part of the back buffer the current frame uses
+int g_out_w, g_out_h;               // the window size as set (open_window): fullscreen's with black.ini fullscreen_res = window
 WINDOWPLACEMENT g_windowed_place = {sizeof(WINDOWPLACEMENT)};
 
 // Mouse: raw input counts and buttons, used only while the cursor is captured (click the window; focus loss
@@ -62,6 +64,7 @@ enum { kDeviceCreate, kDeviceReset, kDeviceTest, kDeviceRecreate };
 bool create_device_here();
 bool reset_device_here();
 bool recreate_device_here();
+void release_stretch(); // present_stretch's target
 
 // Borderless window over the whole monitor, or back to the window it was.
 void toggle_fullscreen()
@@ -403,6 +406,8 @@ bool open_window(int width, int height, int aspect_w, int aspect_h)
     }
     g_win_w = width;
     g_win_h = height;
+    g_out_w = width; // the launcher's size (or auto's), not later drags: what fullscreen_res = window promises
+    g_out_h = height;
     g_window_ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     CreateThread(nullptr, 0, ui_thread, nullptr, 0, nullptr);
     WaitForSingleObject(g_window_ready, 10000);
@@ -440,6 +445,20 @@ bool window_closed() { return g_closed; }
 void frame_layout(RECT *frame, RECT *picture)
 {
     int cw = std::max(1, g_win_w.load()), ch = std::max(1, g_win_h.load());
+    if (g_dev_exclusive && g_bb_w > 0 && g_bb_h > 0) { // exclusive: the whole back buffer, the display mode's size
+        cw = g_bb_w;
+        ch = g_bb_h;
+    }
+    if (g_cfg.fs_window_res && g_out_w > 0 && g_out_h > 0 && (g_dev_exclusive || is_fullscreen())) {
+        // Fullscreen at the window size (black.ini fullscreen_res = window, for slow machines): the frame keeps the
+        // screen's shape, shrunk to fit within the window size, and is stretched over the screen evenly (borderless:
+        // by Present; exclusive: by present_stretch). The picture (and with render = native the 3D render) follows:
+        // fewer pixels for the final passes and the render. The display mode is not changed: a mode of the screen's
+        // shape within a 16:9 window size was not there on a 16:10 laptop (RTX 3060, 1920x1200, 2026-10-25).
+        float k = std::min({1.0f, (float)g_out_w / cw, (float)g_out_h / ch});
+        cw = std::max(1, (int)lroundf(cw * k));
+        ch = std::max(1, (int)lroundf(ch * k));
+    }
     if (cw > g_bb_w || ch > g_bb_h) { // larger than every monitor was at start: draw smaller, Present stretches
         float k = std::min((float)g_bb_w / cw, (float)g_bb_h / ch);
         cw = std::max(1, (int)(cw * k));
@@ -564,6 +583,7 @@ bool create_device_here()
     g_dev = g_devex;
     g_bb_w = (int)pp.BackBufferWidth; // exclusive: the display mode's size
     g_bb_h = (int)pp.BackBufferHeight;
+    g_dev_exclusive = !pp.Windowed;
     if (!pp.Windowed)
         logf("host: exclusive fullscreen %ux%u at %u Hz, vsync %s", pp.BackBufferWidth, pp.BackBufferHeight, pp.FullScreen_RefreshRateInHz,
              pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
@@ -599,6 +619,7 @@ bool create_device_here()
 // left out: the device then stays in memory), and a new one made as at the start
 bool recreate_device_here()
 {
+    release_stretch(); // present_stretch's target: the old device's, so it would keep that device alive
     ULONG left = g_dev ? g_dev->Release() : 0;
     g_dev = nullptr;
     g_devex = nullptr;
@@ -622,6 +643,7 @@ bool reset_device_here()
     }
     g_bb_w = (int)pp.BackBufferWidth; // the exclusive mode's size can differ from the largest monitor's
     g_bb_h = (int)pp.BackBufferHeight;
+    g_dev_exclusive = !pp.Windowed;
     logf("host: device reset, %s %ux%u, vsync %s", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth, pp.BackBufferHeight,
          pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
     if (pp.Windowed && g_restyle_pending.exchange(false)) restyle_windowed(); // now the window can change
@@ -690,6 +712,45 @@ void end_scene()
     }
 }
 
+// Exclusive fullscreen at the window size: the frame, drawn at the back buffer's top left, scaled over all of it (a
+// flipped buffer is shown whole, and the frame is the size the final passes and the render work at). StretchRect
+// cannot copy within one surface, so through a target of the frame's size; linear, as Present scales borderless.
+namespace {
+IDirect3DSurface9 *g_stretch;
+int g_stretch_w, g_stretch_h;
+
+void release_stretch()
+{
+    if (g_stretch) g_stretch->Release();
+    g_stretch = nullptr;
+    g_stretch_w = g_stretch_h = 0;
+}
+
+bool present_stretch()
+{
+    IDirect3DSurface9 *bb = nullptr;
+    if (FAILED(g_dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) return false;
+    if (g_stretch && (g_stretch_w != g_frame_w || g_stretch_h != g_frame_h)) release_stretch();
+    if (!g_stretch) {
+        D3DSURFACE_DESC d = {};
+        bb->GetDesc(&d);
+        if (FAILED(g_dev->CreateRenderTarget(g_frame_w, g_frame_h, d.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &g_stretch, nullptr))) {
+            bb->Release();
+            return false;
+        }
+        g_stretch_w = g_frame_w;
+        g_stretch_h = g_frame_h;
+        logf("host: exclusive fullscreen at the window size: the %dx%d frame scaled over %dx%d", g_frame_w, g_frame_h, g_bb_w, g_bb_h);
+    }
+    RECT fr = {0, 0, g_frame_w, g_frame_h};
+    bool ok = SUCCEEDED(g_dev->StretchRect(bb, &fr, g_stretch, nullptr, D3DTEXF_NONE)) &&
+              (SUCCEEDED(g_dev->StretchRect(g_stretch, nullptr, bb, nullptr, D3DTEXF_LINEAR)) ||
+               SUCCEEDED(g_dev->StretchRect(g_stretch, nullptr, bb, nullptr, D3DTEXF_NONE))); // a card without linear
+    bb->Release();
+    return ok;
+}
+} // namespace
+
 HRESULT present()
 {
     if (!g_dev) return D3D_OK;
@@ -700,8 +761,9 @@ HRESULT present()
     // they piled up in the driver (32 frames and more, r528) and the first Present after the window came back took
     // 1-10 s, a black window with the game stopped (the user, 2026-10-24, borderless; r514-r518). Under plain Direct3D 9
     // an exclusive device was lost there and its Reset dropped the pile; a 9Ex device is not lost.
+    bool whole = g_dev_exclusive && g_frame_w > 0 && g_frame_h > 0 && (g_frame_w < g_bb_w || g_frame_h < g_bb_h) && present_stretch();
     if (g_exclusive_now && g_cfg.vsync) return g_dev->Present(nullptr, nullptr, nullptr, nullptr); // flipped (exclusive_params)
-    RECT src = {0, 0, g_frame_w ? g_frame_w : g_bb_w, g_frame_h ? g_frame_h : g_bb_h};
+    RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w, g_frame_h && !whole ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)
 }
 

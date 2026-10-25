@@ -84,7 +84,7 @@ void load_file()
             int w = 0, h = 0;
             if (sscanf_s(val, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 240) g_cfg.window_w = w, g_cfg.window_h = h;
             else g_cfg.window_w = g_cfg.window_h = 0;
-        }
+        } else if (k == "fullscreen_res") g_cfg.fs_window_res = !strcmp(val, "window"); // "screen" (default) or "window"
         else if (k == "gain") g_cfg.gain = std::clamp(v, 0.5f, 3.0f);
         else if (k == "gamma") g_cfg.gamma = std::clamp(v, 0.5f, 3.0f);
         else if (k == "mouse_sens") g_cfg.mouse_sens = std::clamp(v, 0.1f, 50.0f);
@@ -178,6 +178,7 @@ void write_all(FILE *f)
     fprintf(f, "aspect = %d:%d\n", g_cfg.aspect_w, g_cfg.aspect_h);
     if (g_cfg.window_w > 0 && g_cfg.window_h > 0) fprintf(f, "window = %dx%d\n", g_cfg.window_w, g_cfg.window_h);
     else fprintf(f, "window = auto\n");
+    fprintf(f, "fullscreen_res = %s\n", g_cfg.fs_window_res ? "window" : "screen");
     fprintf(f, "gain = %.2f\ngamma = %.2f\n", g_cfg.gain, g_cfg.gamma);
     fprintf(f, "mouse_sens = %.3f\nmouse_invert = %d\n", g_cfg.mouse_sens, g_cfg.mouse_invert ? 1 : 0);
     fprintf(f, "reverb = %d\nreverb_gain = %.2f\n", g_cfg.reverb ? 1 : 0, g_cfg.reverb_gain);

@@ -297,6 +297,11 @@ enum class Str {
     Aspect4318Note,
     Aspect125Note,
     SavesDoneNoneMoved, // a restore / import / export where nothing was there to move away
+    FsRes,              // Display: fullscreen and borderless at the screen's size or at the window size
+    FsAtWindow,
+    FsResNote,
+    HelpFsRes,
+    WindowFsRes,        // the window size list's note with fullscreen_res = window
     Count
 };
 
