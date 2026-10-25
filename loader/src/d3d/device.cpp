@@ -1610,7 +1610,8 @@ std::map<uint32_t, BOOL> g_lights_on;
 // shaders and vertex declarations survive a Reset.
 bool g_device_lost;
 ULONGLONG g_lost_since;
-std::atomic<bool> g_reset_requested;          // request_device_reset: Alt+Enter, a mode change, press-file "reset"
+std::atomic<uint32_t> g_reset_requested;      // request_device_reset (Alt+Enter, a mode change, press-file "reset"): its number, 0 = none
+std::atomic<uint32_t> g_reset_seq;            // the last request's number
 std::atomic<const char *> g_reset_reason{""};
 std::atomic<bool> g_visquery_requested; // tests: press-file "visquery" (a visibility test, as the game's first leaves it)
 
@@ -1737,6 +1738,10 @@ void recover_device(bool requested)
     // A failed Reset leaves a device that makes nothing until a Reset succeeds: the game's next render target came
     // back null and Alt+Tab in exclusive fullscreen crashed in bind_render_target (r495, a query left alive:
     // vis_release). So the game does not go on until the device is back: Reset again for 2 s, then a new device.
+    // A Reset asked for before this one starts is met by it: the window thread runs the Reset after it set the state
+    // asked for (Alt+Enter sets g_exclusive_now first). The 30-frame mode-change Reset and Alt+Enter at the same frame
+    // made two exclusive Resets in a row, 0.6 s apart (2026-10-25, frames 4115 and 4116).
+    uint32_t asked = g_reset_seq;
     bool ok = host3d::reset_device();
     for (int tries = 1; !ok && tries < 40 && !host3d::window_closed(); tries++) {
         Sleep(50);
@@ -1748,6 +1753,8 @@ void recover_device(bool requested)
         if (!host3d::window_closed()) recreate_device("Reset kept failing for 2 s");
         return;
     }
+    if (asked && g_reset_requested.compare_exchange_strong(asked, 0))
+        logf("[d3d] a Reset asked for (%s) before this one is met by it", g_reset_reason.load());
     d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &g_host_backbuffer);
     d->GetDepthStencilSurface(&g_host_depth);
     resend_game_state(d);
@@ -1867,12 +1874,13 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     }
     // S_PRESENT_MODE_CHANGED that stays (a window after Alt+Enter from exclusive fullscreen) cost each Present 0.2-0.3 ms;
     // a ResetEx to the same window clears it (ex9mode: RTX 3060 1.81 -> 1.62 ms, Iris Xe 1.04 -> 0.78 ms, as a device
-    // made windowed). Back from Alt+Tab in exclusive fullscreen it shows for a frame or two and goes by itself.
+    // made windowed). Back from Alt+Tab in exclusive fullscreen it shows for a frame or two and goes by itself; minimised
+    // there it stays, and the rule reset the exclusive device every few seconds for nothing (2026-10-25): windows only.
     static uint32_t mode_changed_frames;
-    mode_changed_frames = presented == S_PRESENT_MODE_CHANGED ? mode_changed_frames + 1 : 0;
+    mode_changed_frames = presented == S_PRESENT_MODE_CHANGED && !host3d::exclusive() ? mode_changed_frames + 1 : 0;
     if (mode_changed_frames == 30) request_device_reset("Present said S_PRESENT_MODE_CHANGED for 30 frames");
     if (g_recreate_requested.exchange(false)) recreate_device("tests: press-file recreate");
-    bool requested = g_reset_requested.exchange(false);
+    bool requested = g_reset_requested.exchange(0) != 0;
     if (presented == D3DERR_DEVICELOST || presented == D3DERR_DEVICEHUNG || presented == D3DERR_DEVICEREMOVED || g_device_lost || requested)
         recover_device(requested);
     check_render_size();
@@ -2877,8 +2885,9 @@ const Hle *hle_device_table_ngb(size_t *count)
 
 void request_device_reset(const char *why)
 {
+    logf("[d3d] reset asked (%s), frame %u%s", why, g_frame_count.load(), g_reset_requested ? ", one already waiting" : "");
     g_reset_reason = why;
-    g_reset_requested = true;
+    g_reset_requested = ++g_reset_seq;
 }
 void request_visibility_test() { g_visquery_requested = true; }
 void request_device_recreate() { g_recreate_requested = true; }

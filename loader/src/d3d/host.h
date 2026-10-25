@@ -26,6 +26,7 @@ bool mouse_captured();
 void request_capture(bool on); // from any thread; capturing needs the window in front
 void set_fullscreen(bool on);  // from any thread (PC SETTINGS > VIDEO > FULLSCREEN)
 bool fullscreen();
+bool exclusive(); // exclusive fullscreen is on (or being entered)
 void mouse_take(int *dx, int *dy, int *wheel);
 int mouse_buttons();
 IDirect3DDevice9 *dev(); // an IDirect3DDevice9Ex (create_device)

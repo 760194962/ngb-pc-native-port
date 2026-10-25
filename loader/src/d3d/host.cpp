@@ -67,13 +67,14 @@ bool recreate_device_here();
 void toggle_fullscreen()
 {
     DWORD style = GetWindowLongW(g_hwnd, GWL_STYLE);
-    if (!(style & WS_POPUP)) {
+    if (style & WS_CAPTION) {
         MONITORINFO mi = {sizeof mi};
         if (!GetWindowPlacement(g_hwnd, &g_windowed_place) ||
             !GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY), &mi))
             return;
         // WS_MINIMIZEBOX (no frame without a caption) lets Win+D minimize it: without it Show Desktop only covered the
-        // window, and it came back over the whole screen behind the next program opened (2026-10-25, iconic stayed 0)
+        // window, and it came back over the whole screen behind the next program opened (2026-10-25, iconic stayed 0).
+        // Exclusive fullscreen styles the window itself (0x14000000) and minimizes it when it loses the front.
         SetWindowLongW(g_hwnd, GWL_STYLE, (style & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_MINIMIZEBOX);
         g_cfg.fullscreen = true;
         SetWindowPos(g_hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
@@ -189,7 +190,9 @@ void raw_input(HRAWINPUT h)
     }
 }
 
-bool is_fullscreen() { return (GetWindowLongW(g_hwnd, GWL_STYLE) & WS_POPUP) != 0; }
+// Fullscreen = no caption: in exclusive fullscreen the runtime sets the style itself (0x14000000, no WS_POPUP), so
+// WS_POPUP alone took that for a window and Alt+Enter went into fullscreen again (2026-10-25)
+bool is_fullscreen() { return !(GetWindowLongW(g_hwnd, GWL_STYLE) & WS_CAPTION); }
 
 // A performance recording was saved (perf.cpp): windowed, offer to open its folder; fullscreen, the title says it.
 void perf_report(HWND hwnd)
@@ -217,6 +220,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_APP_FULLSCREEN: // PC SETTINGS > VIDEO > FULLSCREEN (fe/pc_settings.cpp)
         if ((wp != 0) != is_fullscreen()) {
+            logf("host: PC SETTINGS fullscreen %d", (int)wp);
             toggle_fullscreen();
             settings_save();
         }
@@ -254,6 +258,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_SYSKEYDOWN: // Alt+Enter: fullscreen <-> window, as PC SETTINGS > VIDEO > FULLSCREEN (first press, not repeats)
         if (wp == VK_RETURN && (lp & (1 << 29)) && !(lp & (1 << 30))) {
+            logf("host: Alt+Enter (key data 0x%08lx, style 0x%08lx)", (unsigned long)lp, GetWindowLongW(h, GWL_STYLE));
             toggle_fullscreen();
             settings_save();
             return 0;
@@ -465,6 +470,7 @@ void set_fullscreen(bool on)
 }
 
 bool fullscreen() { return g_hwnd && is_fullscreen(); }
+bool exclusive() { return g_exclusive_now; }
 
 int mouse_buttons() { return g_captured ? g_buttons.load() : 0; }
 
