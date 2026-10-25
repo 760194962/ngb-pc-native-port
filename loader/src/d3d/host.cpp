@@ -67,12 +67,14 @@ bool recreate_device_here();
 void toggle_fullscreen()
 {
     DWORD style = GetWindowLongW(g_hwnd, GWL_STYLE);
-    if (style & WS_OVERLAPPEDWINDOW) {
+    if (!(style & WS_POPUP)) {
         MONITORINFO mi = {sizeof mi};
         if (!GetWindowPlacement(g_hwnd, &g_windowed_place) ||
             !GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY), &mi))
             return;
-        SetWindowLongW(g_hwnd, GWL_STYLE, (style & ~WS_OVERLAPPEDWINDOW) | WS_POPUP);
+        // WS_MINIMIZEBOX (no frame without a caption) lets Win+D minimize it: without it Show Desktop only covered the
+        // window, and it came back over the whole screen behind the next program opened (2026-10-25, iconic stayed 0)
+        SetWindowLongW(g_hwnd, GWL_STYLE, (style & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_MINIMIZEBOX);
         g_cfg.fullscreen = true;
         SetWindowPos(g_hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
                      mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
@@ -187,7 +189,7 @@ void raw_input(HRAWINPUT h)
     }
 }
 
-bool is_fullscreen() { return !(GetWindowLongW(g_hwnd, GWL_STYLE) & WS_OVERLAPPEDWINDOW); }
+bool is_fullscreen() { return (GetWindowLongW(g_hwnd, GWL_STYLE) & WS_POPUP) != 0; }
 
 // A performance recording was saved (perf.cpp): windowed, offer to open its folder; fullscreen, the title says it.
 void perf_report(HWND hwnd)
