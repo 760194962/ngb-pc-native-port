@@ -341,6 +341,15 @@ void apply_render_states(IDirect3DDevice9 *d)
     {
         static DWORD fog_sent;
         DWORD fog = render_state()[XRS_FOGENABLE] != 0 && !g_cfg.no_fog && !g_st.pixel_shader;
+        if (fog && render_state()[XRS_FOGTABLEMODE] == D3DFOG_LINEAR) {
+            // The Stage 3 skylight cutscene sets fog 5 -> -1.2 with the 0xff6e3c1e colour. D3D9's fixed-function
+            // linear fog divides by (end - start); a reversed range saturates every vertex to the fog colour and the
+            // whole scene turns flat brown. The Xbox path does not: no visible fog. Treat an empty range as fog off.
+            float fs = 0, fe = 0;
+            memcpy(&fs, &render_state()[XRS_FOGSTART], 4);
+            memcpy(&fe, &render_state()[XRS_FOGEND], 4);
+            if (fe <= fs) fog = 0;
+        }
         if (!g_rs_valid[XRS_FOGENABLE] || fog != fog_sent) {
             set(D3DRS_FOGENABLE, fog);
             fog_sent = fog;
