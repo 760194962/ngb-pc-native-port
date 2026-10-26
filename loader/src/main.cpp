@@ -473,6 +473,19 @@ void request_exit(int code, const char *why)
 bool exit_requested() { return g_exit_code.load() >= 0; }
 
 namespace {
+// Proton/Wine can leave the last thread stuck on the way out (a D3D or audio thread in a driver call), so the
+// process would stay alive after EXIT GAME. Once the exit is asked for, give the normal path a few seconds and
+// then terminate from this thread as well. On Windows the normal path is already gone before this runs.
+DWORD WINAPI exit_watchdog(void *)
+{
+    WaitForSingleObject(g_exit_event, INFINITE);
+    Sleep(3000);
+    TerminateProcess(GetCurrentProcess(), (UINT)g_exit_code.load());
+    return 0;
+}
+} // namespace
+
+namespace {
 
 bool g_image_mapped; // once true, black.exe's code is gone and BlackMain must not return
 
@@ -530,6 +543,7 @@ int run(void *reserve, unsigned reserve_size)
 
     log_init(g_cfg.log_path);
     g_exit_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (g_exit_event) CloseHandle(CreateThread(nullptr, 0, exit_watchdog, nullptr, 0, nullptr));
     logc("BLACK loader " BLACK_VERSION " (blackrt) - XBE %s, hdd %s, log %s%s%s", narrow(g_cfg.xbe_path).c_str(), narrow(g_cfg.hdd_dir).c_str(),
          narrow(g_cfg.log_path).c_str(), g_cfg.trace ? ", trace" : "", g_cfg.strict ? ", strict" : "");
     logf("address-space stub: reserve %p + 0x%x", reserve, reserve_size);
@@ -638,8 +652,8 @@ extern "C" __declspec(dllexport) int __cdecl BlackMain(void *reserve, unsigned r
     int code = run(reserve, reserve_size);
     if (!g_image_mapped) return code; // --info, bad arguments, or failure before the stub was overwritten
     logc("exiting with code %d", code);
-    fflush(stdout);
     // The caller's code has been replaced by the XBE, and game threads may hold locks: terminate here.
+    // log_line already flushes stdout and the log; do not flush a pipe that Proton may have stopped reading.
     TerminateProcess(GetCurrentProcess(), (UINT)code);
     for (;;) Sleep(INFINITE);
 }

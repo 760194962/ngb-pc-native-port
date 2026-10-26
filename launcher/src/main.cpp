@@ -90,6 +90,7 @@ struct App {
     std::wstring save_status; // the last action's result
     bool save_status_bad = false;
     int list_open = 0; // the drop-down list open: 0 none, else its hit id (kHitResList, kHitGpu)
+    int list_scroll = 0, list_scroll_max = 0; // the open list's first row and its last possible first row
     int drag = 0;         // the slider being dragged (kHitGain, kHitGamma), its value until the button is released
     float drag_value = 1.0f;
     // the Online page: what the game program found in the chosen files (--online-check), for which files; the network
@@ -1763,17 +1764,45 @@ struct Painter {
             g_hits.push_back({id, box});                       // the box again: close it
             const float rh = 30, note_h = note.empty() ? 0.0f : 40.0f;
             float w = std::max(sh.list_w, sh.box_w);
-            D2D1_RECT_F list = {box.left, box.bottom + 4, box.left + w, box.bottom + 4 + rows.size() * rh + 8 + note_h};
+            const int total = (int)rows.size();
+            const float space_below = kH - (box.bottom + 4) - 8;
+            const float space_above = box.top - 4 - 8;
+            const float full_h = total * rh + 8 + note_h;
+            // Open upward when the list would run off the bottom and there is more room above.
+            const bool up = full_h > space_below && space_above > space_below;
+            const float space = up ? space_above : space_below;
+            int visible = (int)((space - 8 - note_h) / rh);
+            if (visible < 1) visible = 1;
+            if (visible > total) visible = total;
+            const int max_first = total > visible ? total - visible : 0;
+            if (g.list_scroll < 0) g.list_scroll = 0;
+            if (g.list_scroll > max_first) g.list_scroll = max_first;
+            g.list_scroll_max = max_first;
+            const int first = g.list_scroll;
+            const float h = visible * rh + 8 + note_h;
+            D2D1_RECT_F list;
+            if (up) list = {box.left, box.top - 4 - h, box.left + w, box.top - 4};
+            else list = {box.left, box.bottom + 4, box.left + w, box.bottom + 4 + h};
             fill(list, 0x16141a, 1.0f, 4);
             stroke(list, kGold, 0.8f, 4);
-            for (size_t i = 0; i < rows.size(); i++) {
-                D2D1_RECT_F r = {list.left + 4, list.top + 4 + i * rh, list.right - 4, list.top + 4 + (i + 1) * rh};
-                int rid = id + 1 + (int)i;
-                bool on = (int)i == sel, over = !rows[i].off && g.hover == rid;
+            const bool scroll = total > visible;
+            const float row_right = list.right - 4 - (scroll ? 12 : 0);
+            for (int vi = 0; vi < visible; vi++) {
+                const int i = first + vi;
+                D2D1_RECT_F r = {list.left + 4, list.top + 4 + vi * rh, row_right, list.top + 4 + (vi + 1) * rh};
+                int rid = id + 1 + i;
+                bool on = i == sel, over = !rows[i].off && g.hover == rid;
                 g_hits.push_back({rows[i].off ? 0x7fff : rid, r});
                 if (on) fill({r.left, r.top + 7, r.left + 3, r.bottom - 7}, kBlood);
                 if (over) fill(r, kBone, 0.06f, 3);
                 list_row(r, rows[i], on || over, sh);
+            }
+            if (scroll) {
+                const float bar_x = list.right - 9, bar_top = list.top + 6, bar_h = h - 12 - note_h;
+                fill({bar_x, bar_top, bar_x + 3, bar_top + bar_h}, kInk3, 0.8f, 2);
+                const float thumb_h = std::max(18.0f, bar_h * visible / total);
+                const float thumb_y = bar_top + (bar_h - thumb_h) * (max_first ? (float)first / max_first : 0.0f);
+                fill({bar_x, thumb_y, bar_x + 3, thumb_y + thumb_h}, kGold, 0.8f, 2);
             }
             if (!note.empty()) {
                 float ny = list.bottom - 4 - note_h;
@@ -2293,6 +2322,16 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         InvalidateRect(h, nullptr, FALSE);
         return 0;
     }
+    case WM_MOUSEWHEEL:
+        if (g.list_open && g.list_scroll_max > 0) {
+            int delta = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
+            g.list_scroll -= delta;
+            if (g.list_scroll < 0) g.list_scroll = 0;
+            if (g.list_scroll > g.list_scroll_max) g.list_scroll = g.list_scroll_max;
+            InvalidateRect(h, nullptr, FALSE);
+            return 0;
+        }
+        break;
     case WM_LBUTTONDOWN: { // a slider: dragged until the button is released
         int id = hit_at(GET_X_LPARAM(lp) * scale, GET_Y_LPARAM(lp) * scale);
         if ((id == kHitGain || id == kHitGamma) && !g.list_open && !g.help && !g.ask) {
@@ -2335,6 +2374,13 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (k == VK_LMENU || k == VK_RMENU) return 0; // Alt: the game drops every key while it is held; still waiting
             if (k != VK_ESCAPE) kb_set(g.capture / 2, g.capture % 2, k == VK_DELETE ? 0 : k);
             g.capture = -1;
+            InvalidateRect(h, nullptr, FALSE);
+            return 0;
+        }
+        if (g.list_open && (wp == VK_UP || wp == VK_DOWN)) {
+            g.list_scroll += wp == VK_DOWN ? 1 : -1;
+            if (g.list_scroll < 0) g.list_scroll = 0;
+            if (g.list_scroll > g.list_scroll_max) g.list_scroll = g.list_scroll_max;
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
@@ -2410,6 +2456,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 black_ini_set("scale", std::to_string(row));
             }
             g.list_open = 0;
+            g.list_scroll = g.list_scroll_max = 0;
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
@@ -2449,7 +2496,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             g.capture = id - kHitKey;
             SetFocus(h);
         }
-        else if (id >= kHitPadMap && id < kHitPadMap + keys::kButtons * 16 && (id - kHitPadMap) % 16 == 0) g.list_open = id;
+        else if (id >= kHitPadMap && id < kHitPadMap + keys::kButtons * 16 && (id - kHitPadMap) % 16 == 0) {
+            g.list_open = id;
+            g.list_scroll = g.list_scroll_max = 0;
+        }
         else if (id == kHitOpenSaves) open_folder(save_hdd());
         else if (id >= kHitWebsite && id < kHitWebsite + 5) ShellExecuteW(h, L"open", kLinks[id - kHitWebsite], nullptr, nullptr, SW_SHOWNORMAL);
         else if (id == kHitOpenBackups) {
@@ -2506,8 +2556,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
         else if (id == kHitNetCheck) net_check();
         else if (id == kHitInsignia) ShellExecuteW(h, L"open", L"https://insignia.live/", nullptr, nullptr, SW_SHOWNORMAL);
-        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso)
+        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso) {
             g.list_open = id;
+            g.list_scroll = g.list_scroll_max = 0;
+        }
         InvalidateRect(h, nullptr, FALSE);
         return 0;
     }
@@ -2619,15 +2671,18 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
         }
         if (!wcscmp(argv[i], L"--show-ask") && i + 1 < argc) g.ask = _wtoi(argv[i + 1]); // with --snap: a confirmation (4 reset)
         if (!wcscmp(argv[i], L"--tab") && i + 1 < argc) g.ctl_tab = _wtoi(argv[i + 1]); // with --snap: the Controls page's tab
-        if (!wcscmp(argv[i], L"--show-list") && i + 1 < argc) // with --snap: a drop-down list open (gpu | res | mode | aspect | window)
-            g.list_open = !wcscmp(argv[i + 1], L"gpu")    ? kHitGpu
-                          : !wcscmp(argv[i + 1], L"mode")   ? kHitMode
-                          : !wcscmp(argv[i + 1], L"aspect") ? kHitAspect
-                          : !wcscmp(argv[i + 1], L"window") ? kHitWin
-                          : !wcscmp(argv[i + 1], L"shadow") ? kHitShadow
-                          : !wcscmp(argv[i + 1], L"aniso")  ? kHitAniso
-                          : !wcscmp(argv[i + 1], L"padmap") ? kHitPadMap
-                                                            : kHitResList;
+        if (!wcscmp(argv[i], L"--show-list") && i + 1 < argc) { // with --snap: a drop-down list open (gpu | res | mode | aspect | window | padmapN)
+            const wchar_t *v = argv[i + 1];
+            if (!wcsncmp(v, L"padmap", 6) && v[6]) g.list_open = kHitPadMap + _wtoi(v + 6) * 16;
+            else g.list_open = !wcscmp(v, L"gpu")    ? kHitGpu
+                            : !wcscmp(v, L"mode")   ? kHitMode
+                            : !wcscmp(v, L"aspect") ? kHitAspect
+                            : !wcscmp(v, L"window") ? kHitWin
+                            : !wcscmp(v, L"shadow") ? kHitShadow
+                            : !wcscmp(v, L"aniso")  ? kHitAniso
+                            : !wcscmp(v, L"padmap") ? kHitPadMap
+                                                    : kHitResList;
+        }
         if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed | register | 0..12 a setting's)
             g.help = !wcscmp(argv[i + 1], L"image")       ? kHitHelpImage
                      : !wcscmp(argv[i + 1], L"installed") ? kHitHelpInstalled
