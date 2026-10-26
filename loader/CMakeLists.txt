@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.24)
 if(POLICY CMP0184)
   cmake_policy(SET CMP0184 NEW) # MSVC_RUNTIME_CHECKS property
 endif()
-project(black_loader VERSION 1.1.4 LANGUAGES C CXX) # the release number (About box, first log line)
+project(black_loader VERSION 1.1.5 LANGUAGES C CXX) # the release number (About box, first log line)
+set(NGB_VERSION_STRING "${PROJECT_VERSION}-t") # releases taken over since 2026-10-26 carry the -t suffix
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
   message(FATAL_ERROR "The loader must be 32-bit: configure with -A Win32 (or use the 'win32' preset).")
@@ -81,7 +82,7 @@ add_library(blackrt SHARED
 )
 target_include_directories(blackrt PRIVATE src)
 target_compile_definitions(blackrt PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE
-  BLACK_VERSION="${PROJECT_VERSION}")
+  BLACK_VERSION="${NGB_VERSION_STRING}")
 target_compile_options(blackrt PRIVATE /W3 /utf-8 /EHsc)
 target_link_libraries(blackrt PRIVATE ntdll bcrypt d3d9 d3dcompiler windowscodecs ole32 user32 gdi32 winmm dbghelp advapi32 shell32 pdh dxgi psapi ws2_32)
 
@@ -137,7 +138,7 @@ add_executable(launcher WIN32 ../launcher/src/main.cpp ../launcher/src/strings.c
   ../launcher/src/launcher.rc)
 set_target_properties(launcher PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Hurricane Launcher")
 target_compile_definitions(launcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00 WINVER=0x0A00
-  GAME_VERSION="${PROJECT_VERSION}") # the game program's release number, for the About page
+  GAME_VERSION="${NGB_VERSION_STRING}") # the game program's release number, for the About page
 target_compile_options(launcher PRIVATE /W3 /utf-8 /EHsc)
 target_link_libraries(launcher PRIVATE d2d1 dwrite windowscodecs ole32 shell32 user32 advapi32 bcrypt dxgi ws2_32 iphlpapi)
 if(PORT_ICON AND EXISTS "${PORT_ICON}")
