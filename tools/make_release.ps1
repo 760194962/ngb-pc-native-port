@@ -17,6 +17,9 @@ $root = Split-Path -Parent $PSScriptRoot
 $cmake = Get-Content "$root\loader\CMakeLists.txt" -Raw
 if ($cmake -notmatch 'project\(\S+ VERSION (\d+\.\d+\.\d+)') { throw 'no project VERSION in loader\CMakeLists.txt' }
 $version = $Matches[1]
+if ($cmake -match 'set\(NGB_VERSION_STRING "([^"]+)"\)') {
+    $version = $Matches[1] -replace '\$\{PROJECT_VERSION\}', $version
+}
 if (-not $Bin) { $Bin = "$root\loader\build\win32\$Config" }
 $Bin = (Resolve-Path $Bin).Path
 $game = "$Bin\Ninja Gaiden Black Hurricane.exe"
@@ -42,8 +45,8 @@ $name = "ngb-hurricane-pc-$version-win32"
 $dist = "$root\dist"
 New-Item -ItemType Directory -Force $dist | Out-Null
 
-# Staged under %TEMP% so nothing in the project folder has to be deleted.
-$stage = Join-Path $env:TEMP "$name-$PID"
+# Staged inside dist so nothing is written outside the project (C: is off limits).
+$stage = "$dist\_stage-$PID"
 $sym = "$stage-symbols"
 $out = "$stage\NGB-Hurricane"
 New-Item -ItemType Directory -Force $out, $sym | Out-Null
