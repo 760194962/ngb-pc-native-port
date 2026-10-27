@@ -23,6 +23,7 @@
 
 #include <d3dcompiler.h>
 #include <mmsystem.h>
+#include <intrin.h>
 
 #include <algorithm>
 #include <cmath>
@@ -209,6 +210,26 @@ std::unordered_set<uint64_t> g_shadow_keys;
 // and Ryu's legs that jumped as the lights moved (r414, r420). Recorded by rt_texture_for when such a draw is first
 // seen; the targets are then made again at 1x (request_render_rebuild).
 std::unordered_set<uint64_t> g_xbox_size_keys;
+
+// The glow's small blur chain: 256x128 and 128x128 keep the Xbox-size copy and the softening. 256x256 is the
+// screen copy the water/heat path draws the picture into; keeping it at 1x magnified the character behind the
+// water into blocks (the user's water test, 2026-10-28). It stays at the render scale; only the glow's last two
+// small steps are reduced.
+static bool glow_effect_size(uint32_t w, uint32_t h)
+{
+    return (w == 256 && h == 128) || (w == 128 && h == 128);
+}
+
+// A second guard for the water/heat pass: its draw returns through 0x002D01E0. Nothing in that pass may take the
+// Xbox-size path even if a target happens to have one of the glow's sizes.
+static bool water_effect_call()
+{
+    const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress();
+    const uint32_t *top = (const uint32_t *)(uintptr_t)__readfsdword(0x04);
+    for (const uint32_t *p = sp; p < top && p < sp + 0x800; p++)
+        if (*p == 0x002D01E0) return true;
+    return false;
+}
 
 // The scale a host buffer for Xbox memory `key` (w x h Xbox pixels) is made at
 void buffer_scale(uint64_t key, uint32_t w, uint32_t h, float *sx, float *sy)
@@ -926,6 +947,7 @@ IDirect3DTexture9 *smoothed_rt(HostRT &h, uint32_t draw_serial)
 // this copy instead, the small buffers get what the Xbox gave them.
 IDirect3DTexture9 *reduced_rt(HostRT &h)
 {
+    if (water_effect_call() || !glow_effect_size(h.xw, h.xh)) return h.tex;
     if (h.reduced && h.reduced_epoch == h.epoch) return h.reduced;
     if (!g_box_ps && !g_box_tried) {
         g_box_tried = true;
@@ -960,6 +982,7 @@ IDirect3DPixelShader9 *g_soft_ps;
 
 IDirect3DTexture9 *softened_rt(HostRT &h)
 {
+    if (water_effect_call() || !glow_effect_size(h.xw, h.xh)) return h.tex;
     if (h.soft && h.soft_epoch == h.epoch) return h.soft;
     if (!g_soft_ps && !g_soft_tried) {
         g_soft_tried = true;
@@ -1062,7 +1085,7 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
             logf("[d3d] frame %u: %ux%u buffer 0x%08x drawn into a %ux%u one (%s)%s", g_frame_count.load(), src.xw, src.xh,
                  tex->Data, g_cur_xw, g_cur_xh, linear ? "filtered" : "point", src.sx > 1.5f ? ": from its Xbox-size copy" : "");
         }
-        if (cur != g_rts.end() && g_xbox_size_keys.insert(g_cur_key).second) {
+        if (!water_effect_call() && glow_effect_size(g_cur_xw, g_cur_xh) && cur != g_rts.end() && g_xbox_size_keys.insert(g_cur_key).second) {
             logf("[d3d] frame %u: the %ux%u buffer it is drawn into is kept at its Xbox size from now on", g_frame_count.load(),
                  g_cur_xw, g_cur_xh);
             if (cur->second.sx != 1.0f) request_render_rebuild();
@@ -1076,7 +1099,7 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
              g_cur_xw, g_cur_xh);
     }
     if (src.blurred && t != g_cur_rt && cur_area > src_area) return softened_rt(src);
-    if (down && src.sx > 1.5f) return reduced_rt(src);
+    if (down && src.sx > 1.5f && glow_effect_size(g_cur_xw, g_cur_xh)) return reduced_rt(src);
     if (linear && src.sx > 1.5f && small_buffer(src.xw, src.xh)) return smoothed_rt(src, draw_serial);
     if (t != g_cur_rt) return t;
     static uint32_t snap_serial = ~0u;

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(POLICY CMP0184)
   cmake_policy(SET CMP0184 NEW) # MSVC_RUNTIME_CHECKS property
 endif()
-project(black_loader VERSION 1.1.6 LANGUAGES C CXX) # the release number (About box, first log line)
+project(black_loader VERSION 1.1.7 LANGUAGES C CXX) # the release number (About box, first log line)
 set(NGB_VERSION_STRING "${PROJECT_VERSION}-t") # releases taken over since 2026-10-26 carry the -t suffix
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
