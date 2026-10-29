@@ -334,10 +334,9 @@ void apply_render_states(IDirect3DDevice9 *d)
     on_change(XRS_FILLMODE, [&](uint32_t v) {
         set(D3DRS_FILLMODE, v == 0x1B00 ? D3DFILL_POINT : v == 0x1B01 ? D3DFILL_WIREFRAME : D3DFILL_SOLID);
     });
-    // Host fog: fixed-function draws only. On the NV2A fog reaches a pixel shader only through its FOG register,
-    // used by the combiners, and nothing fogs after it (xemu psh.c pFog); Direct3D 9 fogs after a ps_2_0 shader.
-    // Ninja Gaiden Black draws its shadow receivers (no FOG input) with fog on: they came out tinted with the fog
-    // colour (r215, docs/04 §3.21).
+    // Host fog is for the fixed-function path only. The programmable path gets the NV2A fog factor interpolated
+    // through VSOut.t4 and blends it into its own FOGR register (nv2a_vsh.cpp / nv2a_psh.cpp), so adding D3D9's
+    // post-shader fog there would apply it twice. Reversed linear ranges still mean no visible fog (see below).
     {
         static DWORD fog_sent;
         DWORD fog = render_state()[XRS_FOGENABLE] != 0 && !g_cfg.no_fog && !g_st.pixel_shader;

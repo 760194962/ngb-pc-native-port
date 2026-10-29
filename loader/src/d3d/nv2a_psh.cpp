@@ -97,13 +97,13 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
          "sampler2D s2d0 : register(s0); sampler2D s2d1 : register(s1); sampler2D s2d2 : register(s2); sampler2D s2d3 : register(s3);\n"
          "samplerCUBE scu0 : register(s0); samplerCUBE scu1 : register(s1); samplerCUBE scu2 : register(s2); samplerCUBE scu3 : register(s3);\n"
          "struct PSIn { float4 v0 : COLOR0; float4 v1 : COLOR1; float4 tc0 : TEXCOORD0; float4 tc1 : TEXCOORD1;\n"
-         "              float4 tc2 : TEXCOORD2; float4 tc3 : TEXCOORD3; };\n"
+         "              float4 tc2 : TEXCOORD2; float4 tc3 : TEXCOORD3; float4 tc4 : TEXCOORD4; };\n"
          "float4 main(PSIn I) : COLOR0 {\n"
          "  float4 v0 = I.v0, v1 = I.v1;\n"
          "  float4 tc[4] = { I.tc0, I.tc1, I.tc2, I.tc3 };\n"
          "  float4 t0 = 0, t1 = 0, t2 = 0, t3 = 0;\n"
          "  float d0 = 0, d1 = 0, d2 = 0, d3 = 0;\n" // dot-product results of DOTPRODUCT stages
-         "  float4 FOGR = float4(fogColor.rgb, 1);\n";
+         "  float4 FOGR = float4(fogColor.rgb, saturate(I.tc4.x));\n";
     // ---- texture stages ----
     for (int i = 0; i < 4; i++) {
         uint32_t mode = (d.PSTextureModes >> (5 * i)) & 0x1F;

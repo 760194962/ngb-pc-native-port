@@ -265,6 +265,7 @@ std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_
          "struct VSOut {\n"
          "  float4 pos : POSITION; float4 d0 : COLOR0; float4 d1 : COLOR1;\n"
          "  float4 t0 : TEXCOORD0; float4 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float4 t3 : TEXCOORD3;\n"
+         "  float4 t4 : TEXCOORD4; // interpolated NV2A fog factor (x), for a pixel shader that reads FOG\n"
          "  float fog : FOG; float pts : PSIZE;\n"
          "};\n"
          "VSOut main(VSIn I) {\n";
@@ -392,9 +393,11 @@ std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_
         s += "  float fc = abs(oFog.x), fden = fogParams.y - fogParams.x;\n"
              "  float flin = (fogParams.y - fc) / (abs(fden) > 1e-6 ? fden : 1e-6);\n"
              "  float fd = fogParams.z * fc;\n"
-             "  o.fog = saturate(dot(fogMode, float4(flin, exp(-fd), exp(-fd * fd), oFog.x)));\n";
+             "  o.fog = saturate(dot(fogMode, float4(flin, exp(-fd), exp(-fd * fd), oFog.x)));\n"
+             "  o.t4 = float4(o.fog, 0, 0, 1);\n";
     else
-        s += "  o.fog = 1.0;\n";
+        s += "  o.fog = 1.0;\n"
+             "  o.t4 = float4(1, 0, 0, 1);\n";
     s += "  return o;\n"
          "}\n";
     return s;
