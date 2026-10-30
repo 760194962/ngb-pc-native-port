@@ -1476,6 +1476,7 @@ bool begin_draw(DrawCtx &ctx)
     IDirect3DDevice9 *d = host3d::dev();
     if (!d) return false;
     g_draw_serial++;
+    g_ffp_quad_stages = g_ffp_quad_weighted = 0; // a 2D quad's stage shader variant is picked by scale_rhw (QuadSnap)
     if (g_cfg.skip_texmodes && g_st.pixel_shader && render_state()[XRS_PSTEXTUREMODES] == g_cfg.skip_texmodes) return false;
     // Stack scans stop at the thread's stack base: a draw near the top of a game thread's stack read past it and
     // crashed the game (cfg:skipcaller, play 2026-10-22).
@@ -1856,12 +1857,155 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
     }
 }
 
+// QuadSnap (ngbrecomp #83: src/d3d/vk/backend.cpp QuadSnap, gpu::QuadHlsl): a 2D quad above 1x drawn as the console covers
+// and samples it. The game builds its 2D (the pause menu's dagger and plates, backgrounds, fades, letters) from axis-
+// aligned pre-transformed quads that meet between console pixels; scaled up, each quad's edge column of host pixels
+// sampled its texture past what the console's pixel centres read, and linear filtering blended a transparent texel's
+// colour into its opaque neighbour: a thin light line down the pause menu's dagger where two of its quads meet (x
+// 181.4999 and 181.5 of 720, the user's picture, 2026-10-30), lines round letters and along the seams of backgrounds.
+// - The quad's edges go to the console pixel boundaries it covers, its texture coordinates along with them: the NV2A
+//   keeps 4 fraction bits of a window coordinate, truncated (xemu vsh.c roundScreenCoords), and covers a pixel whose
+//   centre is not left of / above the edge (as scale_rhw's border rule).
+// - Each stage's coordinates are clamped to the range the console's pixel centres sample (half a console pixel in from
+//   each edge), and a linearly filtered stage reads its four texels weighted by alpha (ffp_ps.cpp: the generated
+//   stage shader's quad variant). Pixel-shader (combiner) draws keep their coordinates moved but are not clamped.
+// An axis-aligned 4-vertex quad: every corner on its box within a hundredth of a pixel (the dagger's 181.4999), taken as
+// the box's. cfg:quadsnap:0 draws them as before.
+struct QuadSnap {
+    int sets = 0;
+    uint32_t off[8];       // byte offsets of the 2-float coordinate sets
+    float centre[8][4][2]; // per set: the coordinates at the four corner pixels' centres (before rhw_tex_scales)
+};
+
+uint32_t g_quad_snaps, g_quad_snap_frame; // quads snapped in the last 600 frames (logged)
+
+bool quad_prim(uint32_t xprim)
+{
+    return xprim == XPT_TRIANGLESTRIP || xprim == XPT_TRIANGLEFAN || xprim == XPT_QUADLIST || xprim == XPT_QUADSTRIP ||
+           xprim == XPT_POLYGON;
+}
+
+bool quad_snap(uint32_t fvf, uint8_t *verts, uint32_t stride, float ox, float oy, QuadSnap &q)
+{
+    float xy[4][2], x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f;
+    for (int v = 0; v < 4; v++) {
+        memcpy(xy[v], verts + (size_t)v * stride, 8);
+        x0 = std::min(x0, xy[v][0]), x1 = std::max(x1, xy[v][0]), y0 = std::min(y0, xy[v][1]), y1 = std::max(y1, xy[v][1]);
+    }
+    auto on = [](float a, float b) { return fabsf(a - b) <= 0.01f; }; // a hundredth of a pixel
+    for (int v = 0; v < 4; v++) {
+        if (!((on(xy[v][0], x0) || on(xy[v][0], x1)) && (on(xy[v][1], y0) || on(xy[v][1], y1)))) return false;
+        xy[v][0] = on(xy[v][0], x0) ? x0 : x1;
+        xy[v][1] = on(xy[v][1], y0) ? y0 : y1;
+    }
+    if (x1 - x0 < 1.0f || y1 - y0 < 1.0f) return false;
+    int c00 = -1, c10 = -1, c01 = -1;
+    for (int v = 0; v < 4; v++) {
+        if (xy[v][0] == x0 && xy[v][1] == y0) c00 = v;
+        if (xy[v][0] == x1 && xy[v][1] == y0) c10 = v;
+        if (xy[v][0] == x0 && xy[v][1] == y1) c01 = v;
+    }
+    if (c00 < 0 || c10 < 0 || c01 < 0) return false;
+    // the window coordinate (position + the library's screen-space offset) -> the console pixel boundary it covers from
+    auto snap = [](float w) { return ceilf(truncf(w * 16.0f) / 16.0f - 0.5f); };
+    float sx0 = snap(x0 + ox), sx1 = snap(x1 + ox), sy0 = snap(y0 + oy), sy1 = snap(y1 + oy);
+    if (sx1 - sx0 < 1.0f || sy1 - sy0 < 1.0f) return false;
+    // the 2-float coordinate sets (rhw_tex_scales' layout)
+    uint32_t tc = (fvf >> 8) & 0xF, off = 16 + ((fvf & D3DFVF_NORMAL) ? 12 : 0) + ((fvf & D3DFVF_PSIZE) ? 4 : 0) +
+                                          ((fvf & D3DFVF_DIFFUSE) ? 4 : 0) + ((fvf & D3DFVF_SPECULAR) ? 4 : 0);
+    static const uint32_t sizes[4] = {8, 12, 16, 4};
+    q.sets = 0;
+    float w = x1 - x0, h = y1 - y0;
+    for (uint32_t i = 0; i < tc && i < 8; i++) {
+        uint32_t code = (fvf >> (16 + 2 * i)) & 3;
+        if (code == 0) {
+            float uv[4][2];
+            for (int v = 0; v < 4; v++) memcpy(uv[v], verts + (size_t)v * stride + off, 8);
+            float dudx = (uv[c10][0] - uv[c00][0]) / w, dvdx = (uv[c10][1] - uv[c00][1]) / w;
+            float dudy = (uv[c01][0] - uv[c00][0]) / h, dvdy = (uv[c01][1] - uv[c00][1]) / h;
+            int k = q.sets++;
+            q.off[k] = off;
+            for (int v = 0; v < 4; v++) {
+                bool left = xy[v][0] == x0, top = xy[v][1] == y0;
+                float dx = (left ? sx0 : sx1) - (xy[v][0] + ox), dy = (top ? sy0 : sy1) - (xy[v][1] + oy);
+                float u = uv[v][0] + dudx * dx + dudy * dy, t = uv[v][1] + dvdx * dx + dvdy * dy;
+                memcpy(verts + (size_t)v * stride + off, &u, 4);
+                memcpy(verts + (size_t)v * stride + off + 4, &t, 4);
+                // half a console pixel in from each edge: the centre of the corner pixel
+                float cx = left ? 0.5f : -0.5f, cy = top ? 0.5f : -0.5f;
+                q.centre[k][v][0] = u + dudx * cx + dudy * cy;
+                q.centre[k][v][1] = t + dvdx * cx + dvdy * cy;
+            }
+        }
+        off += sizes[code];
+    }
+    for (int v = 0; v < 4; v++) {
+        float p[2] = {(xy[v][0] == x0 ? sx0 : sx1) - ox, (xy[v][1] == y0 ? sy0 : sy1) - oy};
+        memcpy(verts + (size_t)v * stride, p, 8);
+    }
+    return true;
+}
+
+// After the coordinates are scaled (rhw_tex_scales): each textured 2D stage's clamp range and texture size for the
+// stage shader's quad variant, which is then picked
+void quad_snap_shader(const QuadSnap &q, const RhwTexScale *ts, int nts)
+{
+    IDirect3DDevice9 *d = host3d::dev();
+    float clamp[4][4] = {}, size[4][4] = {};
+    uint32_t stages = 0, weighted = 0;
+    for (int s = 0; s < 4; s++) {
+        const uint32_t *tss = texture_state(s);
+        if (!g_st.textures[s] || (tss[28] >> 16) || (tss[21] & 0x100)) continue; // no texture, generated or projected
+        uint32_t set = tss[28] & 0xFFFF;
+        uint32_t tc = (g_st.vertex_shader >> 8) & 0xF;
+        if (set >= tc) continue;
+        uint32_t off = 16 + ((g_st.vertex_shader & D3DFVF_DIFFUSE) ? 4 : 0) + ((g_st.vertex_shader & D3DFVF_SPECULAR) ? 4 : 0);
+        static const uint32_t sizes[4] = {8, 12, 16, 4};
+        for (uint32_t i = 0; i < set; i++) off += sizes[(g_st.vertex_shader >> (16 + 2 * i)) & 3];
+        int k = -1;
+        for (int i = 0; i < q.sets; i++)
+            if (q.off[i] == off) k = i;
+        if (k < 0) continue;
+        IDirect3DBaseTexture9 *bt = nullptr;
+        if (FAILED(d->GetTexture(s, &bt)) || !bt) continue;
+        D3DSURFACE_DESC desc = {};
+        bool ok = bt->GetType() == D3DRTYPE_TEXTURE && SUCCEEDED(((IDirect3DTexture9 *)bt)->GetLevelDesc(0, &desc));
+        bt->Release();
+        if (!ok || !desc.Width || !desc.Height) continue;
+        float u0 = 1e30f, u1 = -1e30f, v0 = 1e30f, v1 = -1e30f;
+        for (int v = 0; v < 4; v++) {
+            float u = q.centre[k][v][0], t = q.centre[k][v][1];
+            for (int i = 0; i < nts; i++)
+                if (ts[i].off == off) {
+                    float a = u * ts[i].m[0] + t * ts[i].m[1] + ts[i].m[2], b = u * ts[i].m[3] + t * ts[i].m[4] + ts[i].m[5];
+                    u = a, t = b;
+                }
+            u0 = std::min(u0, u), u1 = std::max(u1, u), v0 = std::min(v0, t), v1 = std::max(v1, t);
+        }
+        clamp[s][0] = u0, clamp[s][1] = v0, clamp[s][2] = u1, clamp[s][3] = v1;
+        size[s][0] = (float)desc.Width, size[s][1] = (float)desc.Height, size[s][2] = 1.0f / desc.Width, size[s][3] = 1.0f / desc.Height;
+        stages |= 1u << s;
+        DWORD mag = 0, min = 0;
+        d->GetSamplerState(s, D3DSAMP_MAGFILTER, &mag);
+        d->GetSamplerState(s, D3DSAMP_MINFILTER, &min);
+        if (mag == D3DTEXF_LINEAR || min == D3DTEXF_LINEAR) weighted |= 1u << s;
+    }
+    if (!stages || g_st.pixel_shader || g_cfg.host_ffp) return;
+    g_ffp_quad_stages = stages;
+    g_ffp_quad_weighted = weighted;
+    if (IDirect3DPixelShader9 *ps = ffp_reselect()) {
+        set_ps(d, ps);
+        upload_ffp_quad_constants(d, clamp, size);
+    }
+}
+
 // Pre-transformed (XYZRHW) vertices carry Xbox screen pixels, but host render targets are scale_x/y() times
 // larger: copy vertices [first, first+count) with x/y scaled (and texel coordinates normalized, see above).
 // Returns a pointer usable with the original indices (the copy offset by -first vertices); other paths get
 // `data` back unchanged.
 std::vector<uint8_t> g_rhw;
-const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, uint32_t count, uint32_t stride)
+// quad: the primitive can make a 4-vertex quad (a strip, a fan, a quad, a polygon, or indexed triangles) for QuadSnap.
+const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, uint32_t count, uint32_t stride, bool quad)
 {
     auto *src = (const uint8_t *)data;
     float sx = target_scale_x(), sy = target_scale_y();
@@ -1927,6 +2071,9 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
                                   g_frame_count.load(), tw, th, fx ? "x" : "", fy ? "y" : "");
         }
     }
+    QuadSnap qs;
+    bool snapped = quad && count == 4 && edges && g_cfg.quad_snap && (sx > 1.0f || sy > 1.0f) &&
+                   quad_snap(ctx.fvf, g_rhw.data(), stride, ox, oy, qs);
     squeeze_169(g_rhw.data(), count, stride, sx, sy, ctx.fvf);
     for (uint32_t v = 0; v < count; v++) {
         float *p = (float *)&g_rhw[(size_t)v * stride];
@@ -1935,6 +2082,17 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
         p[1] = edge_y ? std::min(p[1] * sy + dy, -0.5f) : p[1] * sy + dy;
     }
     apply_rhw_tex_scales(g_rhw.data(), count, stride, ts, nts);
+    if (snapped) {
+        quad_snap_shader(qs, ts, nts);
+        uint32_t f = g_frame_count.load();
+        g_quad_snaps++;
+        if (f / 600 != g_quad_snap_frame / 600) {
+            logf("[draw] frame %u: %u 2D quads drawn as the console covers and samples them (QuadSnap) in the last 600 frames",
+                 f, g_quad_snaps);
+            g_quad_snaps = 0;
+            g_quad_snap_frame = f;
+        }
+    }
     return g_rhw.data() - (size_t)first * stride;
 }
 
@@ -2040,8 +2198,8 @@ void __stdcall D3DDevice_DrawVerticesUP(uint32_t PrimitiveType, uint32_t VertexC
     }
     debug_draw("DrawVerticesUP", ctx, PrimitiveType, VertexCount, (const float *)pVertexStreamZeroData, VertexStreamZeroStride / 4);
     if (draw_wide_lines(ctx, PrimitiveType, VertexCount, pVertexStreamZeroData, VertexStreamZeroStride)) return;
-    draw_up(PrimitiveType, VertexCount, scale_rhw(ctx, pVertexStreamZeroData, 0, VertexCount, VertexStreamZeroStride),
-            VertexStreamZeroStride);
+    draw_up(PrimitiveType, VertexCount,
+            scale_rhw(ctx, pVertexStreamZeroData, 0, VertexCount, VertexStreamZeroStride, quad_prim(PrimitiveType)), VertexStreamZeroStride);
 }
 
 void __stdcall D3DDevice_DrawVertices(uint32_t PrimitiveType, uint32_t StartVertex, uint32_t VertexCount)
@@ -2062,7 +2220,8 @@ void __stdcall D3DDevice_DrawVertices(uint32_t PrimitiveType, uint32_t StartVert
     const uint8_t *base = stream_data(0);
     uint32_t stride = g_st.streams[0].stride;
     if (!base || !stride) return;
-    draw_up(PrimitiveType, VertexCount, scale_rhw(ctx, base, StartVertex, VertexCount, stride) + (size_t)StartVertex * stride, stride);
+    draw_up(PrimitiveType, VertexCount,
+            scale_rhw(ctx, base, StartVertex, VertexCount, stride, quad_prim(PrimitiveType)) + (size_t)StartVertex * stride, stride);
 }
 
 // --debug-frame: for indexed draws whose declaration has a packed normal (NORMPACKED3), write indices,
@@ -2147,7 +2306,7 @@ void __stdcall D3DDevice_DrawIndexedVertices(uint32_t PrimitiveType, uint32_t Ve
             mn = pIndexData[i] < mn ? pIndexData[i] : mn;
             mx = pIndexData[i] > mx ? pIndexData[i] : mx;
         }
-        base = scale_rhw(ctx, base, mn, mx - mn + 1, stride);
+        base = scale_rhw(ctx, base, mn, mx - mn + 1, stride, quad_prim(PrimitiveType) || PrimitiveType == XPT_TRIANGLELIST);
     }
     if (debug_frame_active()) {
         uint32_t mn = 0xFFFF;
@@ -2239,7 +2398,7 @@ void draw_inline_array(uint32_t prim, const uint32_t *data, uint32_t dwords)
     }
     uint32_t stride = fvf_stride(ctx.fvf);
     if (!stride) return;
-    draw_up(prim, dwords * 4 / stride, scale_rhw(ctx, data, 0, dwords * 4 / stride, stride), stride);
+    draw_up(prim, dwords * 4 / stride, scale_rhw(ctx, data, 0, dwords * 4 / stride, stride, quad_prim(prim)), stride);
 }
 
 // ---- screenshots ----

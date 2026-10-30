@@ -3,7 +3,7 @@ if(POLICY CMP0184)
   cmake_policy(SET CMP0184 NEW) # MSVC_RUNTIME_CHECKS property
 endif()
 project(black_loader VERSION 1.1.9 LANGUAGES C CXX) # the release number (About box, first log line)
-set(NGB_VERSION_STRING "${PROJECT_VERSION}") # 1.1.5-t..1.1.8-t carried a -t suffix; from 1.1.9 none
+set(NGB_VERSION_STRING "${PROJECT_VERSION}-t") # 1.1.5-t..1.1.8-t carried a -t suffix; 1.1.9-t keeps it for this branch
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
   message(FATAL_ERROR "The loader must be 32-bit: configure with -A Win32 (or use the 'win32' preset).")

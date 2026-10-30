@@ -260,6 +260,7 @@ void read_press_file(uint32_t now_ms)
                     else if (k == "zview8") g_cfg.zview8 = v;
                     else if (k == "rhwoffset") g_cfg.rhw_offset = v;
                     else if (k == "rhwedge") g_cfg.rhw_edge_fix = v;
+                    else if (k == "quadsnap") g_cfg.quad_snap = v;
                     else if (k == "edgemirror") g_cfg.edge_mirror = v;
                     else if (k == "vsdivide") g_cfg.vs_divide_fix = v;
                     else if (k == "dumpvs") g_cfg.dump_vs_texmodes = (uint32_t)strtoul(line.c_str() + c + 1, nullptr, 16);

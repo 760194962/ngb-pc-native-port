@@ -27,6 +27,7 @@ namespace xd3d {
 D3DTEXTUREOP conv_texop(uint32_t v); // draw.cpp: the Xbox op number -> D3DTEXTUREOP
 
 uint32_t g_ffp_edge_stages;
+uint32_t g_ffp_quad_stages, g_ffp_quad_weighted;
 
 namespace {
 
@@ -41,6 +42,7 @@ struct StageKey {
     uint32_t kill; // D3DTSS_ALPHAKILL set (texture_state 11)
     uint32_t proj; // D3DTTFF_PROJECTED: 3 = divide by z, 4 = divide by w, 0 = none
     uint32_t edge; // g_ffp_edge_stages: alpha 0 where this stage's coordinates leave 0..1
+    uint32_t quad; // g_ffp_quad_stages / g_ffp_quad_weighted: 1 coordinates clamped, 2 also alpha-weighted texels
 };
 
 // An argument (D3DTA_*) with its modifiers as an HLSL expression.
@@ -113,6 +115,7 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
 {
     std::string s =
         "float4 tfactor : register(c0);\n"
+        "float4 qc[4] : register(c1); float4 qs[4] : register(c5);\n" // a 2D quad's clamp ranges and texture sizes
         "sampler2D s2d0 : register(s0); sampler2D s2d1 : register(s1); sampler2D s2d2 : register(s2); sampler2D s2d3 : register(s3);\n"
         "samplerCUBE scu0 : register(s0); samplerCUBE scu1 : register(s1); samplerCUBE scu2 : register(s2); samplerCUBE scu3 : register(s3);\n"
         "struct PSIn { float4 v0 : COLOR0; float4 v1 : COLOR1; float4 tc0 : TEXCOORD0; float4 tc1 : TEXCOORD1;\n"
@@ -134,6 +137,37 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
         if (k[i].tex == 2) snprintf(b, sizeof b, "  t%d = texCUBE(scu%d, tc[%d].xyz);\n", i, i, i);
         else if (k[i].tex == 1 && k[i].proj == 4) snprintf(b, sizeof b, "  t%d = tex2Dproj(s2d%d, tc[%d]);\n", i, i, i);
         else if (k[i].tex == 1 && k[i].proj == 3) snprintf(b, sizeof b, "  t%d = tex2D(s2d%d, tc[%d].xy / tc[%d].z);\n", i, i, i, i);
+        else if (k[i].tex == 1 && k[i].quad) {
+            // A 2D quad above 1x (draw.cpp quad_snap): the coordinates no nearer the texture's edge than the console's
+            // pixel centres read (the line along a seam of the pause menu's dagger, a font cell's or tile's edge)
+            snprintf(b, sizeof b, "  { float2 uv = clamp(tc[%d].xy, qc[%d].xy, qc[%d].zw);\n", i, i, i);
+            s += b;
+            if (k[i].quad == 2) {
+                // Linear filtering: the four texels around, weighted by their alpha, so a transparent texel's colour
+                // does not fringe its opaque neighbour (between texels, where an upscaled picture samples; at the
+                // console's pixel centres it is the same texel). An on-or-off mask (a cut-out's 0 and 255) takes the
+                // nearest texel's alpha: its edge as sharp as the console's; soft alpha (text) stays filtered.
+                // Explicit gradients: those of the clamped coordinate, not of the texel corners (which jump).
+                std::string q =
+                    "    float2 gx = ddx(uv), gy = ddy(uv), f = uv * qs[#].xy - 0.5, fb = floor(f), w = f - fb;\n"
+                    "    float2 c = (fb + 0.5) * qs[#].zw;\n"
+                    "    float4 q0 = tex2Dgrad(s2d#, c, gx, gy), q1 = tex2Dgrad(s2d#, c + float2(qs[#].z, 0), gx, gy);\n"
+                    "    float4 q2 = tex2Dgrad(s2d#, c + float2(0, qs[#].w), gx, gy), q3 = tex2Dgrad(s2d#, c + qs[#].zw, gx, gy);\n"
+                    "    float4 wq = float4((1 - w.x) * (1 - w.y), w.x * (1 - w.y), (1 - w.x) * w.y, w.x * w.y);\n"
+                    "    float4 qa = float4(q0.a, q1.a, q2.a, q3.a), aw = wq * qa;\n"
+                    "    float sa = dot(aw, 1);\n"
+                    "    float3 rgb = sa > 0 ? (q0.rgb * aw.x + q1.rgb * aw.y + q2.rgb * aw.z + q3.rgb * aw.w) / sa\n"
+                    "                        : q0.rgb * wq.x + q1.rgb * wq.y + q2.rgb * wq.z + q3.rgb * wq.w;\n"
+                    "    if (all((qa < 0.02) + (qa > 0.98))) sa = w.y < 0.5 ? (w.x < 0.5 ? q0.a : q1.a) : (w.x < 0.5 ? q2.a : q3.a);\n"
+                    "    t# = float4(rgb, sa); }\n";
+                for (size_t at; (at = q.find('#')) != std::string::npos;) q.replace(at, 1, std::to_string(i));
+                s += q;
+            } else {
+                snprintf(b, sizeof b, "    t%d = tex2D(s2d%d, uv); }\n", i, i);
+                s += b;
+            }
+            b[0] = 0;
+        }
         else if (k[i].tex == 1) snprintf(b, sizeof b, "  t%d = tex2D(s2d%d, tc[%d].xy);\n", i, i, i);
         else continue;
         s += b;
@@ -179,8 +213,15 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
 
 } // namespace
 
+namespace {
+bool g_last_diffuse, g_last_specular, g_last_pretransformed; // ffp_pixel_shader's last arguments (ffp_reselect)
+}
+
 IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, bool pretransformed)
 {
+    g_last_diffuse = has_diffuse;
+    g_last_specular = has_specular;
+    g_last_pretransformed = pretransformed;
     // lit: the vertex pipeline computes both colours; pre-transformed vertices are never lit (Ninja Gaiden Black's
     // movie quad: XYZRHW|TEX1 with LIGHTING on, MODULATE(texture, diffuse) -> diffuse is the opaque white default)
     bool lighting = render_state()[XRS_LIGHTING] != 0 && !pretransformed;
@@ -201,6 +242,7 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
         // (FUN_00236010 at 0x2370D8).
         e.kill = e.tex && ts[11] != 0;
         e.edge = e.tex == 1 && e.proj && ((g_ffp_edge_stages >> i) & 1);
+        e.quad = e.tex == 1 && !e.proj && ((g_ffp_quad_stages >> i) & 1) ? 1 + ((g_ffp_quad_weighted >> i) & 1) : 0;
     }
     bool specular = render_state()[XRS_SPECULARENABLE] != 0;
     // Point sprites: the Xbox D3D library builds the combiner stages from stage 3 on (FUN_003d4340 of Ninja Gaiden
@@ -246,6 +288,14 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
     g_ffp_cache[key] = ps; // a failure is cached too: the host pipeline draws those
     g_ffp_last_key = key;
     return g_ffp_last_ps = ps;
+}
+
+IDirect3DPixelShader9 *ffp_reselect() { return ffp_pixel_shader(g_last_diffuse, g_last_specular, g_last_pretransformed); }
+
+void upload_ffp_quad_constants(IDirect3DDevice9 *d, const float clamp[4][4], const float size[4][4])
+{
+    d->SetPixelShaderConstantF(1, &clamp[0][0], 4);
+    d->SetPixelShaderConstantF(5, &size[0][0], 4);
 }
 
 void upload_ffp_constants(IDirect3DDevice9 *d)
