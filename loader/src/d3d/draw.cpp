@@ -32,6 +32,7 @@ LastDraw g_last_draws[4];
 unsigned g_last_draw_next;
 
 IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_serial, bool linear); // device.cpp
+bool samples_shadow_map(); // device.cpp
 uint32_t g_draw_serial; // increments per draw (render-target snapshots are shared within a draw)
 uint32_t backbuffer_data();
 uint32_t depthbuffer_data();
@@ -280,6 +281,18 @@ void apply_render_states(IDirect3DDevice9 *d)
             memcpy(&slope, &rs[XRS_POLYGONOFFSETZSLOPESCALE], 4);
             bias = off / 16777216.0f;
             slope *= std::max(target_scale_x(), target_scale_y());
+        }
+        // Ryu's shadow pass -- the surfaces drawn again over themselves (multiplied into the picture), sampling the
+        // shadow map, depth tested and not written -- pulled toward the camera, as ngbrecomp #106 does: drawn by another
+        // vertex path (a vertex program over the fixed-function first pass), its depths tie with what is already there,
+        // and as Ryu moved they went one way or the other: the shadow flickered between two shades (the user, outside the
+        // chapter-1 gate, 2026-10-31; not on xemu; two shades as if one of two layers there lost them, not yet confirmed).
+        // The game's own offset there is -3 / -0.75 (ps 0x3ad6bf0). Each step adds 2 depth units and half a console
+        // pixel's worth of slope: 1 (ngbrecomp's) stopped it where the ground is flat, uneven ground needed 4 (8 too);
+        // shadow quality, render scale and point filtering made no difference. cfg:shadowpull:N, 0 off.
+        if (g_cfg.shadow_pull && rs[XRS_ZENABLE] && !rs[XRS_ZWRITEENABLE] && samples_shadow_map()) {
+            bias -= 2.0f * g_cfg.shadow_pull / 16777216.0f;
+            slope -= 0.5f * g_cfg.shadow_pull * std::max(target_scale_x(), target_scale_y());
         }
         static float sent_bias, sent_slope;
         if (!g_rs_valid[XRS_ZBIAS] || bias != sent_bias || slope != sent_slope) { // ZBIAS's slot marks "sent"

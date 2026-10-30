@@ -219,6 +219,19 @@ std::unordered_set<uint64_t> g_shadow_keys;
 // level has its own addresses (0x02D38000 in chapter 1, 0x015E5000 elsewhere: run/cmp_fix), so nothing is fixed.
 std::unordered_set<uint64_t> g_xbox_size_keys;
 
+// Whether a bound texture is a shadow map (a depth buffer kept at the shadow scale: g_shadow_keys)
+bool samples_shadow_map()
+{
+    for (int s = 0; s < 4; s++) {
+        const PixelContainer *t = (const PixelContainer *)g_st.textures[s];
+        if (!t || !t->Data) continue;
+        uint32_t w, h;
+        surface_size(t, &w, &h);
+        if (g_shadow_keys.count(mem_key(t->Data, w, h))) return true;
+    }
+    return false;
+}
+
 // The scale a host buffer for Xbox memory `key` (w x h Xbox pixels) is made at
 void buffer_scale(uint64_t key, uint32_t w, uint32_t h, float *sx, float *sy)
 {
