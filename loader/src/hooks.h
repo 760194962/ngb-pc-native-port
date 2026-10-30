@@ -6,6 +6,7 @@
 void install_crash_handlers();
 struct BuildProfile;
 bool install_rdtsc_emulation(const BuildProfile &profile); // rdtsc sites trap to a 733.33 MHz counter (Xbox TSC rate)
+uint64_t engine_tsc(); // what an engine rdtsc site reads now (game_load.cpp)
 void tsc_host_sleep(bool resume); // the PC goes to sleep / woke: the time asleep is left out of that counter
 
 // Log the XBE return addresses found on a stack (heuristic: image values preceded by a call).

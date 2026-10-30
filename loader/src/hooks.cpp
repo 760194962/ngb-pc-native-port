@@ -173,7 +173,8 @@ int probe_index(uint32_t addr)
 // 103.5 and the shadow flickered on and off (docs/04 §3.9); --tsc-divisor (the engine's sites see the counter
 // divided by N) was set to 4 for that. With the later speed-ups the true clock reads 42 (median) / 62 (99%) on the
 // Iris Xe in chapter 1, 0.17% of frames over 94, the shadow counter stays at -5 (r186), so the default is 1 again:
-// a frame that really runs late makes the engine drop detail as it would on the console (docs/04 §3.17).
+// a frame that really runs late makes the engine drop detail as it would on the console (docs/04 §3.17). The time the
+// game thread spends in Direct3D is left out of what the engine measures (game_load.cpp, docs/04 §3.17 (5)).
 const uint32_t *g_rdtsc_sites;
 int g_rdtsc_site_count;
 uint32_t g_rdtsc_qpc_site;
@@ -221,6 +222,16 @@ uint64_t xbox_tsc()
              f = (uint64_t)g_tsc_freq.QuadPart;
     return (d / f) * 733333333ull + ((d % f) * 733333333ull) / f;
 }
+
+} // namespace
+
+uint64_t engine_tsc()
+{
+    uint64_t v = xbox_tsc();
+    return g_cfg.tsc_divisor > 1 ? v / g_cfg.tsc_divisor : v;
+}
+
+namespace {
 
 // --coverage: which of a list of code addresses run (gate 4b: the HANZI entries of x2.1). Each address gets an int3
 // once; the first hit logs the frame and thread, restores the byte and continues, so hot paths cost one exception.

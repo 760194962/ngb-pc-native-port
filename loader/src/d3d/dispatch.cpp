@@ -4,6 +4,7 @@
 #include "d3d/draw.h"
 #include "d3d/state.h"
 #include "d3d/xd3d.h"
+#include "game_load.h"
 #include "hooks.h"
 #include "image.h"
 #include "net/online.h"
@@ -136,6 +137,47 @@ __declspec(naked) void unimplemented_common()
     }
 }
 
+// Around a D3D library call in its thunk (game_load.cpp): the registers the thunk still needs are kept.
+__declspec(naked) void span_enter_saved()
+{
+    __asm {
+        push eax
+        push ecx
+        push edx
+        call game_load_span_enter
+        pop edx
+        pop ecx
+        pop eax
+        ret
+    }
+}
+
+__declspec(naked) void span_leave_saved()
+{
+    __asm {
+        push eax
+        push ecx
+        push edx
+        call game_load_span_leave
+        pop edx
+        pop ecx
+        pop eax
+        ret
+    }
+}
+
+void *const g_span_enter = (void *)&span_enter_saved, *const g_span_leave = (void *)&span_leave_saved;
+
+// call dword ptr [p]
+int emit_call_ptr(uint8_t *buf, void *const *p)
+{
+    buf[0] = 0xFF;
+    buf[1] = 0x15;
+    uint32_t a = (uint32_t)(uintptr_t)p;
+    memcpy(buf + 2, &a, 4);
+    return 6;
+}
+
 int reg_code(const std::string &r)
 {
     static const char *names[] = {"eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"};
@@ -144,8 +186,9 @@ int reg_code(const std::string &r)
     return -1;
 }
 
-// Generate the thunk described in dispatch.h. Returns nullptr on a bad spec.
-void *make_thunk(const xd3d::Hle &h)
+// Generate the thunk described in dispatch.h. Returns nullptr on a bad spec. `span`: a D3D library call, timed for the
+// engine's load meter (game_load.cpp).
+void *make_thunk(const xd3d::Hle &h, bool span)
 {
     std::vector<std::string> params;
     {
@@ -168,6 +211,7 @@ void *make_thunk(const xd3d::Hle &h)
     uint8_t buf[256];
     int n = 0;
     int saved = 0;
+    if (span) n += emit_call_ptr(buf + n, &g_span_enter);
     buf[n++] = 0x51; // push ecx
     buf[n++] = 0x52; // push edx
     saved = 2;
@@ -196,6 +240,7 @@ void *make_thunk(const xd3d::Hle &h)
     memcpy(buf + n, &impl, 4);
     n += 4;
     buf[n++] = 0xFF; buf[n++] = 0xD0; // call eax (impl is __stdcall: pops its parameters)
+    if (span) n += emit_call_ptr(buf + n, &g_span_leave);
     if (!h.returns) buf[n++] = 0x58; // pop eax
     buf[n++] = 0x5A; // pop edx
     buf[n++] = 0x59; // pop ecx
@@ -256,6 +301,25 @@ bool install_d3d_hooks(const BuildProfile &profile)
     }
     std::sort(g_funcs.begin(), g_funcs.end(), [](const LibFunc &a, const LibFunc &b) { return a.addr < b.addr; });
     g_int3_hook.assign(g_funcs.size(), false);
+    // Ninja Gaiden Black's load meter: the calls into its D3D library's code that take the time are timed
+    // (game_load.cpp): draws, push buffers, waits, presents, texture binds and shader loads. Not the state setters the
+    // game makes ten thousand of a frame (timing every call cost 0.3-0.5 ms a frame, r652/r653), nor DSound's, XPP's
+    // or XNet's (their replacements sit in the same tables).
+    game_load::install(!profile.black && !profile.aux);
+    uint32_t d3d_lo = ~0u, d3d_hi = 0;
+    for (const LibFunc &f : kNgbD3D) {
+        d3d_lo = std::min(d3d_lo, f.addr);
+        d3d_hi = std::max(d3d_hi, f.addr + f.size);
+    }
+    static const char *const kHeavy[] = {"Draw", "RunPushBuffer", "Clear", "BlockOn", "BlockUntil", "Swap", "Present", "Lock",
+                                         "SetRenderTarget", "CopyRects", "KickOff", "SetTexture", "EndVisibilityTest",
+                                         "CreatePixelShader", "CreateVertexShader", "LoadVertexShader", "PersistDisplay"};
+    auto timed = [&](const Hle &h) {
+        if (!game_load::active() || h.addr < d3d_lo || h.addr >= d3d_hi) return false;
+        for (const char *k : kHeavy)
+            if (strstr(h.name, k) && !strstr(h.name, "SetTextureState")) return true;
+        return false;
+    };
 
     // The HLE tables hold BLACK's addresses; for another build nothing matches and every library function stops on
     // its first call, which is the state the port is brought up from (one function at a time, from the log).
@@ -311,7 +375,7 @@ bool install_d3d_hooks(const BuildProfile &profile)
         }
         void *target;
         if (h) {
-            target = make_thunk(*h);
+            target = make_thunk(*h, timed(*h));
             if (!target) {
                 logf("hooks: bad parameter spec '%s' for %s", h->params, h->name);
                 return false;
@@ -345,7 +409,7 @@ bool install_d3d_hooks(const BuildProfile &profile)
             continue;
         }
         if (!found && r.impl) { // replacement outside the library sections (BLACK: InsertFence-style LTCG strays)
-            write_jmp((uint8_t *)(uintptr_t)r.addr, make_thunk(r));
+            write_jmp((uint8_t *)(uintptr_t)r.addr, make_thunk(r, timed(r)));
             replaced++;
         }
     }

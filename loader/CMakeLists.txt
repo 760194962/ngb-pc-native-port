@@ -25,6 +25,7 @@ add_library(blackrt SHARED
   src/xthread.cpp
   src/hooks.cpp
   src/timing.cpp
+  src/game_load.cpp
   src/fov.cpp
   src/ngb_aspect.cpp
   src/ngb_exitmenu.cpp

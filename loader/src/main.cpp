@@ -75,6 +75,8 @@ void usage()
            "  --strict          stop at the first call to an unimplemented kernel function\n"
            "  --timeout <sec>   exit after this many seconds\n"
            "  --multicore       do not pin the process to one CPU\n"
+           "  --original-load   the engine measures its load with the port's Direct3D time in it (it then sheds\n"
+           "                    the shadow and HUD on a slower PC; comparing)\n"
            "  --game-cpu N      run the game threads on logical CPU N (default: the last physical core)\n"
            "  --skip-videos     play the 9-second logo video instead of the others (dev: unskippable intro/briefings)\n"
            "  --shot-every N    with --screenshot: every N frames (default 60)\n"
@@ -228,6 +230,7 @@ bool parse_args()
         else if (a == L"--coverage") {
             if (!next(g_cfg.coverage)) return false;
         }
+        else if (a == L"--original-load") g_cfg.original_load = true;
         else if (a == L"--tsc-divisor") {
             std::wstring v;
             if (!next(v)) return false;

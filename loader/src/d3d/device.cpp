@@ -15,6 +15,7 @@
 #include "d3d/perfhud.h"
 #include "d3d/pshader.h"
 #include "perf.h"
+#include "game_load.h"
 #include "d3d/pushbuf.h"
 #include "d3d/state.h"
 #include "d3d/vshader.h"
@@ -1835,6 +1836,7 @@ void check_render_size()
 uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
 {
     DTRACE("0x%x", Flags);
+    game_load::on_swap(); // the engine's load figure for the frame it hands over (game_load.cpp)
     pb_flush();
     perf::swap_begin();
     pace_swap();
