@@ -142,7 +142,7 @@ struct Config {
     // already doubles the framebuffer like the Xbox's video DAC did (BLACK's art uses 0x80 = full brightness).
     float gain = 1.0f;
     bool ramp = true;          // apply the game's gamma ramp (fades, brightness); --no-ramp = identity
-    bool aa = true;            // post-process anti-aliasing on the final picture (--no-aa, F9 toggles)
+    bool aa = true;            // post-process anti-aliasing on the final picture (--no-aa)
     bool info_only = false;    // print XBE info and exit
     bool force = false;        // run even if the XBE is not the build the address tables were made for
     unsigned timeout_s = 0;    // exit after N seconds (0 = never)

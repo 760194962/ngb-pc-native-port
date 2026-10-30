@@ -111,7 +111,7 @@ void usage()
            "                    next to black.exe)\n"
            "  --gain K          output gain after the game's gamma ramp (default 1.0; F5/F6 adjust live)\n"
            "  --no-ramp         ignore the game's gamma ramp (no fades, half brightness: the raw framebuffer)\n"
-           "  --no-aa           no anti-aliasing (default: edge-directed post filter; F9 toggles)\n"
+           "  --no-aa           no anti-aliasing (default: edge-directed post filter)\n"
            "  --vsync           wait for the display's refresh when presenting (black.ini vsync)\n"
            "  --perfhud         the performance overlay: frame rate, GPU, CPU, memory, disk (black.ini perfhud)\n"
            "  --aniso N         anisotropic texture filtering 2-16 (black.ini aniso; 1 = as the game sets)\n"
