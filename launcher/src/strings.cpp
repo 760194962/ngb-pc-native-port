@@ -127,7 +127,7 @@ const Pair kText[(int)Str::Count] = {
     {L"按窗口或屏幕的实际像素", L"The window's or screen's own pixels"},
     {L"（原版）", L" (original)"},
     {L"（默认）", L" (default)"},
-    {L"倍数越高越清晰，也越吃显卡。宽度最多 8192（Direct3D 9 的上限）。", L"Higher is sharper and heavier on the graphics card. The width tops out at 8192 (Direct3D 9's limit)."},
+    {L"倍数越高越清晰，也越吃显卡。数字是游戏内部画面的像素（主机画面横向拉伸显示，16:9 内部再加宽 4/3），不是屏幕比例。宽度最多 8192。", L"Higher is sharper and heavier on the GPU. Sizes are the internal picture, shown stretched sideways (16:9: 4/3 wider), not the screen's shape. Max width 8192."},
     {L"带边框的窗口，可拖动、改大小", L"A framed window you can move and resize"},
     {L"独占屏幕，按桌面分辨率显示", L"Takes over the screen at the desktop resolution"},
     {L"铺满屏幕的无边框窗口", L"Borderless, fills the screen"},

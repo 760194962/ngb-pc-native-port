@@ -157,8 +157,10 @@ std::atomic<bool> g_force_rebuild{false};  // re-create the host targets even at
 D3DRECT g_scissor;          // the game's scissor rectangle (Xbox pixels) and whether it is on, to re-apply after a rescale
 bool g_scissor_on;
 
-// The render size: --resolution (WxH, H, native) or --scale. x and y are separate factors, so any size works;
-// in widescreen a picture with square pixels has x = 4/3 y. Kept within Direct3D 9's 8192 texture limit.
+// The render size: --resolution (WxH, H, native) or --scale. x and y are separate factors, so any size works.
+// The 720x480 buffer is shown stretched (3:2 as 4:3, its pixels 0.889 wide); widescreen widens x by the shape over
+// 4:3 (16:9: x = 4/3 y, 960x480 at 1x as 16:9), so every shape keeps the console's 0.889 pixel shape, not square
+// pixels. Kept within Direct3D 9's 8192 texture limit.
 void setup_render_scale(int pic_w, int pic_h)
 {
     // the picture's shape over the 720x480 buffer's: 16:9 x 0.75 = 4/3, 21:9 x 0.75 = 7/4; 4:3 square
