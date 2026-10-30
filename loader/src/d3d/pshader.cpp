@@ -240,7 +240,7 @@ void pshader_drop_all()
     g_last_ps = nullptr;
 }
 
-void upload_ps_constants(IDirect3DDevice9 *d)
+void upload_ps_constants(IDirect3DDevice9 *d, bool vertex_fog)
 {
     const uint32_t *rs = render_state();
     note_alternating_constants(rs);
@@ -268,6 +268,9 @@ void upload_ps_constants(IDirect3DDevice9 *d)
     unpack_color(rs[43], c[16]); // PSFinalCombinerConstant0
     unpack_color(rs[44], c[17]); // PSFinalCombinerConstant1
     unpack_color(rs[XRS_FOGCOLOR], c[18]);
+    // FOG.a is the fog factor: from TEXCOORD4 after a translated vertex program; fixed-function vertices (FVF) write
+    // no TEXCOORD4, and an unwritten input could read 0, a draw all in the fog colour, so their factor is 1 (no fog)
+    c[18][3] = vertex_fog ? 1.0f : 0.0f;
     for (int s = 0; s < 4; s++) {
         const uint32_t *ts = texture_state(s);
         memcpy(&c[19 + s][0], &ts[22], 4); // BUMPENVMAT00

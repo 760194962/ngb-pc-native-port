@@ -75,6 +75,8 @@ void usage()
            "  --strict          stop at the first call to an unimplemented kernel function\n"
            "  --timeout <sec>   exit after this many seconds\n"
            "  --multicore       do not pin the process to one CPU\n"
+           "  --original-load   the engine measures its load with the port's Direct3D time in it (it then sheds\n"
+           "                    the shadow and HUD on a slower PC; comparing)\n"
            "  --game-cpu N      run the game threads on logical CPU N (default: the last physical core)\n"
            "  --skip-videos     play the 9-second logo video instead of the others (dev: unskippable intro/briefings)\n"
            "  --shot-every N    with --screenshot: every N frames (default 60)\n"
@@ -228,6 +230,7 @@ bool parse_args()
         else if (a == L"--coverage") {
             if (!next(g_cfg.coverage)) return false;
         }
+        else if (a == L"--original-load") g_cfg.original_load = true;
         else if (a == L"--tsc-divisor") {
             std::wstring v;
             if (!next(v)) return false;
@@ -433,14 +436,40 @@ void pin_to_one_cpu()
 {
     DWORD_PTR proc = 0, sys = 0;
     GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys);
-    // Physical cores (logical CPU masks); hyperthreads of one core share it.
+    // Physical cores (logical CPU masks); hyperthreads of one core share it. Only the fastest kind of core on a hybrid
+    // CPU (the highest EfficiencyClass): on Intel's 12th generation and later "the last core" is an efficiency core,
+    // and the game thread there took 8.5 ms a frame against 6.2 ms on a performance core (i5-12500H, chapter 1:
+    // r655 / r662). On other CPUs every core has the same class and the choice is as before.
     std::vector<DWORD_PTR> cores;
-    DWORD len = 0;
-    GetLogicalProcessorInformation(nullptr, &len);
-    std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> info(len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION) + 1);
-    if (len && GetLogicalProcessorInformation(info.data(), &len))
-        for (DWORD i = 0; i < len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION); i++)
-            if (info[i].Relationship == RelationProcessorCore && (info[i].ProcessorMask & proc)) cores.push_back(info[i].ProcessorMask & proc);
+    int best_class = -1;
+    {
+        DWORD len = 0;
+        GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &len);
+        std::vector<uint8_t> buf(len);
+        std::vector<std::pair<DWORD_PTR, int>> all;
+        if (len && GetLogicalProcessorInformationEx(RelationProcessorCore, (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)buf.data(), &len)) {
+            for (DWORD at = 0; at < len;) {
+                auto *r = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)(buf.data() + at);
+                if (r->Relationship == RelationProcessorCore && r->Processor.GroupCount && r->Processor.GroupMask[0].Group == 0 &&
+                    (r->Processor.GroupMask[0].Mask & proc)) {
+                    int cls = r->Processor.EfficiencyClass;
+                    all.push_back({(DWORD_PTR)(r->Processor.GroupMask[0].Mask & proc), cls});
+                    best_class = std::max(best_class, cls);
+                }
+                at += r->Size;
+            }
+        }
+        for (auto &c : all)
+            if (c.second == best_class) cores.push_back(c.first);
+    }
+    if (cores.empty()) { // the older call (no core classes)
+        DWORD len = 0;
+        GetLogicalProcessorInformation(nullptr, &len);
+        std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> info(len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION) + 1);
+        if (len && GetLogicalProcessorInformation(info.data(), &len))
+            for (DWORD i = 0; i < len / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION); i++)
+                if (info[i].Relationship == RelationProcessorCore && (info[i].ProcessorMask & proc)) cores.push_back(info[i].ProcessorMask & proc);
+    }
     DWORD_PTR one = 0, core = 0;
     if (g_cfg.game_cpu >= 0 && g_cfg.game_cpu < (int)(8 * sizeof(DWORD_PTR)) && (proc & ((DWORD_PTR)1 << g_cfg.game_cpu))) {
         one = (DWORD_PTR)1 << g_cfg.game_cpu;
@@ -457,8 +486,9 @@ void pin_to_one_cpu()
     // Keep the core's other hyperthread free: threads created from now on (driver, audio) use the other cores.
     DWORD_PTR sibling = core & ~one;
     if (sibling && (proc & ~core)) SetProcessAffinityMask(GetCurrentProcess(), proc & ~sibling);
-    logf("cpu: game threads pinned to CPU mask 0x%lx like the single-core Xbox%s; host threads use the others; --game-cpu N to "
-         "choose, --multicore to disable", (unsigned long)one, sibling && (proc & ~core) ? " (its hyperthread sibling left idle)" : "");
+    logf("cpu: game threads pinned to CPU mask 0x%lx like the single-core Xbox%s%s; host threads use the others; --game-cpu N to "
+         "choose, --multicore to disable", (unsigned long)one, sibling && (proc & ~core) ? " (its hyperthread sibling left idle)" : "",
+         best_class > 0 ? " (a performance core of this hybrid CPU)" : "");
 }
 
 } // namespace
@@ -653,7 +683,8 @@ extern "C" __declspec(dllexport) int __cdecl BlackMain(void *reserve, unsigned r
     if (!g_image_mapped) return code; // --info, bad arguments, or failure before the stub was overwritten
     logc("exiting with code %d", code);
     // The caller's code has been replaced by the XBE, and game threads may hold locks: terminate here.
-    // log_line already flushes stdout and the log; do not flush a pipe that Proton may have stopped reading.
+    // logc above already flushed stdout and the log. If a write to a pipe Proton stopped reading ever blocks, it blocks
+    // there; the exit watchdog ends the process 3 s after the exit was asked for.
     TerminateProcess(GetCurrentProcess(), (UINT)code);
     for (;;) Sleep(INFINITE);
 }

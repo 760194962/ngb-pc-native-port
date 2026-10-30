@@ -267,6 +267,12 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
         break;
+    case WM_KEYDOWN: // F9: a performance recording (perf.cpp: stops on F9 again or after 60 s)
+        if (wp == VK_F9 && !(lp & (1 << 30))) {
+            perf::toggle_by_key();
+            return 0;
+        }
+        break;
     case WM_SYSCHAR: // the Alt+Enter character would ring the default beep
         if (wp == VK_RETURN) return 0;
         break;

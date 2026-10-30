@@ -103,7 +103,7 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
          "  float4 tc[4] = { I.tc0, I.tc1, I.tc2, I.tc3 };\n"
          "  float4 t0 = 0, t1 = 0, t2 = 0, t3 = 0;\n"
          "  float d0 = 0, d1 = 0, d2 = 0, d3 = 0;\n" // dot-product results of DOTPRODUCT stages
-         "  float4 FOGR = float4(fogColor.rgb, saturate(I.tc4.x));\n";
+         "  float4 FOGR = float4(fogColor.rgb, fogColor.w > 0.5 ? saturate(I.tc4.x) : 1);\n"; // c18.w: tc4 written
     // ---- texture stages ----
     for (int i = 0; i < 4; i++) {
         uint32_t mode = (d.PSTextureModes >> (5 * i)) & 0x1F;

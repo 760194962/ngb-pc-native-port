@@ -1508,14 +1508,14 @@ bool begin_draw(DrawCtx &ctx)
                                                     fvf_vs && (vsh & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
     set_ps(d, hps);
     if (ps && render_state()[XRS_FOGENABLE] && psh_reads_fog()) {
-        // A pixel shader that reads its FOG register with fog on: the translator's FOG has the fog colour but alpha 1
-        // (the vertex fog factor is not passed to the host shader). None in the traced scenes; note one if it comes.
+        // A pixel shader that reads its FOG register with fog on: FOG.a is the fog factor a translated vertex program
+        // passes in TEXCOORD4 (1.1.8-t, the underwater tint); with fixed-function vertices it is 1. Noted once or so.
         static int noted;
-        if (noted++ < 4) logf("[draw] frame %u: pixel shader 0x%x reads FOG with fog enabled (fog factor not emulated; docs/04 §3.21)",
-                              g_frame_count.load(), g_st.pixel_shader);
+        if (noted++ < 4) logf("[draw] frame %u: pixel shader 0x%x reads FOG with fog enabled (%s)", g_frame_count.load(),
+                              g_st.pixel_shader, fvf_vs ? "fixed-function vertices: fog factor 1" : "fog factor from the vertex program");
         if (noted == 1 && g_cfg.trace_fog_ps && !g_cfg.debug_frame) g_cfg.debug_frame = g_frame_count + 1; // --trace-fog-ps
     }
-    if (ps && hps) upload_ps_constants(d);
+    if (ps && hps) upload_ps_constants(d, !fvf_vs);
     else if (ps) apply_pixel_shader_fallback(d);
     else if (hps) upload_ffp_constants(d);
     uint32_t h = g_st.vertex_shader;

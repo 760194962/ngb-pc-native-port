@@ -13,7 +13,8 @@ struct PixelShaderDef;
 // Host translation of the program currently in the render states (cached by content), or null.
 IDirect3DPixelShader9 *ps_host_shader();
 // c0-c17 combiner constants, c18 fog color, c19-c22 bump-env matrices.
-void upload_ps_constants(IDirect3DDevice9 *d);
+// vertex_fog: the vertex shader is a translated program, which passes the fog factor in TEXCOORD4 (nv2a_vsh.cpp)
+void upload_ps_constants(IDirect3DDevice9 *d, bool vertex_fog);
 void pshader_drop_all(); // a new device: every shader made (made again on demand)
 // What the library's SetPixelShaderConstant does: pack to ARGB8 and route through the shader's
 // PSC0/PSC1/final-combiner mappings into the PSCONSTANT render states.

@@ -2,6 +2,7 @@
 
 #include "d3d/device.h"
 #include "d3d/draw.h"
+#include "game_load.h"
 
 #include <cstring>
 #include <set>
@@ -114,7 +115,8 @@ void method(uint32_t m, uint32_t v)
             noted++;
             logf("[pb] push-buffer callback %s(0x%08x)", sym_name(g_callback_fn).c_str(), v);
         }
-        if (g_callback_fn) ((void(__cdecl *)(uint32_t))(uintptr_t)g_callback_fn)(v);
+        // the engine's GPU timer (0x30E060) is answered by game_load.cpp
+        if (g_callback_fn && !game_load::gpu_callback(g_callback_fn)) ((void(__cdecl *)(uint32_t))(uintptr_t)g_callback_fn)(v);
         return;
     }
     }

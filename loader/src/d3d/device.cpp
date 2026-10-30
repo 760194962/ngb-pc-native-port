@@ -15,6 +15,7 @@
 #include "d3d/perfhud.h"
 #include "d3d/pshader.h"
 #include "perf.h"
+#include "game_load.h"
 #include "d3d/pushbuf.h"
 #include "d3d/state.h"
 #include "d3d/vshader.h"
@@ -23,7 +24,6 @@
 
 #include <d3dcompiler.h>
 #include <mmsystem.h>
-#include <intrin.h>
 
 #include <algorithm>
 #include <cmath>
@@ -71,6 +71,7 @@ struct HostRT {
     IDirect3DTexture9 *reduced = nullptr; // at its Xbox size, box-filtered: what a small buffer is drawn from (reduced_rt)
     uint32_t reduced_epoch = ~0u;
     bool blurred = false;                 // drawn from another Xbox-size buffer (the glow's last blur step)
+    bool from_bigger = false;             // filled by drawing a bigger buffer into it (a screen copy, a reduction step)
     IDirect3DTexture9 *soft = nullptr, *soft_tmp = nullptr; // softened for the picture (softened_rt)
     uint32_t soft_epoch = ~0u;
 };
@@ -203,33 +204,20 @@ bool native_size(uint32_t xw, uint32_t xh) { return g_cfg.effects_native && smal
 // made at the render scale, smaller than the target, and nothing drew into it (Murai without a shadow, 2026-10-25).
 std::unordered_set<uint64_t> g_shadow_keys;
 
-// Buffers the game fills by drawing a bigger one into them (the glow's 256x256, 256x128 and 128x128, screen copies):
-// kept at their Xbox size. Their blur takes 4 taps 2 and 6 texels apart (FUN_00314430); at the Xbox size the copies
-// it makes lie a texel or three apart and the final stretch over the screen melts them into one soft glow, as on the
+// The glow's reduction chain (its 256x256, 256x128 and 128x128): kept at their Xbox size. Their blur takes 4 taps
+// 2 and 6 texels apart (FUN_00314430); at the Xbox size the copies it makes lie a texel or three apart and the final
+// stretch over the screen melts them into one soft glow, as on the
 // Xbox (the user's xemu picture, 2026-10-22). At 4 x 3 they stood 8-24 host pixels apart: sharp stripes around lamps
 // and Ryu's legs that jumped as the lights moved (r414, r420). Recorded by rt_texture_for when such a draw is first
 // seen; the targets are then made again at 1x (request_render_rebuild).
+// The chain is found by what its buffers do, not by their size: a buffer drawn down from a screen copy (a buffer that
+// was itself filled from a bigger one: from_bigger) starts it, and what is drawn down from a chain buffer joins it. The
+// copies stay at the render scale and are reduced to their Xbox size when drawn into the chain (reduced_rt): the
+// glow's 256x256, and the water and heat passes' 256x256 and 512x256, which are only sampled back over the picture (at
+// 1x the character behind the water was magnified into blocks: the user's water test, 2026-10-28). Reducing the
+// 256x256 instead of the whole picture costs less (+0.36 ms a frame on the Iris Xe for the picture, r625-r632). Each
+// level has its own addresses (0x02D38000 in chapter 1, 0x015E5000 elsewhere: run/cmp_fix), so nothing is fixed.
 std::unordered_set<uint64_t> g_xbox_size_keys;
-
-// The glow's small blur chain: 256x128 and 128x128 keep the Xbox-size copy and the softening. 256x256 is the
-// screen copy the water/heat path draws the picture into; keeping it at 1x magnified the character behind the
-// water into blocks (the user's water test, 2026-10-28). It stays at the render scale; only the glow's last two
-// small steps are reduced.
-static bool glow_effect_size(uint32_t w, uint32_t h)
-{
-    return (w == 256 && h == 128) || (w == 128 && h == 128);
-}
-
-// A second guard for the water/heat pass: its draw returns through 0x002D01E0. Nothing in that pass may take the
-// Xbox-size path even if a target happens to have one of the glow's sizes.
-static bool water_effect_call()
-{
-    const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress();
-    const uint32_t *top = (const uint32_t *)(uintptr_t)__readfsdword(0x04);
-    for (const uint32_t *p = sp; p < top && p < sp + 0x800; p++)
-        if (*p == 0x002D01E0) return true;
-    return false;
-}
 
 // The scale a host buffer for Xbox memory `key` (w x h Xbox pixels) is made at
 void buffer_scale(uint64_t key, uint32_t w, uint32_t h, float *sx, float *sy)
@@ -947,7 +935,6 @@ IDirect3DTexture9 *smoothed_rt(HostRT &h, uint32_t draw_serial)
 // this copy instead, the small buffers get what the Xbox gave them.
 IDirect3DTexture9 *reduced_rt(HostRT &h)
 {
-    if (water_effect_call() || !glow_effect_size(h.xw, h.xh)) return h.tex;
     if (h.reduced && h.reduced_epoch == h.epoch) return h.reduced;
     if (!g_box_ps && !g_box_tried) {
         g_box_tried = true;
@@ -982,7 +969,6 @@ IDirect3DPixelShader9 *g_soft_ps;
 
 IDirect3DTexture9 *softened_rt(HostRT &h)
 {
-    if (water_effect_call() || !glow_effect_size(h.xw, h.xh)) return h.tex;
     if (h.soft && h.soft_epoch == h.epoch) return h.soft;
     if (!g_soft_ps && !g_soft_tried) {
         g_soft_tried = true;
@@ -1068,11 +1054,11 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
     // 256x256, then 256x128 and 128x128 (r417: 256x256 is not a "small buffer", its height is over half of 480, so
     // that rule missed it). Each case is logged once (size, target, filter).
     HostRT &src = it->second;
-    // A buffer drawn into one of at most half its size (in Xbox pixels) whose own pixels are finer than the Xbox's, or
-    // one already kept at its Xbox size: the target is kept at its Xbox size too (the glow's 256x256 from the back
-    // buffer, then its 256x128 and 128x128; r417: 256x256 is not a "small buffer", its height is over half of 480).
-    // A scaled source is read from its Xbox-size copy, filtered or not (a point sample of the 2880-wide picture flickers
-    // the same way). Each case is logged once (size, target, filter).
+    // A buffer drawn into one of at most half its size (in Xbox pixels): the target is marked as filled from a bigger
+    // one. If the source was itself filled from a bigger one (the glow's 256x256 from the back buffer, drawn into its
+    // 256x128), or is in the chain, the target joins the reduction chain. A scaled source drawn into a buffer at its Xbox
+    // size is read from its Xbox-size copy, filtered or not (a point sample of the finer picture flickers the same way).
+    // Each case is logged once (size, target, filter).
     bool src_xbox = g_xbox_size_keys.count(key) != 0;
     uint64_t cur_area = (uint64_t)g_cur_xw * g_cur_xh, src_area = (uint64_t)src.xw * src.xh;
     bool down = t != g_cur_rt && cur_area * 2 <= src_area;
@@ -1085,21 +1071,24 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
             logf("[d3d] frame %u: %ux%u buffer 0x%08x drawn into a %ux%u one (%s)%s", g_frame_count.load(), src.xw, src.xh,
                  tex->Data, g_cur_xw, g_cur_xh, linear ? "filtered" : "point", src.sx > 1.5f ? ": from its Xbox-size copy" : "");
         }
-        if (!water_effect_call() && glow_effect_size(g_cur_xw, g_cur_xh) && cur != g_rts.end() && g_xbox_size_keys.insert(g_cur_key).second) {
-            logf("[d3d] frame %u: the %ux%u buffer it is drawn into is kept at its Xbox size from now on", g_frame_count.load(),
-                 g_cur_xw, g_cur_xh);
+        // never the back buffer (nothing bigger is drawn into it, but it must stay at the render scale whatever happens)
+        if (cur != g_rts.end() && cur->second.tex != host_rt(g_backbuffer).tex) cur->second.from_bigger = true;
+        if ((src_xbox || src.from_bigger) && cur != g_rts.end() && g_xbox_size_keys.insert(g_cur_key).second) {
+            logf("[d3d] frame %u: the %ux%u buffer it is drawn into is kept at its Xbox size from now on (%s)", g_frame_count.load(),
+                 g_cur_xw, g_cur_xh, src_xbox ? "a step of the reduction chain" : "it starts a reduction chain");
             if (cur->second.sx != 1.0f) request_render_rebuild();
         }
     }
     // An Xbox-size buffer drawn into another (the glow's blur steps) marks the target; such a result drawn onto
     // something bigger (the picture) is softened first (softened_rt)
-    if (src_xbox && key != g_cur_key && g_xbox_size_keys.count(g_cur_key) && cur != g_rts.end() && !cur->second.blurred) {
+    if ((src_xbox || src.from_bigger) && key != g_cur_key && g_xbox_size_keys.count(g_cur_key) && cur != g_rts.end() &&
+        !cur->second.blurred) {
         cur->second.blurred = true;
         logf("[d3d] frame %u: the %ux%u buffer is a blur of another: softened when drawn over the picture", g_frame_count.load(),
              g_cur_xw, g_cur_xh);
     }
     if (src.blurred && t != g_cur_rt && cur_area > src_area) return softened_rt(src);
-    if (down && src.sx > 1.5f && glow_effect_size(g_cur_xw, g_cur_xh)) return reduced_rt(src);
+    if (down && src.sx > 1.5f && cur != g_rts.end() && cur->second.sx < 1.5f) return reduced_rt(src);
     if (linear && src.sx > 1.5f && small_buffer(src.xw, src.xh)) return smoothed_rt(src, draw_serial);
     if (t != g_cur_rt) return t;
     static uint32_t snap_serial = ~0u;
@@ -1847,6 +1836,7 @@ void check_render_size()
 uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
 {
     DTRACE("0x%x", Flags);
+    game_load::on_swap(); // the engine's load figure for the frame it hands over (game_load.cpp)
     pb_flush();
     perf::swap_begin();
     pace_swap();
