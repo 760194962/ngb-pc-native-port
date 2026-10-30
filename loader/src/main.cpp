@@ -653,7 +653,8 @@ extern "C" __declspec(dllexport) int __cdecl BlackMain(void *reserve, unsigned r
     if (!g_image_mapped) return code; // --info, bad arguments, or failure before the stub was overwritten
     logc("exiting with code %d", code);
     // The caller's code has been replaced by the XBE, and game threads may hold locks: terminate here.
-    // log_line already flushes stdout and the log; do not flush a pipe that Proton may have stopped reading.
+    // logc above already flushed stdout and the log. If a write to a pipe Proton stopped reading ever blocks, it blocks
+    // there; the exit watchdog ends the process 3 s after the exit was asked for.
     TerminateProcess(GetCurrentProcess(), (UINT)code);
     for (;;) Sleep(INFINITE);
 }

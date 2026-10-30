@@ -2324,7 +2324,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     }
     case WM_MOUSEWHEEL:
         if (g.list_open && g.list_scroll_max > 0) {
-            int delta = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
+            static int rest; // a high-resolution wheel (touchpads, the Steam Deck's) sends parts of a notch
+            rest += GET_WHEEL_DELTA_WPARAM(wp);
+            int delta = rest / WHEEL_DELTA;
+            rest -= delta * WHEEL_DELTA;
             g.list_scroll -= delta;
             if (g.list_scroll < 0) g.list_scroll = 0;
             if (g.list_scroll > g.list_scroll_max) g.list_scroll = g.list_scroll_max;
