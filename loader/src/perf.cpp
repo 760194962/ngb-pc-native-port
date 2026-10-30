@@ -109,7 +109,6 @@ struct Recording {
 };
 
 std::atomic<bool> g_toggle_req{false};
-std::atomic<uint64_t> g_key_deadline{0}; // F9: GetTickCount64 at which a recording it started stops by itself (0 none)
 std::atomic<int> g_state{0}; // 0 idle, 1 recording, 2 writing the report
 volatile uint8_t g_phase;
 volatile uint32_t g_frame_index;
@@ -708,14 +707,11 @@ void start()
     g_sampler = std::thread(sampler_main);
     g_on = true;
     g_state = 1;
-    logf("[perf] recording started%s", g_key_deadline ? " (F9; F9 again or 60 s to stop)" : "");
-    if (g_key_deadline) // 性能记录中: "recording performance"
-        host3d::set_title((std::wstring(host3d::game_title()) + L"  [F9 \u6027\u80FD\u8BB0\u5F55\u4E2D / recording]").c_str());
+    logf("[perf] recording started");
 }
 
 void stop()
 {
-    if (g_key_deadline.exchange(0)) host3d::set_title(host3d::game_title());
     g_on = false;
     g_sampler_run = false;
     if (g_sampler.joinable()) g_sampler.join();
@@ -778,14 +774,6 @@ Scope::~Scope()
 void Scope::pause(int64_t now) { g_cat_ticks[cat] += now - start; }
 
 void toggle() { g_toggle_req = true; }
-
-// F9 (host.cpp): the player starts a recording just before a stutter they want to show, e.g. a scene change; it stops
-// by itself after 60 s so a forgotten one does not run on. Applied by the render thread at the next frame.
-void toggle_by_key()
-{
-    if (g_state == 0) g_key_deadline = GetTickCount64() + 60000;
-    g_toggle_req = true;
-}
 bool recording() { return g_state == 1; }
 
 void swap_begin()
@@ -817,7 +805,7 @@ void frame_end(uint32_t render_w, uint32_t render_h)
                  rc = g_h_rt_copies.exchange(0), r = g_h_reads.exchange(0), rkb = g_h_read_kb.exchange(0),
                  bus = g_h_build_us.exchange(0), cached = g_h_cached.exchange(0);
         static int logged;
-        if (dt > (g_on ? 25.0 : 50.0) && frames > 2 && logged < 300) {
+        if (dt > 50.0 && frames > 2 && logged < 300) {
             logged++;
             logf("[hitch] frame %u took %.0f ms: new shaders %u (%.0f ms building, %u from the cache), texture uploads %u (%u KB), "
                  "render target copies %u, file reads %u (%u KB)", frames, dt, c, bus / 1000.0, cached, u, ukb, rc, r, rkb);
@@ -850,7 +838,6 @@ void frame_end(uint32_t render_w, uint32_t render_h)
         g_frame_index = (uint32_t)g_rec->frames.size();
         g_phase = kWork;
     }
-    if (g_state == 1 && g_key_deadline && GetTickCount64() >= g_key_deadline) g_toggle_req = true;
     if (g_toggle_req.exchange(false)) {
         if (g_state == 0) start();
         else if (g_state == 1) stop();

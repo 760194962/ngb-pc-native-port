@@ -23,7 +23,6 @@ enum Cat : int {
 extern volatile bool g_on; // recording (cheap test for the hot paths)
 
 void toggle();             // start or stop (any thread; applied by the render thread at the next frame)
-void toggle_by_key();      // F9 in the window: as toggle, and a recording started so stops by itself after 60 s
 bool recording();
 
 // Render thread, from D3DDevice_Swap.
@@ -38,9 +37,8 @@ void add_compile();
 void add_rt_copy();
 void add_file_read(uint32_t bytes); // game file reads (kernel NtReadFile)
 void add_shader_build(double ms, bool from_cache); // one cached_compile (d3d/shader_cache.cpp): its time
-// Always on, recording or not: a frame over 50 ms (25 ms while recording) is logged as "[hitch]" with what that frame
-// did (shader compiles, texture uploads, render target copies, file reads), so a stutter the player meets shows in
-// black.log.
+// Always on, recording or not: a frame over 50 ms is logged as "[hitch]" with what that frame did (shader compiles,
+// texture uploads, render target copies, file reads), so a stutter the player meets shows in black.log.
 
 // The report finished writing: the window shows it (host.cpp, WM_APP_PERF).
 const char *last_report_text();
