@@ -292,8 +292,18 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
 
 IDirect3DPixelShader9 *ffp_reselect() { return ffp_pixel_shader(g_last_diffuse, g_last_specular, g_last_pretransformed); }
 
+namespace {
+float g_quad_sent[2][4][4]; // c1-c4, c5-c8 as last sent
+bool g_quad_valid;          // false after another writer (the combiners' constants) or a new device
+}
+
 void upload_ffp_quad_constants(IDirect3DDevice9 *d, const float clamp[4][4], const float size[4][4])
 {
+    if (g_quad_valid && !memcmp(g_quad_sent[0], clamp, sizeof g_quad_sent[0]) && !memcmp(g_quad_sent[1], size, sizeof g_quad_sent[1]))
+        return;
+    memcpy(g_quad_sent[0], clamp, sizeof g_quad_sent[0]);
+    memcpy(g_quad_sent[1], size, sizeof g_quad_sent[1]);
+    g_quad_valid = true;
     d->SetPixelShaderConstantF(1, &clamp[0][0], 4);
     d->SetPixelShaderConstantF(5, &size[0][0], 4);
 }
@@ -308,7 +318,11 @@ void upload_ffp_constants(IDirect3DDevice9 *d)
 }
 
 // c0 rewritten by another (the combiners' constants, pshader.cpp) or a new device: the next upload sends it
-void ffp_forget_constants() { g_ffp_c0[0] = -1; }
+void ffp_forget_constants()
+{
+    g_ffp_c0[0] = -1;
+    g_quad_valid = false;
+}
 
 void ffp_drop_all()
 {

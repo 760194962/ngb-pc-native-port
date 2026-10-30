@@ -1966,12 +1966,23 @@ void quad_snap_shader(const QuadSnap &q, const RhwTexScale *ts, int nts)
         for (int i = 0; i < q.sets; i++)
             if (q.off[i] == off) k = i;
         if (k < 0) continue;
-        IDirect3DBaseTexture9 *bt = nullptr;
-        if (FAILED(d->GetTexture(s, &bt)) || !bt) continue;
-        D3DSURFACE_DESC desc = {};
-        bool ok = bt->GetType() == D3DRTYPE_TEXTURE && SUCCEEDED(((IDirect3DTexture9 *)bt)->GetLevelDesc(0, &desc));
-        bt->Release();
-        if (!ok || !desc.Width || !desc.Height) continue;
+        // the host texture bound to the stage (apply_texture_stages) and its size, asked of Direct3D once per texture
+        IDirect3DBaseTexture9 *bt = g_tex_sent[s];
+        // (keyed by the Xbox header's format and size too: a texture made again may come back at the same address)
+        static IDirect3DBaseTexture9 *size_of[4];
+        static uint32_t shape_of[4][2];
+        static D3DSURFACE_DESC desc_of[4];
+        if (!bt) continue;
+        const PixelContainer *pc = (const PixelContainer *)g_st.textures[s];
+        if (bt != size_of[s] || shape_of[s][0] != pc->Format || shape_of[s][1] != pc->Size) {
+            shape_of[s][0] = pc->Format;
+            shape_of[s][1] = pc->Size;
+            desc_of[s] = {};
+            if (bt->GetType() == D3DRTYPE_TEXTURE) ((IDirect3DTexture9 *)bt)->GetLevelDesc(0, &desc_of[s]);
+            size_of[s] = bt;
+        }
+        const D3DSURFACE_DESC &desc = desc_of[s];
+        if (!desc.Width || !desc.Height) continue;
         float u0 = 1e30f, u1 = -1e30f, v0 = 1e30f, v1 = -1e30f;
         for (int v = 0; v < 4; v++) {
             float u = q.centre[k][v][0], t = q.centre[k][v][1];
@@ -1985,10 +1996,8 @@ void quad_snap_shader(const QuadSnap &q, const RhwTexScale *ts, int nts)
         clamp[s][0] = u0, clamp[s][1] = v0, clamp[s][2] = u1, clamp[s][3] = v1;
         size[s][0] = (float)desc.Width, size[s][1] = (float)desc.Height, size[s][2] = 1.0f / desc.Width, size[s][3] = 1.0f / desc.Height;
         stages |= 1u << s;
-        DWORD mag = 0, min = 0;
-        d->GetSamplerState(s, D3DSAMP_MAGFILTER, &mag);
-        d->GetSamplerState(s, D3DSAMP_MINFILTER, &min);
-        if (mag == D3DTEXF_LINEAR || min == D3DTEXF_LINEAR) weighted |= 1u << s;
+        // linear filtering as apply_texture_stages sets it from the Xbox stage (MAGFILTER 3, MINFILTER 4: 2 or over 3)
+        if (tss[3] == 2 || tss[3] > 3 || tss[4] == 2 || tss[4] > 3) weighted |= 1u << s;
     }
     if (!stages || g_st.pixel_shader || g_cfg.host_ffp) return;
     g_ffp_quad_stages = stages;
