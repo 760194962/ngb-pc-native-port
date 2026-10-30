@@ -131,6 +131,7 @@ struct Config {
                               // (on: alpha 0 past the edge, d3d/draw.cpp apply_texture_stages)
     bool sdl_pads = true;     // --no-sdl-pads: XInput pads only (input/sdlpad.cpp)
     bool rhw_edge_fix = true; // press-file "cfg:rhwedge:0": keep XYZRHW quads that stop a pixel short of their target (d3d/draw.cpp)
+    bool quad_snap = true;     // press-file "cfg:quadsnap:0": 2D quads above 1x drawn as before (d3d/draw.cpp quad_snap)
     bool rhw_offset = true;    // press-file "cfg:rhwoffset:0": XYZRHW positions ignore the screen-space offset (comparison)
     bool zview8 = false;       // press-file "cfg:zview8:1": depth views back to A8R8G8B8 (8-bit depth) for comparison
     bool api_count = false;    // --api-count (diagnosis): Direct3D 9 calls by kind per frame (d3d/apicount.cpp)
