@@ -115,6 +115,13 @@ inline const BuildProfile kProfileNgbUs = ngb_family(
     "NINJA GAIDEN BLACK NTSC-U", "df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda", 41,
     L"Ninja Gaiden Black", false);
 
+// The same US release as Redump / extract-xiso dumps have it: byte for byte the above but for the certificate (title
+// name "NINJA GAIDEN Black", region NA, media 0x202 instead of all regions and all media; 20 bytes at 0x192-0x224).
+// The user's E:\games\pc\美版XISO, 2026-10-31.
+inline const BuildProfile kProfileNgbUsRetail = ngb_family(
+    "NINJA GAIDEN BLACK NTSC-U (retail certificate)", "5fa3997b0d518a9db3867ca6ae2942c99e5349fd138f536ff56772e1a0202200", 41,
+    L"Ninja Gaiden Black", false);
+
 // The user's Hurricane edition, Japanese / English (vb-jp-x2.1): x2.1's gameplay changes without the translation.
 inline const BuildProfile kProfileNgbHurricaneJp = ngb_family(
     "NINJA GAIDEN BLACK Hurricane vb-jp-x2.1", "535778c8a4623195c8f320b85d2d139f20ff13c020d40150adaed54cfdeffc38", 41,
@@ -147,6 +154,25 @@ inline const BuildProfile kProfileNinjaTrilogy = {
     {"D3D", "DSOUND", "XPP", nullptr},
     0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTrilogy",
 };
+
+// The US release's two NES programs with the retail certificate (4 bytes at 0x220-0x224, as default.xbe above).
+inline const BuildProfile kProfileNinjaTomoeRetail = {
+    "NINJA GAIDEN BLACK NTSC-U: NinjaTomoe.xbe (NES trilogy, Japanese; retail certificate)",
+    "8d761be1789bb9d000d561debab5bb6c8d7be376d7dec452f6020043e0b653f8",
+    0x5443000D, 31, false,
+    {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTomoe",
+};
+inline const BuildProfile kProfileNinjaTrilogyRetail = {
+    "NINJA GAIDEN BLACK NTSC-U: NinjaTrilogy.xbe (NES trilogy, US; retail certificate)",
+    "c86ed2baa91f204b176b7329bc087ed499b1ecd4146a62bfc493a161a1b44330",
+    0x5443000D, 31, false,
+    {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTrilogy",
+};
+
 inline const uint32_t kFcjQpc[] = {0x0033B5D4};
 inline const BuildProfile kProfileNinjaFCJ = {
     "NINJA GAIDEN BLACK x2.1: NinjaFCJ.xbe (SNES trilogy, Japanese)",
@@ -226,7 +252,8 @@ inline const BuildProfile kProfileNg04Trilogy = {
 inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNgbUs,
                                                 &kProfileNgbHurricaneJp, &kProfileNgbBasicX2, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
                                                 &kProfileNinjaFCJ, &kProfileNinjaFCU, &kProfileNg04Tu,
-                                                &kProfileNg04Tomoe, &kProfileNg04Trilogy, &kProfileNg04Disc};
+                                                &kProfileNg04Tomoe, &kProfileNg04Trilogy, &kProfileNg04Disc,
+                                                &kProfileNgbUsRetail, &kProfileNinjaTomoeRetail, &kProfileNinjaTrilogyRetail};
 
 // The profile whose SHA-256 matches, or nullptr for an unknown build.
 inline const BuildProfile *build_profile_for(const char *sha256_hex)

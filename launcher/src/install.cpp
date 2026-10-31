@@ -151,6 +151,8 @@ const struct {
     {"535778c8a4623195c8f320b85d2d139f20ff13c020d40150adaed54cfdeffc38", Edition::X21Jp, true, L"x2.1 jp"},
     {"00cef52546618eb0149d7895f9042403e95f361b5483aac38933e799c67a50e1", Edition::BasicX2, false, L"x2 basic"},
     {"df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda", Edition::Us, false, L"US"},
+    // the same with the retail certificate (Redump / extract-xiso dumps; build_profile.h kProfileNgbUsRetail)
+    {"5fa3997b0d518a9db3867ca6ae2942c99e5349fd138f536ff56772e1a0202200", Edition::Us, false, L"US"},
     {"bea2a85eea7e6e0ba6c3e201966a46b24b27e25b3307a29bc3de5b4254791308", Edition::Ng04, false, L"NG2004"},
 };
 // Ninja Gaiden (2004)'s own two programs (the SNES trilogy, Japanese and US): x2.1's NinjaFCJ / NinjaFCU before its patch
@@ -166,11 +168,14 @@ const struct {
     const wchar_t *file;
     const char *sha256;
     bool snes;
+    const char *retail; // the same program with the US release's retail certificate (Redump dumps), or nullptr
 } kFiles[] = {
-    {L"NinjaTomoe.xbe", "2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff", false},
-    {L"NinjaTrilogy.xbe", "31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621", false},
-    {L"NinjaFCJ.xbe", "b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31", true},
-    {L"NinjaFCU.xbe", "9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1", true},
+    {L"NinjaTomoe.xbe", "2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff", false,
+     "8d761be1789bb9d000d561debab5bb6c8d7be376d7dec452f6020043e0b653f8"},
+    {L"NinjaTrilogy.xbe", "31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621", false,
+     "c86ed2baa91f204b176b7329bc087ed499b1ecd4146a62bfc493a161a1b44330"},
+    {L"NinjaFCJ.xbe", "b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31", true, nullptr},
+    {L"NinjaFCU.xbe", "9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1", true, nullptr},
 };
 
 } // namespace
@@ -218,7 +223,8 @@ bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition)
             *detail = std::wstring(f.file) + L": missing";
             return false;
         }
-        if (sha256_file(p) != f.sha256) {
+        std::string h = sha256_file(p);
+        if (h != f.sha256 && !(f.retail && h == f.retail)) {
             *detail = std::wstring(f.file) + L": another build";
             return false;
         }

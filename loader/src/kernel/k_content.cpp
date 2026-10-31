@@ -4,8 +4,8 @@
 // FUN_0031A55A / 0x31A475, 2026-10-31): the header is "XCSF" at +0x14 and its size at +0x18; the first 20 bytes must
 // be HMAC-SHA1(K, bytes 0x14 .. size), K = HMAC-SHA1(XboxHDKey, the title id at +0x24). Content copied from elsewhere
 // (the Hurricane Packs' installer leaves the signature zero) fails with "content damaged", so at start every meta
-// file of the running title whose signature does not match this run's XboxHDKey (the EEPROM's with online play,
-// else the kernel's default) is signed again. Only those 20 bytes change.
+// file of the running title whose signature does not match is signed again, with the key XAPI reads there: the
+// saves' console key (ktable.cpp xapi_hdkey: fixed, whatever online play does). Only those 20 bytes change.
 #include "common.h"
 #include "kernel/kexports.h"
 #include "kernel/xboxkrnl.h"
@@ -49,7 +49,7 @@ void sign_title_content(uint32_t title_id)
             continue;
         }
         uint8_t key[20], sig[20];
-        xk::XcHMAC(xk::XboxHDKey, 16, (const uint8_t *)&title, 4, nullptr, 0, key);
+        xk::XcHMAC(xapi_hdkey(), 16, (const uint8_t *)&title, 4, nullptr, 0, key);
         xk::XcHMAC(key, 20, &b[0x14], size - 0x14, nullptr, 0, sig);
         if (!memcmp(sig, b.data(), 20)) {
             good++;

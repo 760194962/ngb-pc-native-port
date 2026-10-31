@@ -274,6 +274,45 @@ const char *kernel_export_name(uint32_t ordinal)
     return e ? e->name : "?";
 }
 
+// The console's own key for what the game signs on the hard disk: XAPI's non-roamable signatures (its saves: Ninja Gaiden
+// Black's and Ninja Gaiden 2004's are, FUN_0032AAAD / FUN_0031A13E read XboxHDKey) and its content keys (downloadable
+// content: FUN_0032CD90 / FUN_0031A456). Online play puts the EEPROM's key in XboxHDKey for XONLINE and XNET (net/
+// online.cpp), so with the same variable a save made with online play off read as "damaged" with it on, and back (r720
+// vs r726, the user, 2026-10-31). Every read of XboxHDKey outside XONLINE and XNET is pointed at this key instead: the
+// default the saves of play without online have always had (the user's choice), whatever online play does.
+static uint8_t g_xapi_hdkey[16];
+static uint32_t g_xapi_hdkey_ptr = (uint32_t)(uintptr_t)g_xapi_hdkey;
+const uint8_t *xapi_hdkey() { return g_xapi_hdkey; }
+
+// mov eax, [slot] (A1), mov r32, [slot] (8B 05/0D/../3D) and push [slot] (FF 35) in the executable sections other than
+// XONLINE and XNET: their slot address is replaced with g_xapi_hdkey_ptr's.
+static void point_xapi_at_console_key(const Xbe &xbe, uint32_t slot)
+{
+    int n = 0;
+    for (const XbeSection &s : xbe.sections) {
+        if (!(s.flags & 4) || s.name == "XONLINE" || s.name == "XNET") continue; // executable only
+        uint8_t *p = (uint8_t *)(uintptr_t)s.vaddr;
+        for (uint32_t i = 1; i + 4 <= s.raw_size; i++) {
+            uint32_t v;
+            memcpy(&v, p + i, 4);
+            if (v != slot) continue;
+            bool mov_eax = p[i - 1] == 0xA1;
+            bool mov_r = i >= 2 && p[i - 2] == 0x8B && (p[i - 1] & 0xC7) == 0x05;
+            bool push = i >= 2 && p[i - 2] == 0xFF && p[i - 1] == 0x35;
+            if (!mov_eax && !mov_r && !push) continue;
+            DWORD old;
+            VirtualProtect(p + i, 4, PAGE_EXECUTE_READWRITE, &old);
+            uint32_t to = (uint32_t)(uintptr_t)&g_xapi_hdkey_ptr;
+            memcpy(p + i, &to, 4);
+            VirtualProtect(p + i, 4, old, &old);
+            logf("kernel: XboxHDKey read at 0x%08x (%s) now reads the console key for saves", s.vaddr + i - (mov_eax ? 1 : 2),
+                 s.name.c_str());
+            n++;
+        }
+    }
+    logf("kernel: %d XboxHDKey reads outside XONLINE / XNET use the saves' console key (online play does not change it)", n);
+}
+
 bool kernel_resolve_thunks(const Xbe &xbe)
 {
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
@@ -285,6 +324,7 @@ bool kernel_resolve_thunks(const Xbe &xbe)
 
     uint32_t *thunk = (uint32_t *)(uintptr_t)xbe.thunk_addr;
     int implemented = 0, stubbed = 0, vars = 0;
+    uint32_t hdkey_slot = 0;
     std::string stubs;
     for (int i = 0; thunk[i]; i++) {
         uint32_t ord = thunk[i] & 0x7FFFFFFF;
@@ -306,7 +346,9 @@ bool kernel_resolve_thunks(const Xbe &xbe)
             implemented++;
         }
         thunk[i] = (uint32_t)(uintptr_t)target;
+        if (ord == 323) hdkey_slot = (uint32_t)(uintptr_t)&thunk[i]; // XboxHDKey
     }
+    if (hdkey_slot) point_xapi_at_console_key(xbe, hdkey_slot);
     logf("kernel: %d imports implemented, %d data exports, %d logging stubs%s%s", implemented, vars, stubbed,
          stubbed ? ": " : "", stubs.c_str());
     return true;
