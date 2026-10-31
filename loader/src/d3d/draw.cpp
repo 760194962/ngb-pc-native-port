@@ -7,6 +7,7 @@
 #include "d3d/dispatch.h"
 #include "d3d/ffp_ps.h"
 #include "d3d/host.h"
+#include "build_profile.h"
 #include "d3d/nv2a_vsh.h"
 #include "d3d/pshader.h"
 #include "d3d/pushbuf.h"
@@ -1837,15 +1838,16 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
         // the picture beside them left without (the user, 2026-10-24, r503 at 64:27)
         uint32_t by[1] = {};
         first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 1);
-        if (by[0] == 0x0013A8E6) return;
+        if (g_cfg.profile && g_cfg.profile->wide2d && by[0] == g_cfg.profile->wide2d->ripples_ret) return;
     }
     if (!squeeze) {
         uint32_t by[3] = {};
         first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 3);
         // a menu's band or rule: the menus' 2D (FUN_00222730, 234 bytes; its calls at 0x222795 and 0x222805) draws
         // sprites through FUN_00325810, and their lines through 0x3273B8 (r375)
-        auto menu = [](uint32_t a) { return a >= 0x00222730 && a < 0x0022281A; };
-        if (full_h && by[0] == 0x0031DB8C) squeeze = true; // a movie frame
+        const Wide2D *w2 = g_cfg.profile ? g_cfg.profile->wide2d : nullptr;
+        auto menu = [w2](uint32_t a) { return w2 && a >= w2->menu_lo && a < w2->menu_hi; };
+        if (full_h && w2 && by[0] == w2->movie_ret) squeeze = true; // a movie frame
         else if (!full_h && (menu(by[1]) || menu(by[2]))) squeeze = clip = true;
     }
     if (!squeeze) return;

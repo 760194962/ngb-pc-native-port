@@ -13,6 +13,29 @@ struct InitTableRange {
     uint32_t begin, end; // [begin, end) of function pointers in .data; 0 / -1 entries are skipped by the CRT
 };
 
+// The engine's load meter (game_load.cpp): where it keeps its frame's start, the GPU's share and the CPU percentage,
+// and the GPU timer callback it pushes.
+struct LoadMeter {
+    uint32_t frame_start, gpu_cycles, cpu_load, gpu_callback;
+};
+// Ninja Gaiden Black (every build of x2.1's code): docs/04 §3.17.
+inline constexpr LoadMeter kLoadMeterNgb = {0x00D21680, 0x00D21690, 0x00D21698, 0x0030E060};
+// Ninja Gaiden 2004 1.06.04: the same engine; the four are where code paired with x2.1's refers to them (tools/x21_map.py,
+// unanimous: 4/4, 2/2, 3/3 votes; the callback is the function paired with 0x30E060, an rdtsc site of the profile).
+inline constexpr LoadMeter kLoadMeterNg04Tu = {0x00DFB2A0, 0x00DFB2B0, 0x00DFB2B8, 0x002FFAC0};
+
+// Wider than 16:9 (d3d/draw.cpp squeeze_169): the draws the game makes from these places keep the 16:9 shape. The
+// return addresses of the movie player's full-screen blit (a call of DrawVerticesUP) and of the underwater ripples'
+// draw, and the menus' 2D routine.
+struct Wide2D {
+    uint32_t movie_ret, ripples_ret, menu_lo, menu_hi;
+};
+// Ninja Gaiden Black: FUN_0031DA50 + 0x13C, FUN_0013A050's 0x13A8E6, FUN_00222730 (r346, r503, r375).
+inline constexpr Wide2D kWide2DNgb = {0x0031DB8C, 0x0013A8E6, 0x00222730, 0x0022281A};
+// Ninja Gaiden 2004 1.06.04: the same routines (x21_map: 0x31DA50 -> 0x30EFB0, 0x13A050 -> 0x137290, 0x222730 ->
+// 0x212410), each return address after the same call of DrawVerticesUP (0x3B0540), checked in the disassembly.
+inline constexpr Wide2D kWide2DNg04Tu = {0x0030F0EC, 0x00137B26, 0x00212410, 0x002124FA};
+
 struct BuildProfile {
     const char *name;          // shown in the log and in the "wrong build" message
     const char *sha256;        // of default.xbe, lower-case hex
@@ -31,6 +54,9 @@ struct BuildProfile {
                                    // name; nullptr for BLACK and Ninja Gaiden Black itself
     const wchar_t *window_title = nullptr; // Ninja Gaiden Black builds: the game window's title (nullptr: BLACK)
     bool chinese = false;                  // its menus have Chinese text (x2.1's language switch, [0xDB9890] = 0)
+    const LoadMeter *load_meter = nullptr; // the engine's load meter (game_load.cpp); nullptr: none
+    uint32_t aspect_const = 0;             // the game's 16/9 float (ngb_aspect.cpp: other widescreen shapes); 0: 16:9 only
+    const Wide2D *wide2d = nullptr;        // its 2D that keeps the 16:9 shape when wider (draw.cpp); nullptr: none known
 };
 
 // BLACK (Criterion, NTSC-U): numbers from black-pc NOTES.md.
@@ -70,7 +96,8 @@ constexpr BuildProfile ngb_family(const char *name, const char *sha256, int fs_p
     return {name, sha256, 0x5443000D, fs_patch_count, false,
             {{0x4162C0, 0x4162CC}, {0x4162D0, 0x41634C}, {0x416350, 0x416368}},
             {"D3D", "DSOUND", "XPP", nullptr},
-            0x003D9694, 0x0032A293, 0x0045E84C, kNgbRdtscSites, 6, 0x00376E44, nullptr, title, chinese};
+            0x003D9694, 0x0032A293, 0x0045E84C, kNgbRdtscSites, 6, 0x00376E44, nullptr, title, chinese, &kLoadMeterNgb,
+            0x00414AF8, &kWide2DNgb};
 }
 
 // The user's Hurricane edition, Chinese / English: the port's own target. "Ninja Gaiden Black·Hurricane[中英文版]" (the
@@ -152,7 +179,9 @@ inline const BuildProfile kProfileNg04Tu = {
     0x54430003, 42, false,
     {{0x3F6C00, 0x3F6C0C}, {0x3F6C10, 0x3F6C5C}, {0x3F6C60, 0x3F6C78}},
     {"D3D", "DSOUND", "XPP", nullptr},
-    0x003C0234, 0x0031AF77, 0x0043EF3C, kNg04TuRdtscSites, 6, 0x00361474, "NG04TU", L"Ninja Gaiden", false,
+    0x003C0234, 0x0031AF77, 0x0043EF3C, kNg04TuRdtscSites, 6, 0x00361474, "NG04TU", L"Ninja Gaiden", false, &kLoadMeterNg04Tu,
+    0x003F5284, // 16/9, 4/3 at 0x3F5280 (paired with x2.1's 0x414AF8 / 0x414AF4, 3/3 votes each; values checked)
+    &kWide2DNg04Tu,
 };
 
 inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNgbUs,

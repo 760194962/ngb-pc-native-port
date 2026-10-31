@@ -3,9 +3,11 @@
 
 #include <cstdint>
 
+struct LoadMeter;
+
 namespace game_load {
 
-void install(bool ngb);              // from install_d3d_hooks; on for Ninja Gaiden Black unless --original-load
+void install(const LoadMeter *m);   // from install_d3d_hooks: the build's meter (nullptr: none); on unless --original-load
 bool active();                       // D3D library thunks time their calls (dispatch.cpp)
 void on_swap();                      // D3DDevice_Swap, on the thread that presents
 bool gpu_callback(uint32_t fn);      // a push-buffer callback: true when it is the GPU timer, handled here

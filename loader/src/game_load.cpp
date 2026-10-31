@@ -17,6 +17,7 @@
 // --original-load keeps the engine's own measurement (comparing). Either way the engine's figure is logged every 30 s.
 #include "game_load.h"
 
+#include "build_profile.h"
 #include "common.h"
 #include "hooks.h"
 
@@ -25,10 +26,11 @@
 namespace game_load {
 namespace {
 
-constexpr uint32_t kFrameStart = 0x00D21680; // uint64: the engine's cycle count as its frame began
-constexpr uint32_t kGpuCycles = 0x00D21690;  // uint64: cycles into the frame when the GPU reached the callback
-constexpr uint32_t kCpuLoad = 0x00D21698;    // float: the frame's CPU share in percent (FUN_0030E140)
-constexpr uint32_t kGpuCallback = 0x0030E060;
+// The build's meter (build_profile.h; Black's: FUN_0030E140 writes the percentage):
+uint32_t kFrameStart;  // uint64: the engine's cycle count as its frame began
+uint32_t kGpuCycles;   // uint64: cycles into the frame when the GPU reached the callback
+uint32_t kCpuLoad;     // float: the frame's CPU share in percent
+uint32_t kGpuCallback; // the GPU timer it pushes
 
 bool g_ngb, g_active;
 double g_per_cycle; // engine counts per host cycle; 0 until measured (nothing is taken out before)
@@ -48,8 +50,10 @@ uint32_t g_frames, g_over80, g_over94;
 
 } // namespace
 
-void install(bool ngb)
+void install(const LoadMeter *m)
 {
+    bool ngb = m != nullptr;
+    if (m) kFrameStart = m->frame_start, kGpuCycles = m->gpu_cycles, kCpuLoad = m->cpu_load, kGpuCallback = m->gpu_callback;
     g_ngb = ngb;
     g_active = ngb && !g_cfg.original_load;
     if (ngb)

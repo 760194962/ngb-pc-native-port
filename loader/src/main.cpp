@@ -646,8 +646,8 @@ int run(void *reserve, unsigned reserve_size)
     }
     // BLACK runs at 30 fps and needs patches for 60; Ninja Gaiden Black is a 60 fps game as it is.
     if (black && g_cfg.fps == 60 && !install_60fps_patches()) g_cfg.fps = 30;
-    // A widescreen shape other than 16:9: Ninja Gaiden Black x2.1 itself only (its bundled programs and BLACK keep 16:9)
-    if (profile && !black && !profile->aux) install_ngb_aspect();
+    // A widescreen shape other than 16:9: the builds whose 16/9 constant is known (the bundled programs and BLACK keep 16:9)
+    if (profile && profile->aspect_const) install_ngb_aspect(); // Ninja Gaiden Black's builds and Ninja Gaiden 2004
     else g_cfg.aspect_w = 16, g_cfg.aspect_h = 9;
     if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
     if (profile && !black && !profile->aux) install_ngb_livedash(); // Ⓐ in Ranking's Live boxes: cancel, not the dashboard

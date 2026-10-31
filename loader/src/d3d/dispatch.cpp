@@ -305,7 +305,7 @@ bool install_d3d_hooks(const BuildProfile &profile)
     // (game_load.cpp): draws, push buffers, waits, presents, texture binds and shader loads. Not the state setters the
     // game makes ten thousand of a frame (timing every call cost 0.3-0.5 ms a frame, r652/r653), nor DSound's, XPP's
     // or XNet's (their replacements sit in the same tables).
-    game_load::install(!profile.black && !profile.aux);
+    game_load::install(profile.load_meter);
     uint32_t d3d_lo = ~0u, d3d_hi = 0;
     for (const LibFunc &f : kNgbD3D) {
         d3d_lo = std::min(d3d_lo, f.addr);
