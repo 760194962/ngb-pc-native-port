@@ -56,7 +56,8 @@ launcher to "2004" at the top left; the game installs into a folder of its own, 
 - **Hurricane Packs**: on the launcher's Install page, the Hurricane Packs card takes the installer's folder ("Ninja
   Gaiden DLC Installer") and installs it onto the game's hard disk; the game then starts with update 1.06. The same
   card's Uninstall list shows what is installed (update 1.06, packs 1 and 2, notices downloaded in the game) and
-  deletes the one chosen after asking.
+  deletes the one chosen after asking. Export copies the installed update and all content into a folder in the
+  installer's layout; another player chooses that folder on the same card to install it.
 - **Updating to 1.06 online**: without the Hurricane Packs, the Master Ninja Tournament asks for the update; yes runs
   the disc's Xbox Live updater, which downloads update 1.06 from Insignia, installs it and goes back to the game
   (from 2.0.1). The updater draws with the Xbox dashboard's fonts, copied the first time from the xemu hard disk
