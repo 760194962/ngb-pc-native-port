@@ -1,7 +1,8 @@
 // Virtual network for online play (net/vnet.h). Only what an Xbox needs to reach Xbox Live: ARP for the gateway, a
 // DHCP lease, DNS relayed to Insignia's server (or to a PC running InsigniaDNS, black.ini online_dns_mode = insigniadns,
 // or where the console's settings send it, = console), and UDP through host sockets (Kerberos on 88, the security gateway
-// on 3074: everything after sign-in travels inside that UDP tunnel). IP fragments are reassembled before they leave
+// on 3074: everything after sign-in travels inside that UDP tunnel), and TCP through host sockets (Insignia's content
+// server: downloads and notices). IP fragments are reassembled before they leave
 // and large replies are fragmented for the Xbox. Nothing of the payloads is logged.
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -363,6 +364,262 @@ void expire()
         it = now - it->second.started > 30000 ? g_frags.erase(it) : std::next(it);
 }
 
+// --- TCP NAT ---
+// The Xbox's TCP connections (Ninja Gaiden 2004's content downloader fetches its downloads and notices over TCP from
+// Insignia's content server, r756) end here: this side plays the server to the Xbox (handshake, sequence numbers,
+// acknowledgements, its window) and a host socket carries the bytes to the real server. The link to the Xbox is in
+// process, so a lost segment is rare (its receive ring full): data not acknowledged within 0.7 s is sent again.
+
+constexpr uint8_t TCP_FIN = 1, TCP_SYN = 2, TCP_RST = 4, TCP_PSH = 8, TCP_ACK = 16;
+
+struct Tcp {
+    SOCKET s = INVALID_SOCKET;
+    uint32_t dst = 0;
+    uint16_t dport = 0, gport = 0;
+    uint32_t rcv_nxt = 0;              // the next sequence number expected from the Xbox
+    uint32_t iss = 0, snd_una = 0, snd_nxt = 0;
+    uint32_t guest_wnd = 0, mss = 1460;
+    bool connected = false, syn_acked = false, guest_fin = false, host_eof = false, fin_sent = false, fin_acked = false,
+         host_shut = false;
+    std::vector<uint8_t> to_host;      // the Xbox's bytes the host socket has not taken yet
+    std::vector<uint8_t> unacked;      // bytes sent to the Xbox from snd_una on
+    uint64_t last_use = 0, last_send = 0;
+    uint64_t up = 0, down = 0;
+};
+std::map<uint64_t, Tcp> g_tcp; // (Xbox port, server address, server port) -> connection
+
+uint64_t tcp_key(uint16_t gport, uint32_t dst, uint16_t dport) { return (uint64_t)gport << 48 | (uint64_t)dst << 16 | dport; }
+
+void send_tcp(uint32_t src, uint16_t sport, uint16_t dport, uint32_t seq, uint32_t ack, uint8_t flags, const uint8_t *data,
+              size_t len, bool mss_option = false)
+{
+    size_t hl = mss_option ? 24 : 20;
+    std::vector<uint8_t> t(hl + len);
+    wr16(&t[0], sport);
+    wr16(&t[2], dport);
+    wr32(&t[4], seq);
+    wr32(&t[8], ack);
+    t[12] = (uint8_t)((hl / 4) << 4);
+    t[13] = flags;
+    wr16(&t[14], 65535); // this side's window: the host socket takes what comes
+    if (mss_option) {
+        t[20] = 2, t[21] = 4;
+        wr16(&t[22], 1460);
+    }
+    if (len) memcpy(&t[hl], data, len);
+    uint8_t pseudo[12];
+    wr32(pseudo, src);
+    wr32(pseudo + 4, GUEST_IP);
+    pseudo[8] = 0;
+    pseudo[9] = 6;
+    wr16(pseudo + 10, (uint16_t)t.size());
+    wr16(&t[16], csum_fold(csum_add(csum_add(0, pseudo, 12), t.data(), t.size())));
+    send_ip(src, GUEST_IP, 6, t.data(), t.size());
+}
+
+void tcp_to_guest(Tcp &c, uint32_t seq, uint8_t flags, const uint8_t *data, size_t len, bool mss_option = false)
+{
+    send_tcp(c.dst, c.dport, c.gport, seq, c.rcv_nxt, flags, data, len, mss_option);
+    c.last_send = kclock_ms();
+}
+
+void tcp_close(std::map<uint64_t, Tcp>::iterator it, const char *why)
+{
+    Tcp &c = it->second;
+    logf("[net] TCP Xbox:%u -> %s:%u closed (%s; %llu bytes up, %llu down)", c.gport, ip_str(c.dst).c_str(), c.dport, why,
+         (unsigned long long)c.up, (unsigned long long)c.down);
+    if (c.s != INVALID_SOCKET) closesocket(c.s);
+    g_tcp.erase(it);
+}
+
+// A segment from the Xbox
+void tcp(uint32_t src, uint32_t dst, const uint8_t *t, size_t len)
+{
+    if (len < 20) return;
+    uint16_t sport = rd16(t), dport = rd16(t + 2);
+    uint32_t seq = rd32(t + 4), ack = rd32(t + 8);
+    size_t off = (t[12] >> 4) * 4u;
+    uint8_t flags = t[13];
+    uint16_t wnd = rd16(t + 14);
+    if (off < 20 || off > len) return;
+    const uint8_t *data = t + off;
+    size_t n = len - off;
+    if ((dst & 0xFFFFFF00) == NET) { // nothing listens on the virtual network itself
+        if (!(flags & TCP_RST)) send_tcp(dst, dport, sport, (flags & TCP_ACK) ? ack : 0, seq + (uint32_t)n + ((flags & TCP_SYN) ? 1 : 0),
+                                         TCP_RST | TCP_ACK, nullptr, 0);
+        return;
+    }
+    auto it = g_tcp.find(tcp_key(sport, dst, dport));
+    if (flags & TCP_RST) {
+        if (it != g_tcp.end()) tcp_close(it, "reset by the Xbox");
+        return;
+    }
+    if ((flags & TCP_SYN) && !(flags & TCP_ACK)) {
+        if (it != g_tcp.end()) {
+            if (it->second.connected) tcp_to_guest(it->second, it->second.iss, TCP_SYN | TCP_ACK, nullptr, 0, true);
+            return; // still connecting: the answer goes when the host's connect completes
+        }
+        Tcp c;
+        c.dst = dst, c.dport = dport, c.gport = sport;
+        c.rcv_nxt = seq + 1;
+        c.iss = (uint32_t)(kclock_ms() * 2654435761u) ^ ((uint32_t)sport << 16 | dport);
+        c.snd_una = c.snd_nxt = c.iss;
+        c.guest_wnd = wnd;
+        for (size_t i = 20; i + 1 < off;) { // options: the Xbox's MSS
+            uint8_t kind = t[i];
+            if (kind == 0) break;
+            if (kind == 1) { i++; continue; }
+            uint8_t ol = t[i + 1];
+            if (ol < 2 || i + ol > off) break;
+            if (kind == 2 && ol == 4) c.mss = std::max<uint32_t>(536, std::min<uint32_t>(1460, rd16(t + i + 2)));
+            i += ol;
+        }
+        c.s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (c.s == INVALID_SOCKET) {
+            send_tcp(dst, dport, sport, 0, seq + 1, TCP_RST | TCP_ACK, nullptr, 0);
+            return;
+        }
+        BOOL one = TRUE;
+        setsockopt(c.s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one);
+        WSAEventSelect(c.s, g_sock_event, FD_CONNECT | FD_READ | FD_WRITE | FD_CLOSE); // also makes it non-blocking
+        sockaddr_in to = {};
+        to.sin_family = AF_INET;
+        to.sin_addr.s_addr = htonl(dst);
+        to.sin_port = htons(dport);
+        if (connect(c.s, (sockaddr *)&to, sizeof to) != 0 && WSAGetLastError() != WSAEWOULDBLOCK) {
+            logf("[net] TCP Xbox:%u -> %s:%u: connect failed (%d)", sport, ip_str(dst).c_str(), dport, WSAGetLastError());
+            closesocket(c.s);
+            send_tcp(dst, dport, sport, 0, seq + 1, TCP_RST | TCP_ACK, nullptr, 0);
+            return;
+        }
+        c.last_use = kclock_ms();
+        logf("[net] TCP Xbox:%u -> %s:%u connecting", sport, ip_str(dst).c_str(), dport);
+        g_tcp[tcp_key(sport, dst, dport)] = std::move(c);
+        return;
+    }
+    if (it == g_tcp.end()) { // not a connection this side knows: reset it
+        send_tcp(dst, dport, sport, (flags & TCP_ACK) ? ack : 0, seq + (uint32_t)n, TCP_RST | ((flags & TCP_ACK) ? 0 : TCP_ACK),
+                 nullptr, 0);
+        return;
+    }
+    Tcp &c = it->second;
+    c.last_use = kclock_ms();
+    c.guest_wnd = wnd;
+    if (flags & TCP_ACK) {
+        uint32_t acked = ack - c.snd_una;
+        if (acked && acked <= c.snd_nxt - c.snd_una) {
+            if (!c.syn_acked) c.syn_acked = true, c.snd_una++, acked--;
+            uint32_t bytes = std::min<uint32_t>(acked, (uint32_t)c.unacked.size());
+            c.unacked.erase(c.unacked.begin(), c.unacked.begin() + bytes);
+            c.snd_una += bytes;
+            if (c.fin_sent && ack == c.snd_nxt) c.fin_acked = true, c.snd_una = c.snd_nxt;
+        }
+    }
+    if (!c.syn_acked) return;
+    bool answer = false;
+    if (n) {
+        if (seq == c.rcv_nxt && c.to_host.size() + n <= (1u << 20)) {
+            c.to_host.insert(c.to_host.end(), data, data + n);
+            c.rcv_nxt += (uint32_t)n;
+            c.up += n;
+        }
+        answer = true; // in order: taken; out of order or a repeat: say again what is expected
+    }
+    if ((flags & TCP_FIN) && !c.guest_fin && seq + (uint32_t)n == c.rcv_nxt) {
+        c.guest_fin = true;
+        c.rcv_nxt++;
+        answer = true;
+    }
+    if (answer) tcp_to_guest(c, c.snd_nxt, TCP_ACK, nullptr, 0);
+}
+
+// The host side of every connection: connects completed, bytes each way, closes, sending again what was not acknowledged
+void tcp_pump()
+{
+    static std::vector<uint8_t> buf(65536);
+    uint64_t now = kclock_ms();
+    for (auto it = g_tcp.begin(); it != g_tcp.end();) {
+        Tcp &c = it->second;
+        WSANETWORKEVENTS ne = {};
+        WSAEnumNetworkEvents(c.s, nullptr, &ne);
+        if (!c.connected) {
+            if (ne.lNetworkEvents & FD_CONNECT) {
+                if (ne.iErrorCode[FD_CONNECT_BIT]) {
+                    logf("[net] TCP Xbox:%u -> %s:%u: the server did not take the connection (%d)", c.gport, ip_str(c.dst).c_str(),
+                         c.dport, ne.iErrorCode[FD_CONNECT_BIT]);
+                    send_tcp(c.dst, c.dport, c.gport, 0, c.rcv_nxt, TCP_RST | TCP_ACK, nullptr, 0);
+                    tcp_close(it++, "connect failed");
+                    continue;
+                }
+                c.connected = true;
+                c.snd_nxt = c.iss + 1;
+                tcp_to_guest(c, c.iss, TCP_SYN | TCP_ACK, nullptr, 0, true);
+                logf("[net] TCP Xbox:%u -> %s:%u connected", c.gport, ip_str(c.dst).c_str(), c.dport);
+            } else if (now - c.last_use > 20000) {
+                send_tcp(c.dst, c.dport, c.gport, 0, c.rcv_nxt, TCP_RST | TCP_ACK, nullptr, 0);
+                tcp_close(it++, "connect timed out");
+                continue;
+            }
+            ++it;
+            continue;
+        }
+        // the Xbox's bytes to the server
+        while (!c.to_host.empty()) {
+            int sent = send(c.s, (const char *)c.to_host.data(), (int)std::min<size_t>(c.to_host.size(), 65536), 0);
+            if (sent <= 0) break;
+            c.to_host.erase(c.to_host.begin(), c.to_host.begin() + sent);
+        }
+        if (c.guest_fin && c.to_host.empty() && !c.host_shut) shutdown(c.s, SD_SEND), c.host_shut = true;
+        // the server's bytes to the Xbox, as far as its window allows
+        bool failed = false;
+        while (c.syn_acked && !c.host_eof) {
+            uint32_t inflight = (uint32_t)c.unacked.size(), room = c.guest_wnd > inflight ? c.guest_wnd - inflight : 0;
+            if (!room) break;
+            int got = recv(c.s, (char *)buf.data(), (int)std::min<uint32_t>(room, (uint32_t)buf.size()), 0);
+            if (got == 0) { c.host_eof = true; break; }
+            if (got < 0) {
+                failed = WSAGetLastError() != WSAEWOULDBLOCK;
+                break;
+            }
+            c.unacked.insert(c.unacked.end(), buf.begin(), buf.begin() + got);
+            for (int o = 0; o < got; o += (int)c.mss) {
+                int part = std::min<int>((int)c.mss, got - o);
+                tcp_to_guest(c, c.snd_nxt, TCP_ACK | (o + part == got ? TCP_PSH : 0), buf.data() + o, part);
+                c.snd_nxt += (uint32_t)part;
+            }
+            c.down += got;
+            c.last_use = now;
+        }
+        if (failed) {
+            send_tcp(c.dst, c.dport, c.gport, c.snd_nxt, c.rcv_nxt, TCP_RST | TCP_ACK, nullptr, 0);
+            tcp_close(it++, "the server's side failed");
+            continue;
+        }
+        if (c.host_eof && c.unacked.empty() && !c.fin_sent && c.syn_acked) {
+            tcp_to_guest(c, c.snd_nxt, TCP_FIN | TCP_ACK, nullptr, 0);
+            c.snd_nxt++;
+            c.fin_sent = true;
+        }
+        // not acknowledged within 0.7 s: again, from the first unacknowledged byte
+        if (now - c.last_send > 700) {
+            if (!c.syn_acked) {
+                tcp_to_guest(c, c.iss, TCP_SYN | TCP_ACK, nullptr, 0, true);
+            } else if (!c.unacked.empty()) {
+                uint32_t limit = std::min<uint32_t>((uint32_t)c.unacked.size(), std::max<uint32_t>(c.guest_wnd, c.mss));
+                for (uint32_t o = 0; o < limit; o += c.mss)
+                    tcp_to_guest(c, c.snd_una + o, TCP_ACK, c.unacked.data() + o, std::min<uint32_t>(c.mss, limit - o));
+            } else if (c.fin_sent && !c.fin_acked) {
+                tcp_to_guest(c, c.snd_nxt - 1, TCP_FIN | TCP_ACK, nullptr, 0);
+            }
+        }
+        if ((c.fin_acked && c.guest_fin) || now - c.last_use > 300000) {
+            tcp_close(it++, c.fin_acked && c.guest_fin ? "both sides done" : "idle");
+            continue;
+        }
+        ++it;
+    }
+}
+
 // IPv4 from the Xbox, reassembled if fragmented
 void ip(const uint8_t *p, size_t len)
 {
@@ -395,6 +652,8 @@ void ip(const uint8_t *p, size_t len)
     }
     if (proto == 17) {
         udp(src, dst, data, n);
+    } else if (proto == 6) {
+        tcp(src, dst, data, n);
     } else if (proto == 1 && n >= 8 && data[0] == 8 && (dst & 0xFFFFFF00) == NET) { // ping the gateway / DNS: echo reply
         std::vector<uint8_t> r(data, data + n);
         r[0] = 0;
@@ -474,6 +733,7 @@ void vnet_wait(HANDLE wake, int timeout_ms)
     WSAResetEvent(g_sock_event);
     drain(g_flows);
     drain(g_dns_flows);
+    tcp_pump();
     static uint64_t last_expire;
     uint64_t now = kclock_ms();
     if (now - last_expire > 5000) {
