@@ -16,6 +16,12 @@ static const Hle kAuxDrawNinjaFCU[] = {
 
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxDrawNG04TU[] = {
+    {0x003b0540u, "D3DDevice_DrawVerticesUP", (void *)&D3DDevice_DrawVerticesUP, "s s s s", false}, // x2.1 0x003c98c0
+    {0x003b06f0u, "D3DDevice_DrawVertices_4__LTCG_ecx2_eax3", (void *)&D3DDevice_DrawVertices, "s ecx eax", false}, // x2.1 0x003c9a70
+    {0x003b07c0u, "D3DDevice_DrawIndexedVertices", (void *)&D3DDevice_DrawIndexedVertices, "s s s", false}, // by name; x2.1 0x003c9b40
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_draw_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -33,6 +39,10 @@ const Hle *hle_draw_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NinjaFCU")) {
         *count = sizeof kAuxDrawNinjaFCU / sizeof kAuxDrawNinjaFCU[0] - 1;
         return kAuxDrawNinjaFCU;
+    }
+    if (!strcmp(xbe, "NG04TU")) {
+        *count = sizeof kAuxDrawNG04TU / sizeof kAuxDrawNG04TU[0] - 1;
+        return kAuxDrawNG04TU;
     }
     *count = 0;
     return nullptr;

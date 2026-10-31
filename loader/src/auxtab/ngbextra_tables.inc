@@ -160,6 +160,59 @@ static const Hle kAuxNgbextraNinjaFCU[] = {
     {0x001d6550u, "D3DDevice_BlockUntilVerticalBlank", (void *)&BlockUntilVerticalBlank, "", false},
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxNgbextraNG04TU[] = {
+    {0x003ac4e0u, "SetRenderState_EdgeAntiAlias", (void *)&SetRenderState_EdgeAntiAlias, "s", false}, // x2.1 0x003c5260
+    {0x003ac520u, "SetRenderState_ShadowFunc", (void *)&SetRenderState_ShadowFunc, "s", false}, // x2.1 0x003c52a0
+    {0x003ac560u, "SetRenderState_FogColor", (void *)&SetRenderState_FogColor, "s", false}, // x2.1 0x003c52e0
+    {0x003ac5c0u, "SetRenderState_CullMode", (void *)&SetRenderState_CullMode, "s", false}, // x2.1 0x003c5340
+    {0x003ac640u, "SetRenderState_FrontFace", (void *)&SetRenderState_FrontFace, "s", false}, // x2.1 0x003c53c0
+    {0x003ac6e0u, "SetRenderState_ZEnable", (void *)&SetRenderState_ZEnable, "s", false}, // x2.1 0x003c5460
+    {0x003ac900u, "SetRenderState_LineWidth", (void *)&SetRenderState_LineWidth, "s", false}, // x2.1 0x003c56a0
+    {0x003ac970u, "SetRenderState_Dxt1NoiseEnable", (void *)&SetRenderState_Dxt1NoiseEnable, "s", false}, // x2.1 0x003c5710
+    {0x003aca00u, "SetRenderState_YuvEnable", (void *)&SetRenderState_YuvEnable, "s", false}, // x2.1 0x003c57a0
+    {0x003aca40u, "SetRenderState_OcclusionCullEnable", (void *)&SetRenderState_OcclusionCullEnable, "s", false}, // by name; x2.1 0x003c57e0
+    {0x003acab0u, "SetRenderState_StencilCullEnable", (void *)&SetRenderState_StencilCullEnable, "s", false}, // by name; x2.1 0x003c5850
+    {0x003acb20u, "SetRenderState_RopZCmpAlwaysRead", (void *)&SetRenderState_RopZCmpAlwaysRead, "s", false}, // by name; x2.1 0x003c58c0
+    {0x003acb40u, "SetRenderState_RopZRead", (void *)&SetRenderState_RopZRead, "s", false}, // by name; x2.1 0x003c58e0
+    {0x003acb60u, "SetRenderState_DoNotCullUncompressed", (void *)&SetRenderState_DoNotCullUncompressed, "s", false}, // by name; x2.1 0x003c5900
+    {0x003acb80u, "SetRenderState_ZBias", (void *)&SetRenderState_ZBias, "s", false}, // x2.1 0x003c5920
+    {0x003acc30u, "SetRenderState_MultiSampleMode", (void *)&SetRenderState_MultiSampleMode, "s", false}, // x2.1 0x003c59d0
+    {0x003acc60u, "SetRenderState_MultiSampleRenderTargetMode", (void *)&SetRenderState_MultiSampleRenderTargetMode, "s", false}, // x2.1 0x003c5a00
+    {0x003acc90u, "SetRenderState_MultiSampleAntiAlias", (void *)&SetRenderState_MultiSampleAntiAlias, "s", false}, // x2.1 0x003c5a30
+    {0x003accd0u, "SetRenderState_MultiSampleMask", (void *)&SetRenderState_MultiSampleMask, "s", false}, // by name; x2.1 0x003c5a70
+    {0x003accf0u, "SetRenderState_SampleAlpha", (void *)&SetRenderState_SampleAlpha, "s", false}, // by name; x2.1 0x003c5a90
+    {0x003acd10u, "SetRenderState_LogicOp", (void *)&SetRenderState_LogicOp, "s", false}, // x2.1 0x003c5ab0
+    {0x003acd70u, "SetRenderState_FillMode", (void *)&SetRenderState_FillMode, "s", false}, // x2.1 0x003c5b10
+    {0x003acdc0u, "SetRenderState_BackFillMode", (void *)&SetRenderState_BackFillMode, "s", false}, // x2.1 0x003c5b60
+    {0x003acde0u, "SetRenderState_TwoSidedLighting", (void *)&SetRenderState_TwoSidedLighting, "s", false}, // x2.1 0x003c5b80
+    {0x003ace40u, "SetRenderState_VertexBlend", (void *)&SetRenderState_VertexBlend, "s", false}, // x2.1 0x003c5be0
+    {0x003ace90u, "SetRenderState_PSTextureModes", (void *)&SetRenderState_PSTextureModes, "s", false}, // x2.1 0x003c5c30
+    {0x003acef0u, "SetTextureState_TexCoordIndex", (void *)&SetTextureState_TexCoordIndex, "esi s", false}, // x2.1 0x003c5c90
+    {0x003ad000u, "SetTextureState_BumpEnv", (void *)&SetTextureState_BumpEnv, "eax s s", false}, // x2.1 0x003c5da0
+    {0x003ad070u, "SetTextureState_BorderColor", (void *)&SetTextureState_BorderColor, "eax ebx", false}, // x2.1 0x003c5e10
+    {0x003ad0c0u, "SetTextureState_ColorKeyColor", (void *)&SetTextureState_ColorKeyColor, "eax ebx", false}, // x2.1 0x003c5e60
+    {0x003b2ef0u, "CreateDevice", (void *)&CreateDevice, "eax s ecx", true}, // x2.1 0x003cc310
+    {0x003ada10u, "UpdateProjectionViewportTransform", (void *)&UpdateProjectionViewportTransform, "", false}, // x2.1 0x003c67b0
+    {0x003ad360u, "D3D_WriteViewportTransform", (void *)&D3D_WriteViewportTransform, "eax", true}, // x2.1 0x003c6100
+    {0x003ad560u, "SetControl0", (void *)&SetControl0, "s", false}, // x2.1 0x003c6300
+    {0x003afb90u, "D3D_UpdateFogState", (void *)&D3D_UpdateFogState, "", false}, // x2.1 0x003c8f10
+    {0x003b0d60u, "IsResourceBusy", (void *)&IsResourceBusy, "ecx", true}, // x2.1 0x003ca0e0
+    {0x003b0ce0u, "GetType", (void *)&GetType, "ecx", true}, // x2.1 0x003ca060
+    {0x003b1a70u, "BlockOnResource", (void *)&BlockOnResource, "eax", false}, // x2.1 0x003cadf0
+    {0x003b0e60u, "CreateSurface2", (void *)&CreateSurface2, "s s edx", true}, // x2.1 0x003ca1e0
+    {0x003b58d0u, "ComputeTextureHeader", (void *)&ComputeTextureHeader, "eax edx s s s s s s s s", true}, // x2.1 0x003cecf0
+    {0x003af520u, "LoadVertexShader", (void *)&LoadVertexShader, "edx eax", false}, // by name, its registers; x2.1 0x003c88a0 "eax s"
+    {0x003af5b0u, "SelectVertexShader", (void *)&SelectVertexShader, "eax ebx", false}, // x2.1 0x003c8930
+    {0x003af670u, "SetShaderConstantMode", (void *)&SetShaderConstantMode, "eax", false}, // x2.1 0x003c89f0
+    {0x003aff30u, "CreatePixelShader", (void *)&CreatePixelShader, "s s", true}, // x2.1 0x003c92b0
+    {0x003adf70u, "SetGammaRamp", (void *)&SetGammaRamp, "s s", false}, // x2.1 0x003c6d90
+    {0x003aeb40u, "BlockUntilVerticalBlank", (void *)&BlockUntilVerticalBlank, "", false}, // x2.1 0x003c7cb0
+    {0x00364c38u, "DirectSoundUseFullHRTF", (void *)&DirectSoundUseFullHRTF, "", false}, // x2.1 0x0037a978
+    {0x003b1c40u, "RunPushBuffer", (void *)&RunPushBuffer, "s s", false}, // x2.1 0x003cafc0
+    {0x003aeae0u, "EndVisibilityTest", (void *)&EndVisibilityTest, "eax", true}, // x2.1 0x003c7c50
+    {0x003979d4u, "XNetStartup", (void *)&XNetStartup, "s", true}, // by name; x2.1 0x003afb34
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_ngb_extra_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -177,6 +230,10 @@ const Hle *hle_ngb_extra_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NinjaFCU")) {
         *count = sizeof kAuxNgbextraNinjaFCU / sizeof kAuxNgbextraNinjaFCU[0] - 1;
         return kAuxNgbextraNinjaFCU;
+    }
+    if (!strcmp(xbe, "NG04TU")) {
+        *count = sizeof kAuxNgbextraNG04TU / sizeof kAuxNgbextraNG04TU[0] - 1;
+        return kAuxNgbextraNG04TU;
     }
     *count = 0;
     return nullptr;

@@ -153,6 +153,7 @@ NTSTATUS __stdcall NtQuerySymbolicLinkObject(HANDLE LinkHandle, XANSI_STRING *Li
 NTSTATUS __stdcall RtlAnsiStringToUnicodeString(XUNICODE_STRING *Destination, const XANSI_STRING *Source, BOOLEAN Allocate);
 NTSTATUS __stdcall RtlUnicodeStringToAnsiString(XANSI_STRING *Destination, const XUNICODE_STRING *Source, BOOLEAN Allocate);
 uint32_t __stdcall RtlCompareMemoryUlong(void *Source, uint32_t Length, uint32_t Pattern);
+int32_t __stdcall RtlCompareString(const XANSI_STRING *String1, const XANSI_STRING *String2, BOOLEAN CaseInSensitive);
 BOOLEAN __stdcall RtlEqualString(const XANSI_STRING *String1, const XANSI_STRING *String2, BOOLEAN CaseInSensitive);
 void __stdcall RtlInitAnsiString(XANSI_STRING *Destination, const char *Source);
 uint32_t __stdcall RtlNtStatusToDosError(NTSTATUS Status);

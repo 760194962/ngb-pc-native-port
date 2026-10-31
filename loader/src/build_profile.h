@@ -139,9 +139,25 @@ inline const BuildProfile kProfileNinjaFCU = {
     0x001EF06C, 0, 0, kFcuQpc, 1, 0x001D5E94, "NinjaFCU",
 };
 
+// NINJA GAIDEN (2004, title 54430003): the title update 1.06.04 (Xbox Live, 2004-09-17; TDATA/54430003/$u/default.xbe),
+// the main program the Hurricane Packs need. XDK 5659 (Black is 5849): every address differs, so it runs on tables
+// generated like the bundled programs' (tools/gen_aux_tables.py, "NG04TU"; work/functions_NG04TU.csv from xboxrecomp
+// + XbSymbolDatabase, 2026-10-31). Initializer tables from _rtinit 0x31E16D / _cinit 0x31E115; SwitchToFiber 0x31AF77
+// reads the TLS index at 0x43EF3C; rdtsc in the engine's timer functions (FUN_002FE4D0, 2FFAC0, 2FFBA0, 2FFFC0) and in
+// QueryPerformanceCounter 0x361470 (work/ng04/profile_probe.py). None of Black's game patches apply (aux).
+inline const uint32_t kNg04TuRdtscSites[] = {0x002FE53F, 0x002FE5A1, 0x002FFAC0, 0x002FFCDA, 0x002FFFCE, 0x00361474};
+inline const BuildProfile kProfileNg04Tu = {
+    "NINJA GAIDEN (2004) title update 1.06.04",
+    "86475ba502c0e7f147334b167041c3fd310f8fb34f9e77b0ee6e6866e0764ee3",
+    0x54430003, 42, false,
+    {{0x3F6C00, 0x3F6C0C}, {0x3F6C10, 0x3F6C5C}, {0x3F6C60, 0x3F6C78}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x003C0234, 0x0031AF77, 0x0043EF3C, kNg04TuRdtscSites, 6, 0x00361474, "NG04TU", L"Ninja Gaiden", false,
+};
+
 inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNgbUs,
                                                 &kProfileNgbHurricaneJp, &kProfileNgbBasicX2, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
-                                                &kProfileNinjaFCJ, &kProfileNinjaFCU};
+                                                &kProfileNinjaFCJ, &kProfileNinjaFCU, &kProfileNg04Tu};
 
 // The profile whose SHA-256 matches, or nullptr for an unknown build.
 inline const BuildProfile *build_profile_for(const char *sha256_hex)

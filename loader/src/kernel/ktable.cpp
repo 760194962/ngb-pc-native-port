@@ -158,6 +158,7 @@ const KExport kExports[] = {
     V(259, PsThreadObjectType),
     F(260, RtlAnsiStringToUnicodeString, 3),
     F(269, RtlCompareMemoryUlong, 3),
+    F(270, RtlCompareString, 3),
     F(277, RtlEnterCriticalSection, 1),
     F(279, RtlEqualString, 3),
     F(289, RtlInitAnsiString, 2),

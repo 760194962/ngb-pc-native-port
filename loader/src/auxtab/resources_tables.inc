@@ -38,6 +38,17 @@ static const Hle kAuxResourcesNinjaFCU[] = {
     {0x001d86a0u, "D3DSurface_LockRect", (void *)&D3DSurface_LockRect, "s s s s", true},
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxResourcesNG04TU[] = {
+    {0x003b0460u, "D3DDevice_CreateVertexBuffer2", (void *)&D3DDevice_CreateVertexBuffer2, "s", true}, // x2.1 0x003c97e0
+    {0x003b0c50u, "D3DResource_AddRef", (void *)&D3DResource_AddRef, "s", true}, // x2.1 0x003c9fd0
+    {0x003b0c90u, "D3DResource_Release", (void *)&D3DResource_Release, "s", true}, // x2.1 0x003ca010
+    {0x003b0b40u, "D3D_DestroyResource_0__LTCG_edi1", (void *)&D3D_DestroyResource, "edi", false}, // x2.1 0x003c9ec0
+    {0x003b5690u, "D3D_GetLevelInfo", (void *)&D3D_GetLevelInfo, "s s s s s s s s", false}, // x2.1 0x003ceab0
+    {0x003b0df0u, "D3D_CreateSurfaceHeader", (void *)&D3D_CreateSurfaceHeader, "eax edi s s", true}, // x2.1 0x003ca170
+    {0x003af200u, "D3DTexture_GetSurfaceLevel2", (void *)&D3DTexture_GetSurfaceLevel2, "eax s", true}, // x2.1 0x003c8580
+    {0x003b55f0u, "Get2DSurfaceDesc", (void *)&D3D_Get2DSurfaceDesc, "edi ebx esi", false}, // x2.1 0x003cea10
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_resource_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -55,6 +66,10 @@ const Hle *hle_resource_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NinjaFCU")) {
         *count = sizeof kAuxResourcesNinjaFCU / sizeof kAuxResourcesNinjaFCU[0] - 1;
         return kAuxResourcesNinjaFCU;
+    }
+    if (!strcmp(xbe, "NG04TU")) {
+        *count = sizeof kAuxResourcesNG04TU / sizeof kAuxResourcesNG04TU[0] - 1;
+        return kAuxResourcesNG04TU;
     }
     *count = 0;
     return nullptr;

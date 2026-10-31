@@ -53,6 +53,23 @@ uint32_t __stdcall RtlCompareMemoryUlong(void *Source, uint32_t Length, uint32_t
     return i * 4;
 }
 
+// Like NT's: the first differing character decides (unsigned, upper-cased when case-insensitive), else the shorter
+// string is less. Ninja Gaiden (2004) imports it.
+int32_t __stdcall RtlCompareString(const XANSI_STRING *String1, const XANSI_STRING *String2, BOOLEAN CaseInSensitive)
+{
+    KTRACE("'%s', '%s', %u", xstr(String1).c_str(), xstr(String2).c_str(), CaseInSensitive);
+    uint32_t n = String1->Length < String2->Length ? String1->Length : String2->Length;
+    for (uint32_t i = 0; i < n; i++) {
+        unsigned char a = (unsigned char)String1->Buffer[i], b = (unsigned char)String2->Buffer[i];
+        if (CaseInSensitive) {
+            a = (unsigned char)toupper(a);
+            b = (unsigned char)toupper(b);
+        }
+        if (a != b) return (int32_t)a - (int32_t)b;
+    }
+    return (int32_t)String1->Length - (int32_t)String2->Length;
+}
+
 BOOLEAN __stdcall RtlEqualString(const XANSI_STRING *String1, const XANSI_STRING *String2, BOOLEAN CaseInSensitive)
 {
     KTRACE("'%s', '%s', %u", xstr(String1).c_str(), xstr(String2).c_str(), CaseInSensitive);
