@@ -36,4 +36,14 @@ bool backup(const std::wstring &root, const std::wstring &backup_root, const std
 bool replace(const std::wstring &from, const std::wstring &to, const std::wstring &backup_root, const std::wstring &note,
              std::wstring *made, std::wstring *error);
 
+// Saves signed for this port. Ninja Gaiden Black and Ninja Gaiden 2004 sign system.dat (TDATA) and each slot's
+// save000.dat (UDATA) with XAPI's non-roamable signature in their first 20 bytes: HMAC-SHA1(console key,
+// HMAC-SHA1(title key, the rest of the file)) (2026-10-31: the game's verify call given file[20:], loader --probe; the
+// encryption's seed is in the file, so nothing else depends on the console). The port's keys are 16 zero bytes both
+// (loader kernel/ktable.cpp: XboxSignatureKey, and the console key whatever online play does). A save made on another
+// Xbox, in xemu or by another player, or with online play on before 1.2.1, has another signature and reads as damaged.
+// resign signs every such file again; when any is to change, the title's saves are first copied into a backup
+// ("before-resign", *made). *count: files signed again (0: all were right).
+bool resign(const std::wstring &root, const std::wstring &backup_root, int *count, std::wstring *made, std::wstring *error);
+
 } // namespace saves

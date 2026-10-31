@@ -289,6 +289,14 @@ LONG CALLBACK vectored_handler(EXCEPTION_POINTERS *ep)
                      "%08x %08x %08x %08x %08x",
                      g_cfg.probe[i], where(g_cfg.probe[i]).c_str(), n, t ? t->name : "host", c->Eax, c->Ebx, c->Ecx, c->Edx, c->Esi,
                      c->Edi, xmm0, s[0], s[1], s[2], s[3], s[4], s[5]);
+                // the first two arguments' first 32 bytes, when they point at readable memory (what a function was given)
+                for (int a = 1; a <= 2; a++) {
+                    const uint8_t *m = (const uint8_t *)(uintptr_t)s[a];
+                    if (s[a] < 0x10000 || IsBadReadPtr(m, 32)) continue;
+                    char hex[100];
+                    for (int k = 0; k < 32; k++) sprintf_s(hex + k * 3, 4, "%02x ", m[k]);
+                    logf("    arg%d -> %s", a, hex);
+                }
             }
             *(uint8_t *)(uintptr_t)g_cfg.probe[i] = g_probe_orig[i]; // run the original instruction once
             c->Eip = g_cfg.probe[i];

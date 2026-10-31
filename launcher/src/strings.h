@@ -326,6 +326,13 @@ enum class Str {
     HelpDlc,
     HelpFromImageNg04,
     NoXreviveNg04,
+    // the Saves page: re-signing
+    ResignBtn,
+    AskResignTitle,
+    AskResign,
+    ResignDone,
+    ResignNone,
+    NoteBeforeResign,
     Count
 };
 

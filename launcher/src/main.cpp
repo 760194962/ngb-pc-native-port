@@ -116,7 +116,7 @@ struct App {
     bool dns_note_bad = false;
 };
 enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete, kAskReset, kAskUnsavedStart, kAskUnsavedClose, kAskRestore, kAskImport,
-       kAskExport };
+       kAskExport, kAskResign };
 App g;
 
 // Hit ids: 0..kPageCount-1 the navigation, then these
@@ -131,7 +131,8 @@ enum {
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
     kHitModule = 580, // + 0 Black, 1 Ninja Gaiden 2004
-    kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc
+    kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc,
+    kHitResign = 590
 };
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -1365,6 +1366,7 @@ struct Painter {
         if (g.ask == kAskRestore) title = Str::AskRestoreTitle, body = Str::AskRestore;
         if (g.ask == kAskImport) title = Str::ImportX, body = Str::AskImport;
         if (g.ask == kAskExport) title = Str::ExportX, body = Str::AskExport;
+        if (g.ask == kAskResign) title = Str::AskResignTitle, body = Str::AskResign;
         const float pw = 560, ph = 300, px = (kW - pw) / 2, py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
@@ -1947,11 +1949,13 @@ struct Painter {
         y = card(c2, S(Str::BackupCard), help_id(Str::BackupCard));
         button(kHitBackupNow, {lx, y, lx + bw, y + 32}, S(Str::BackupNow), true, !g.slots.empty());
         button(kHitOpenBackups, {lx + bw + 12, y, lx + 2 * bw + 52, y + 32}, S(Str::OpenBackups), false);
+        button(kHitResign, {lx + 2 * bw + 64, y, lx + 3 * bw + 64, y + 32}, S(Str::ResignBtn), false, !g.slots.empty());
         y += 42;
         if (!shown) text(S(Str::NoBackups), {lx, y, c2.right - 20, y + 30}, 13, kAsh, 0.75f);
         for (int i = 0; i < shown; i++) {
             const saves::Backup &bk = g.backups[i];
             Str kind = bk.note == L"before-restore" ? Str::NoteBeforeRestore : bk.note == L"before-import" ? Str::NoteBeforeImport
+                     : bk.note == L"before-resign" ? Str::NoteBeforeResign
                      : bk.note == L"xrevive-before-export" ? Str::NoteXreviveBefore
                                                            : Str::NoteByHand;
             wchar_t b[64];
@@ -2314,6 +2318,17 @@ void saves_action(int what)
         ok = saves::replace(g.backups[g.restore_index].dir, ours, backup_root(), L"before-restore", &made, &err), done = Str::RestoreDone;
     if (what == kAskImport) ok = saves::replace(xr, ours, backup_root(), L"before-import", &made, &err), done = Str::ImportDone;
     if (what == kAskExport) ok = saves::replace(ours, xr, backup_root(), L"xrevive-before-export", &made, &err), done = Str::ExportDone;
+    if (what == kAskResign) {
+        int n = 0;
+        ok = saves::resign(ours, backup_root(), &n, &made, &err);
+        wchar_t r[1024];
+        if (ok && n) swprintf(r, 1024, S(Str::ResignDone), n, made.c_str());
+        else if (ok) wcscpy_s(r, S(Str::ResignNone));
+        else swprintf(r, 1024, S(Str::SavesFailed), err.c_str());
+        saves_result(ok, r);
+        refresh_saves();
+        return;
+    }
     wchar_t b[1024];
     swprintf(b, 1024, S(ok ? (made.empty() && done != Str::BackupDone ? Str::SavesDoneNoneMoved : done) : Str::SavesFailed),
              ok ? made.c_str() : err.c_str());
@@ -2583,7 +2598,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                     else PostMessageW(h, WM_CLOSE, 0, 0);
                 }
             } else if (id == kHitAskYes) {
-                if (ask == kAskRestore || ask == kAskImport || ask == kAskExport) saves_action(ask);
+                if (ask == kAskRestore || ask == kAskImport || ask == kAskExport || ask == kAskResign) saves_action(ask);
                 else if (ask == kAskDelete) delete_image();
                 else if (ask == kAskReset) reset_page(g.page);
                 else start_install();
@@ -2630,6 +2645,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             open_folder(backup_root());
         }
         else if (id == kHitBackupNow) saves_action(0);
+        else if (id == kHitResign) g.ask = kAskResign;
         else if (id >= kHitRestore && id < kHitRestore + 3) {
             g.restore_index = id - kHitRestore;
             if (game_running()) saves_result(false, S(Str::GameRunning));
@@ -2778,6 +2794,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     for (int i = 1; i < argc; i++) {
+        if (!wcscmp(argv[i], L"--resign") && i + 3 < argc) { // tests: --resign <hdd> <title id folder> <backup root>
+            if (AttachConsole(ATTACH_PARENT_PROCESS)) freopen("CONOUT$", "w", stdout);
+            saves::set_title(argv[i + 2]);
+            int n = 0;
+            std::wstring made, err;
+            bool ok = saves::resign(saves::our_root(argv[i + 1]), argv[i + 3], &n, &made, &err);
+            wprintf(L"resign: %ls, %d files signed again, backup %ls %ls\n", ok ? L"ok" : L"failed", n, made.c_str(), err.c_str());
+            fflush(stdout);
+            return ok ? 0 : 1;
+        }
         if (!wcscmp(argv[i], L"--extract") && i + 2 < argc) {
             if (AttachConsole(ATTACH_PARENT_PROCESS)) freopen("CONOUT$", "w", stdout);
             install::Progress pr;

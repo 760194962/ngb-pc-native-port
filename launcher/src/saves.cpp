@@ -1,9 +1,11 @@
 #include "saves.h"
 
 #include <windows.h>
+#include <bcrypt.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -115,6 +117,83 @@ bool move_saves(const fs::path &root, const fs::path &to, std::wstring *error)
 } // namespace
 
 void set_title(const std::wstring &title) { g_title = title; }
+
+namespace {
+
+bool hmac_sha1(const uint8_t *key, size_t klen, const uint8_t *data, size_t len, uint8_t out[20])
+{
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    BCRYPT_HASH_HANDLE h = nullptr;
+    bool ok = !BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA1_ALGORITHM, nullptr, BCRYPT_ALG_HANDLE_HMAC_FLAG) &&
+              !BCryptCreateHash(alg, &h, nullptr, 0, (PUCHAR)key, (ULONG)klen, 0) &&
+              !BCryptHashData(h, (PUCHAR)data, (ULONG)len, 0) && !BCryptFinishHash(h, out, 20, 0);
+    if (h) BCryptDestroyHash(h);
+    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
+    return ok;
+}
+
+// The signature this port's console gives a file: the port's keys are 16 zero bytes both
+bool port_signature(const std::vector<uint8_t> &b, uint8_t sig[20])
+{
+    static const uint8_t zero[16] = {};
+    uint8_t inner[20];
+    return b.size() > 20 && hmac_sha1(zero, 16, b.data() + 20, b.size() - 20, inner) && hmac_sha1(zero, 16, inner, 20, sig);
+}
+
+bool read_all(const fs::path &p, std::vector<uint8_t> &b)
+{
+    FILE *f = _wfopen(p.c_str(), L"rb");
+    if (!f) return false;
+    b.clear();
+    uint8_t buf[65536];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) b.insert(b.end(), buf, buf + n);
+    fclose(f);
+    return true;
+}
+
+} // namespace
+
+bool resign(const std::wstring &root, const std::wstring &backup_root, int *count, std::wstring *made, std::wstring *error)
+{
+    *count = 0;
+    std::error_code ec;
+    std::vector<fs::path> files; // system.dat, and the slots' save*.dat
+    fs::path sys = fs::path(root) / title_dirs()[1] / L"system.dat";
+    if (fs::exists(sys, ec)) files.push_back(sys);
+    for (const auto &slot : fs::directory_iterator(fs::path(root) / title_dirs()[0], ec)) {
+        if (!slot.is_directory(ec)) continue;
+        for (const auto &f : fs::directory_iterator(slot.path(), ec)) {
+            std::wstring n = f.path().filename().wstring();
+            if (f.is_regular_file(ec) && n.size() > 8 && !_wcsnicmp(n.c_str(), L"save", 4) &&
+                !_wcsicmp(n.c_str() + n.size() - 4, L".dat"))
+                files.push_back(f.path());
+        }
+    }
+    std::vector<std::pair<fs::path, std::vector<uint8_t>>> todo; // file, its new first 20 bytes
+    for (const fs::path &p : files) {
+        std::vector<uint8_t> b;
+        uint8_t sig[20];
+        if (!read_all(p, b) || !port_signature(b, sig)) {
+            *error = p.wstring() + L": cannot read";
+            return false;
+        }
+        if (memcmp(sig, b.data(), 20)) todo.push_back({p, std::vector<uint8_t>(sig, sig + 20)});
+    }
+    if (todo.empty()) return true;
+    if (!backup(root, backup_root, L"before-resign", made, error)) return false;
+    for (auto &t : todo) {
+        FILE *f = _wfopen(t.first.c_str(), L"r+b");
+        if (!f || fwrite(t.second.data(), 1, 20, f) != 20) {
+            if (f) fclose(f);
+            *error = t.first.wstring() + L": cannot write";
+            return false;
+        }
+        fclose(f);
+        ++*count;
+    }
+    return true;
+}
 
 std::wstring our_root(const std::wstring &hdd) { return (fs::path(hdd) / L"Partition1").wstring(); }
 std::wstring xrevive_root(const std::wstring &folder) { return (fs::path(folder) / L"SaveData\\Ninja Gaiden_ Black\\HddData").wstring(); }
