@@ -61,4 +61,10 @@ std::vector<ContentItem> installed_content(const std::wstring &hdd);
 // Deletes one of them (its whole folder). *error: why not.
 bool remove_content(const std::wstring &hdd, const std::wstring &id, std::wstring *error);
 
+// Everything installed there (the update $u and every content folder of $c: the Hurricane Packs and what the game
+// downloaded) copied into <dest>\Ninja Gaiden DLC Installer\content, the installer's layout, so another player installs it
+// with install_dlc. The game signs content for its own console when it starts, so the copies work anywhere.
+// *made: the folder written. *error: why not.
+bool export_dlc(const std::wstring &hdd, const std::wstring &dest, std::wstring *made, std::wstring *error);
+
 } // namespace install

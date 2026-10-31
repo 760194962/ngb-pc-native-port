@@ -134,7 +134,7 @@ enum {
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
     kHitModule = 580, // + 0 Black, 1 Ninja Gaiden 2004
-    kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc,
+    kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc, kHitExportDlc,
     kHitResign = 590,
     kHitUninstall = 2000, // Ninja Gaiden 2004's content to uninstall: its drop-down list (+ 1 + row)
 };
@@ -718,6 +718,20 @@ std::wstring content_size_text(uint64_t bytes)
     if (bytes >= (1ull << 20)) swprintf(b, 32, L"%.1f MB", bytes / 1048576.0);
     else swprintf(b, 32, L"%u KB", (unsigned)((bytes + 1023) / 1024));
     return b;
+}
+
+// Ninja Gaiden 2004: everything installed, into a folder another player installs from (install.cpp export_dlc)
+void export_dlc_now()
+{
+    std::wstring dir, made, err;
+    if (!pick(true, &dir)) return;
+    HCURSOR old = SetCursor(LoadCursorW(nullptr, IDC_WAIT));
+    bool ok = install::export_dlc(save_hdd(), dir, &made, &err);
+    SetCursor(old);
+    wchar_t b[1024];
+    swprintf(b, 1024, S(ok ? Str::DlcExported : Str::DlcExportFailed), ok ? made.c_str() : err.c_str());
+    g.dlc_result = b;
+    g.dlc_bad = !ok;
 }
 
 // Ninja Gaiden 2004: one installed item off the Xbox hard disk (the update, a pack, content the game downloaded)
@@ -1548,7 +1562,9 @@ struct Painter {
              DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
         button(kHitPickDlc, {c3.right - 136, y3 + 3, c3.right - 20, y3 + 33}, S(Str::ChooseFolder), false, !busy);
         y3 += 44;
-        button(kHitInstallDlc, {c3.left + 26, y3, c3.left + 206, y3 + 36}, S(Str::DlcInstall), true, !busy && !g.dlc_dir.empty());
+        button(kHitInstallDlc, {c3.left + 26, y3, c3.left + 176, y3 + 36}, S(Str::DlcInstall), true, !busy && !g.dlc_dir.empty());
+        // what is installed, for other players (the installer's layout)
+        button(kHitExportDlc, {c3.left + 184, y3, c3.left + 284, y3 + 36}, S(Str::DlcExport), false, !busy && !g.content.empty());
         std::wstring st;
         bool have_dlc = g.dlc.update || g.dlc.pack1 || g.dlc.pack2;
         if (!g.dlc_result.empty()) st = g.dlc_result;
@@ -1560,7 +1576,7 @@ struct Painter {
             if (g.dlc.pack1) st += std::wstring(g.dlc.update ? sep : L"") + S(Str::DlcPack1);
             if (g.dlc.pack2) st += std::wstring(g.dlc.update || g.dlc.pack1 ? sep : L"") + S(Str::DlcPack2);
         }
-        text(st, {c3.left + 222, y3, c3.right - 186, y3 + 36}, 13, g.dlc_bad ? kBlood : have_dlc ? kGold : kAsh, 1.0f,
+        text(st, {c3.left + 296, y3, c3.right - 186, y3 + 36}, 13, g.dlc_bad ? kBlood : have_dlc ? kGold : kAsh, 1.0f,
              DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
         // what is installed, to uninstall one (a confirmation first): the update, the packs, what the game downloaded
         std::vector<ListRow> rows;
@@ -1924,9 +1940,11 @@ struct Painter {
             g.list_scroll_max = max_first;
             const int first = g.list_scroll;
             const float h = visible * rh + 8 + note_h;
+            // wider than the box and past the window's right edge (the uninstall list): line up with the box's right edge
+            const float lx = box.left + w > kW - 8 ? box.right - w : box.left;
             D2D1_RECT_F list;
-            if (up) list = {box.left, box.top - 4 - h, box.left + w, box.top - 4};
-            else list = {box.left, box.bottom + 4, box.left + w, box.bottom + 4 + h};
+            if (up) list = {lx, box.top - 4 - h, lx + w, box.top - 4};
+            else list = {lx, box.bottom + 4, lx + w, box.bottom + 4 + h};
             fill(list, 0x16141a, 1.0f, 4);
             stroke(list, kGold, 0.8f, 4);
             const bool scroll = total > visible;
@@ -2670,6 +2688,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             }
         }
         else if (id == kHitInstallDlc && !g.dlc_dir.empty() && !installing()) install_dlc_now();
+        else if (id == kHitExportDlc && !g.content.empty() && !installing()) export_dlc_now();
         else if (id >= 0 && id < kPageCount) {
             g.page = (Page)id;
             if (g.page == kSaves) g.saves_read = false; // read the disk again when the page is opened
@@ -2747,7 +2766,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
         else if (id == kHitNetCheck) net_check();
         else if (id == kHitInsignia) ShellExecuteW(h, L"open", L"https://insignia.live/", nullptr, nullptr, SW_SHOWNORMAL);
-        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso) {
+        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso || id == kHitUninstall) {
             g.list_open = id;
             g.list_scroll = g.list_scroll_max = 0;
         }

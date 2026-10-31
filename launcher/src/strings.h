@@ -341,6 +341,9 @@ enum class Str {
     AskUninstall,
     UninstallDone,
     UninstallFailed,
+    DlcExport,
+    DlcExported,
+    DlcExportFailed,
     Count
 };
 

@@ -402,6 +402,25 @@ bool install_dlc(const std::wstring &src, const std::wstring &hdd, std::wstring 
     return true;
 }
 
+bool export_dlc(const std::wstring &hdd, const std::wstring &dest, std::wstring *made, std::wstring *error)
+{
+    std::wstring t = ng04_tdata(hdd);
+    bool have_u = is_dir(t + L"\\$u"), have_c = is_dir(t + L"\\$c");
+    if (!have_u && !have_c) {
+        *error = L"nothing installed";
+        return false;
+    }
+    std::wstring out = dest + L"\\Ninja Gaiden DLC Installer\\content";
+    if (!make_dirs(out)) {
+        *error = L"cannot make " + out;
+        return false;
+    }
+    if (have_u && !copy_tree(t + L"\\$u", out + L"\\$u", error)) return false;
+    if (have_c && !copy_tree(t + L"\\$c", out + L"\\$c", error)) return false;
+    *made = dest + L"\\Ninja Gaiden DLC Installer";
+    return true;
+}
+
 void extract(const std::wstring &iso, const std::wstring &dest, Progress &p)
 {
     auto fail = [&](const std::wstring &why) {

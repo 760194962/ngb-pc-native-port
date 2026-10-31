@@ -534,6 +534,9 @@ const Pair kText[(int)Str::Count] = {
      L"Deletes “%s” (%s) from the game’s hard disk.\n\nUpdate 1.06 and the Hurricane Packs come back with Install above at any time; notices and other content downloaded in the game download again from “NEW NOTICE!” in the Master Ninja Tournament."},
     {L"已卸载：%s", L"Uninstalled: %s"},
     {L"卸载失败：%s", L"Could not uninstall: %s"},
+    {L"导出", L"Export"},
+    {L"已导出到 %s，别的玩家在「安装包」选这个文件夹即可安装", L"Exported to %s: another player chooses that folder as the installer and installs"},
+    {L"导出失败：%s", L"Could not export: %s"},
 };
 
 } // namespace
