@@ -41,6 +41,30 @@ the same tables and fixes. The bundled programs are identical in every build:
 The launched programs are entered from the main menu's arcade and SNES entries: the game calls `XLaunchNewImage`, and
 the loader restarts itself with the same options and loads the target XBE.
 
+## Ninja Gaiden (2004)
+
+From 2.0.0 the port also runs the first Ninja Gaiden (2004, the US disc 1.02.04) and its Hurricane Packs. Switch the
+launcher to "2004" at the top left; the game installs into a folder of its own, apart from Black.
+
+| Program | What | SHA-256 |
+|---|---|---|
+| `default.xbe`, disc 1.02.04 | runs without the Hurricane Packs | `bea2a85eea7e6e0ba6c3e201966a46b24b27e25b3307a29bc3de5b4254791308` |
+| `$u\default.xbe`, update 1.06.04 | installed with the packs; runs instead once installed (as on the console) | `86475ba502c0e7f147334b167041c3fd310f8fb34f9e77b0ee6e6866e0764ee3` |
+| `downloader.xbe`, disc / update | the Xbox Live downloader behind "NEW NOTICE!" in the Master Ninja Tournament | `fcce4a17…` (disc) / `a99574a8…` (update) |
+| `NinjaTomoe.xbe` / `NinjaTrilogy.xbe` | the bundled SNES trilogy | `d2aeab80…` / `18eaadc5…` |
+
+- **Hurricane Packs**: on the launcher's Install page, the Hurricane Packs card takes the installer's folder ("Ninja
+  Gaiden DLC Installer") and installs it onto the game's hard disk; the game then starts with update 1.06. The same
+  card's Uninstall list shows what is installed (update 1.06, packs 1 and 2, notices downloaded in the game) and
+  deletes the one chosen after asking.
+- **Master Ninja Tournament**: needs online play (Insignia, as in Black; see "Online" below). The packs are signed for
+  this PC when the game starts, so packs installed elsewhere work too.
+- **NEW NOTICE!**: opens the Xbox Live downloader, which downloads notices and other content from Insignia and goes
+  back to the game. The downloader has no sound.
+- **Exit game**: the title menu has a last row, EXIT GAME (its letters cut from the menu's own words), that asks "Exit
+  the game?" in the game's own box.
+- Black's fixes (widescreen, 16:9 movies on 21:9, the load timing) apply to 2004 as well.
+
 ## Status
 
 Each item's verdict and evidence are in `project/docs/06_功能验证矩阵.md` (feature verification matrix).
@@ -56,7 +80,10 @@ Each item's verdict and evidence are in `project/docs/06_功能验证矩阵.md` 
 - **Online leaderboards (optional)**: with your own console and account registered with Insignia in xemu, the game's
   Ranking menu signs in and shows the real leaderboards (tested). Off by default; see "Online" below.
 - **Saves**: saving, loading and loading back the same slot verified. Saves are in the standard Xbox format; copied
-  into xRevive's save folder they load directly (tested).
+  into xRevive's save folder they load directly (tested). Saves are signed with the same console key whether online
+  play is on or off, so switching it no longer shows Damaged Game. The launcher's Saves page re-signs saves from
+  another Xbox, from xemu, from another player, or made with online play on in earlier versions, for this PC (backed
+  up first).
 - **Sound**: a software DirectSound mixer on XAudio2, with reverb.
 - **Performance**: in a chapter 1 battle, an average frame time of 10.45 ms on Intel Iris Xe integrated graphics
   (the 60 fps budget is 16.68 ms; r178, `project/docs/05_音频输入存档.md`).
@@ -79,8 +106,9 @@ These also happen on the Xbox; the port fixes them. Each fix can be switched bac
   unfixed (`project/docs/07_证据盘点.md`).
 - 3D sound and reverb approximate the Xbox's and have not been checked item by item (`project/docs/07_证据盘点.md`
   #9).
-- Leaderboard "new user": the Xbox goes to the dashboard here; the port restarts the main program instead, so the
-  window closes and opens again.
+- Choices in the Ranking / Master Ninja Tournament boxes that go to the Xbox dashboard (network settings, a new
+  account, recovering a gamertag): the PC has no dashboard, so Ⓐ closes the box as Ⓑ does.
+- Ninja Gaiden 2004's Xbox Live downloader has no sound.
 - Running `NinjaFCJ.xbe` directly, without launch data, crashes (players entering from the main menu never take this
   path).
 - Emulation rules still being verified are listed in the progress section of `project/docs/07_证据盘点.md`.
