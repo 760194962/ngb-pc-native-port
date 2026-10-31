@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(POLICY CMP0184)
   cmake_policy(SET CMP0184 NEW) # MSVC_RUNTIME_CHECKS property
 endif()
-project(black_loader VERSION 1.1.11 LANGUAGES C CXX) # the release number (About box, first log line)
+project(black_loader VERSION 1.1.12 LANGUAGES C CXX) # the release number (About box, first log line)
 set(NGB_VERSION_STRING "${PROJECT_VERSION}") # 1.1.5-t..1.1.8-t carried a -t suffix; none from 1.1.10 (the user, 2026-10-31)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -15,6 +15,16 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# The version block in each program's Properties > Details (version.rc.in): product, version, description.
+function(ngb_version_info target type desc file)
+  set(NGB_RC_TYPE ${type})
+  set(NGB_RC_DESC "${desc}")
+  set(NGB_RC_FILE "${file}")
+  set(NGB_RC_INTERNAL ${target})
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.rc.in" "${CMAKE_CURRENT_BINARY_DIR}/version_${target}.rc" @ONLY)
+  target_sources(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/version_${target}.rc")
+endfunction()
 
 # blackrt.dll: XBE loader, HLE kernel, hooks. Everything that is real code lives here.
 add_library(blackrt SHARED
@@ -108,6 +118,7 @@ FetchContent_MakeAvailable(SDL3)
 target_sources(blackrt PRIVATE src/input/sdlpad.cpp)
 target_link_libraries(blackrt PRIVATE SDL3::SDL3-static)
 # Xbox SEH handlers run through the same fs:[0] chain; no SafeSEH tables anywhere in the process.
+ngb_version_info(blackrt VFT_DLL "Ninja Gaiden Black Hurricane runtime" "blackrt.dll")
 target_link_options(blackrt PRIVATE /SAFESEH:NO /MAP) # blackrt.map: port addresses in crash logs -> functions
 
 # black.exe: tiny stub with no CRT. Linked at 0x10000 with a large BSS so its own image owns the
@@ -126,6 +137,7 @@ if(PORT_ICON AND EXISTS "${PORT_ICON}")
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc" "1 ICON \"${_port_icon}\"\n")
   target_sources(black PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc")
 endif()
+ngb_version_info(black VFT_APP "Ninja Gaiden Black Hurricane" "Ninja Gaiden Black Hurricane.exe")
 target_link_libraries(black PRIVATE blackrt kernel32)
 set_property(TARGET black PROPERTY MSVC_RUNTIME_CHECKS "")
 target_compile_options(black PRIVATE /GS- /Gs999999)
@@ -138,6 +150,7 @@ add_executable(launcher WIN32 ../launcher/src/main.cpp ../launcher/src/strings.c
   ../launcher/src/saves.cpp ../launcher/src/keys.cpp
   ../launcher/src/launcher.rc)
 set_target_properties(launcher PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Hurricane Launcher")
+ngb_version_info(launcher VFT_APP "Ninja Gaiden Black Hurricane Launcher" "Ninja Gaiden Black Hurricane Launcher.exe")
 target_compile_definitions(launcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00 WINVER=0x0A00
   GAME_VERSION="${NGB_VERSION_STRING}") # the game program's release number, for the About page
 target_compile_options(launcher PRIVATE /W3 /utf-8 /EHsc)

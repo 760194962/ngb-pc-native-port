@@ -41,6 +41,18 @@ $icon = [ReleaseRes]::FindResourceW($m, [IntPtr]1, [IntPtr]14) # RT_GROUP_ICON 1
 [ReleaseRes]::FreeLibrary($m) | Out-Null
 if ($icon -eq [IntPtr]::Zero) { throw "$game has no icon (built with PORT_ICON empty): rebuild with the default" }
 
+# Windows Defender scan of the three programs: 1.1.11's launcher was a machine-learning false positive
+# (Trojan:Win32/Bearfoos.A!ml) while a second build of the same source was clean. A flagged build is not shipped:
+# rebuild and pack again.
+$mp = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+if (Test-Path $mp) {
+    foreach ($f in $launcher, $game, "$Bin\blackrt.dll") {
+        $r = & $mp -Scan -ScanType 3 -File $f -DisableRemediation | Out-String
+        if ($r -notmatch 'found no threats') { throw "Windows Defender flags ${f}: rebuild it and pack again`n$r" }
+    }
+    'Windows Defender: the three programs are clean'
+} else { Write-Warning 'MpCmdRun.exe not found: the programs were not scanned' }
+
 $name = "ngb-hurricane-pc-$version-win32"
 $dist = "$root\dist"
 New-Item -ItemType Directory -Force $dist | Out-Null
