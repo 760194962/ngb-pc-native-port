@@ -138,16 +138,19 @@ std::string sha256_file(const std::wstring &path)
     return out;
 }
 
-// The builds the port knows (loader/src/build_profile.h)
+// The builds the port knows (loader/src/build_profile.h): default.xbe tells which, then the programs it launches. The
+// US release has the NES trilogies only; x2.1 added the SNES ones.
+const char kDefaultX21[] = "aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6";
+const char kDefaultUs[] = "df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda";
 const struct {
     const wchar_t *file;
     const char *sha256;
+    bool x21_only;
 } kFiles[] = {
-    {L"default.xbe", "aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6"},
-    {L"NinjaTomoe.xbe", "2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff"},
-    {L"NinjaTrilogy.xbe", "31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621"},
-    {L"NinjaFCJ.xbe", "b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31"},
-    {L"NinjaFCU.xbe", "9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1"},
+    {L"NinjaTomoe.xbe", "2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff", false},
+    {L"NinjaTrilogy.xbe", "31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621", false},
+    {L"NinjaFCJ.xbe", "b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31", true},
+    {L"NinjaFCU.xbe", "9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1", true},
 };
 
 } // namespace
@@ -162,9 +165,22 @@ uint64_t image_size(const std::wstring &iso, std::wstring *error)
     return total;
 }
 
-bool check_game(const std::wstring &dir, std::wstring *detail)
+bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition)
 {
+    if (edition) *edition = Edition::None;
+    std::wstring xbe = dir + L"\\default.xbe";
+    if (GetFileAttributesW(xbe.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        *detail = L"default.xbe: missing";
+        return false;
+    }
+    std::string hash = sha256_file(xbe);
+    bool x21 = hash == kDefaultX21;
+    if (!x21 && hash != kDefaultUs) {
+        *detail = L"default.xbe: another build";
+        return false;
+    }
     for (const auto &f : kFiles) {
+        if (f.x21_only && !x21) continue;
         std::wstring p = dir + L"\\" + f.file;
         if (GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES) {
             *detail = std::wstring(f.file) + L": missing";
@@ -175,7 +191,8 @@ bool check_game(const std::wstring &dir, std::wstring *detail)
             return false;
         }
     }
-    *detail = L"default.xbe + 4";
+    *detail = x21 ? L"x2.1: default.xbe + 4" : L"US: default.xbe + 2";
+    if (edition) *edition = x21 ? Edition::X21 : Edition::Us;
     return true;
 }
 

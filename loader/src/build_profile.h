@@ -77,6 +77,27 @@ inline const BuildProfile kProfileNgbHurricaneX21 = {
     0x00376E44,
 };
 
+// NINJA GAIDEN BLACK NTSC-U, the original retail release (title 5443000D, version 5, XBE 2005-08-31). x2.1 is this
+// XBE patched: the same 16 sections at the same addresses, the library sections (D3D, DSOUND, XPP, XGRPH, D3DX,
+// XONLINE, XNET, DOLBY) byte for byte identical, .text differing in 360 bytes at 65 places (the Chinese text hooks into
+// x2.1's added HANZI section) and none of them at an address the port uses (scratchpad xbe_hits.py, 2026-10-31). So
+// every x2.1 table and patch address holds here too.
+inline const BuildProfile kProfileNgbUs = {
+    "NINJA GAIDEN BLACK NTSC-U",
+    "df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda",
+    0x5443000D,
+    41,
+    false,
+    {{0x4162C0, 0x4162CC}, {0x4162D0, 0x41634C}, {0x416350, 0x416368}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x003D9694,
+    0x0032A293,
+    0x0045E84C,
+    kNgbRdtscSites,
+    6,
+    0x00376E44,
+};
+
 // The programs Ninja Gaiden Black x2.1 launches (docs/06 of the port project): the NES trilogy of the original release
 // (NinjaTomoe.xbe Japanese, NinjaTrilogy.xbe US; XDK 5849) and the SNES trilogy added by x2.1 (NinjaFCJ.xbe Japanese,
 // NinjaFCU.xbe US; XDK 5659). Plain (non-LTCG) D3D8 / DSOUND: the HLE tables come from XbSymbolDatabase names
@@ -117,7 +138,7 @@ inline const BuildProfile kProfileNinjaFCU = {
     0x001EF06C, 0, 0, kFcuQpc, 1, 0x001D5E94, "NinjaFCU",
 };
 
-inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
+inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNgbUs, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
                                                 &kProfileNinjaFCJ, &kProfileNinjaFCU};
 
 // The profile whose SHA-256 matches, or nullptr for an unknown build.

@@ -436,6 +436,7 @@ void set_title(const wchar_t *text)
 const wchar_t *game_title()
 {
     // "Ninja Gaiden Black·Hurricane[中英文版]" (the user's name, 2026-10-22: no "X21" in the names)
+    if (g_cfg.profile == &kProfileNgbUs) return L"Ninja Gaiden Black";
     if (g_cfg.profile && !g_cfg.profile->black) return L"Ninja Gaiden Black\u00B7Hurricane[\u4E2D\u82F1\u6587\u7248]";
     return L"BLACK";
 }

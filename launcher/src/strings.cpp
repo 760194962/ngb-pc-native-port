@@ -54,35 +54,37 @@ const Pair kText[(int)Str::Count] = {
     {L"游戏已安装并核对无误。要把镜像移到回收站吗？", L"The game is installed and checked. Move the image to the Recycle Bin?"},
     {L"镜像已移到回收站。", L"The image is in the Recycle Bin."},
     {L"游戏安装路径", L"Game folder"},
-    {L"已核对：支持的版本（default.xbe 与 4 个附带程序）", L"Checked: the supported build (default.xbe and 4 bundled programs)"},
+    {L"已核对：飓风版 x2.1 中英文版（default.xbe 与 4 个附带程序）", L"Checked: Hurricane x2.1, Chinese / English (default.xbe and 4 bundled programs)"},
+    {L"已核对：美版原版（default.xbe 与 2 个附带程序）", L"Checked: the original US release (default.xbe and 2 bundled programs)"},
     {L"不是支持的版本：", L"Not the supported build: "},
     {L"选择已有游戏…", L"Use an installed copy…"},
     {L"不是 Xbox 光盘镜像", L"Not an Xbox disc image"},
     {L"Xbox 光盘镜像 (*.iso)", L"Xbox disc image (*.iso)"},
-    {L"选择你自己的《忍者龙剑传 黑之章 飓风版》x2.1 中英文版光盘镜像（.iso）。extract-xiso 做的精简镜像和完整的 redump 镜像都可以。\n\n"
-     L"安装会把镜像里的全部文件（约 5.9 GB）写到下方「游戏安装路径」的文件夹，写完后核对 default.xbe 与 4 个附带程序（街机版与 SFC 三部曲，日版、美版各一）的 SHA-256，"
+    {L"选择你自己的《忍者龙剑传 黑之章 飓风版》x2.1 中英文版光盘镜像（.iso），或美版原版《NINJA GAIDEN BLACK》的光盘镜像（英文）。extract-xiso 做的精简镜像和完整的 redump 镜像都可以。\n\n"
+     L"安装会把镜像里的全部文件（约 5.9 GB）写到下方「游戏安装路径」的文件夹，写完后核对 default.xbe 与附带程序（x2.1：街机版与 SFC 三部曲，日版、美版各一，共 4 个；美版原版：街机版三部曲 2 个）的 SHA-256，"
      L"确认是支持的版本。\n\n"
      L"安装中可以随时取消；已经写出的文件会留在文件夹里，再次安装时会被覆盖。\n\n"
      L"核对通过后，可以把镜像移到回收站来节省空间；以后需要时，还能从回收站还原。",
-     L"Choose your own disc image (.iso) of NINJA GAIDEN BLACK, Hurricane edition x2.1 (Chinese / English). Both an "
+     L"Choose your own disc image (.iso) of NINJA GAIDEN BLACK, Hurricane edition x2.1 (Chinese / English), or of the "
+     L"original US release (English). Both an "
      L"extract-xiso image and a full redump image will do.\n\n"
      L"Installing writes every file of the image (about 5.9 GB) to the game folder below, then checks the SHA-256 of "
-     L"default.xbe and the 4 bundled programs (the arcade version and the SNES trilogy, a Japanese and a US build of each) to make sure this is the "
-     L"supported build.\n\n"
+     L"default.xbe and the bundled programs (x2.1: the arcade version and the SNES trilogy, a Japanese and a US build of each; the US "
+     L"release: the two arcade trilogies) to make sure this is a supported build.\n\n"
      L"You can cancel at any time; the files written so far stay in the folder and are overwritten by the next install.\n\n"
      L"Once the check passes you can move the image to the Recycle Bin to save space, and restore it from there later."},
     {L"这里是游戏所在的文件夹：从镜像安装时装到这里，开始游戏时也从这里启动。\n\n"
      L"点「更改…」选一个文件夹：如果里面已经有解包好的游戏（有 default.xbe），就直接使用，不需要重新安装；"
      L"如果是空文件夹，就可以从上方的镜像安装到这里。「默认路径」会改回启动器旁边的 game 文件夹。\n\n"
-     L"核对会计算 default.xbe 与 4 个附带程序的 SHA-256：金色的「已核对」表示是支持的 x2.1 版本；红色表示缺少文件或是别的版本，"
+     L"核对会计算 default.xbe 与附带程序的 SHA-256：金色的「已核对」表示是支持的版本（x2.1 中英文版或美版原版）；红色表示缺少文件或是别的版本，"
      L"游戏可能无法启动。\n\n"
      L"存档不在游戏文件夹里，更换路径不会影响存档。",
      L"This is the game's folder: an install from an image goes here, and the game starts from here.\n\n"
      L"Choose a folder with \"Change\": if the game is already extracted there (a folder with default.xbe in it), it "
      L"is used as it is, with no need to install again; if the folder is empty, install into it from an image above. "
      L"\"Default\" goes back to the game folder next to the launcher.\n\n"
-     L"The check computes the SHA-256 of default.xbe and the 4 bundled programs: a gold \"Checked\" line means the "
-     L"supported x2.1 build; red means a file is missing or another build, and the game may not start.\n\n"
+     L"The check computes the SHA-256 of default.xbe and the bundled programs: a gold \"Checked\" line means a "
+     L"supported build (x2.1 or the original US release); red means a file is missing or another build, and the game may not start.\n\n"
      L"Saved games are not kept in the game folder, so changing it does not touch them."},
     {L"知道了", L"Got it"},
     {L"覆盖已安装的游戏？", L"Replace the installed game?"},

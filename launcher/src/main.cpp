@@ -78,6 +78,7 @@ struct App {
     std::wstring checked_game;     // the game folder last checked, and the result
     bool game_ok = false;
     std::wstring game_detail;
+    install::Edition game_edition = install::Edition::None; // which supported build the check found
     int help = 0; // the "?" panel open: 0 none, else its hit id
     int ask = 0;  // the confirmation open: 0 none, else kAsk*
     // the Saves page: what is on disk (read when the page is opened and after each action), the backup to restore
@@ -476,13 +477,13 @@ void launch_game()
 
 std::wstring folder_of(const std::wstring &p) { return p.substr(0, p.find_last_of(L"\\/")); }
 
-// The game folder's check (5 SHA-256), redone only when the folder changes
+// The game folder's check (SHA-256 of default.xbe and its programs), redone only when the folder changes
 void check_game()
 {
     std::wstring dir = folder_of(g.game);
     if (dir == g.checked_game) return;
     g.checked_game = dir;
-    g.game_ok = exists(g.game) && install::check_game(dir, &g.game_detail);
+    g.game_ok = exists(g.game) && install::check_game(dir, &g.game_detail, &g.game_edition);
     if (!exists(g.game)) g.game_detail.clear();
 }
 
@@ -1425,7 +1426,8 @@ struct Painter {
         button(kHitDefaultPath, {c2.right - 256, y2 + 1, c2.right - 146, y2 + 31}, S(Str::DefaultPath), false, !busy && !is_default);
         button(kHitPickGame, {c2.right - 136, y2 + 1, c2.right - 20, y2 + 31}, S(Str::Change), false, !busy);
         text(!have ? std::wstring(S(Str::NotInstalledHere))
-                   : g.game_ok ? std::wstring(S(Str::GameChecked)) : std::wstring(S(Str::GameWrong)) + g.game_detail,
+                   : g.game_ok ? std::wstring(S(g.game_edition == install::Edition::Us ? Str::GameCheckedUs : Str::GameChecked))
+                              : std::wstring(S(Str::GameWrong)) + g.game_detail,
              {c2.left + 26, y2 + 36, c2.right - 20, y2 + 64}, 12.5f, !have ? kAsh : g.game_ok ? kGold : kBlood);
     }
 

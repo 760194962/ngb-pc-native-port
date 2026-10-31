@@ -22,6 +22,7 @@
 // message 0x9000E answered as 退出游戏 at FUN_0017A400's own call (0x9000E is Mission mode's name elsewhere); the
 // spacing table gets 32 for nine rows; selecting row 8 opens the box instead of FUN_0017B010, and while it is up
 // FUN_0017B3E0 draws it and waits for Ⓐ (exit) or Ⓑ (close) instead of moving the menu.
+#include "build_profile.h"
 #include "common.h"
 
 #include <windows.h>
@@ -33,6 +34,8 @@ extern "C" {
 // Read by the thunks
 volatile uint32_t g_exitmenu_list;      // the list descriptor FUN_0017A400 is laying a row out for
 volatile uint32_t g_exitmenu_dialog;    // 1 while the box is up
+uint32_t g_exitmenu_english;            // 1: English only (the original US release: no Chinese font, and [0xDB9890]
+                                        // is x2.1's language switch)
 uint32_t g_exitmenu_a400_resume = 0x0017A406;
 uint32_t g_exitmenu_6ae0 = 0x001E6AE0;
 uint32_t g_exitmenu_6ae0_resume = 0x001E6AE6;
@@ -121,7 +124,7 @@ extern "C" void __cdecl exitmenu_draw()
     auto *text_on = (uint32_t *)(uintptr_t)0x008F9488;
     auto *column = (uint8_t *)(uintptr_t)0x008F94CE;
     auto *style1 = (uint32_t *)(uintptr_t)0x0043B6C0, *style2 = (uint32_t *)(uintptr_t)0x0043B4A0;
-    bool chinese = *(const uint8_t *)(uintptr_t)0x00DB9890 == 0;
+    bool chinese = !g_exitmenu_english && *(const uint8_t *)(uintptr_t)0x00DB9890 == 0;
     uint32_t old_on = *text_on, old_s1 = *style1, old_s2 = *style2;
     uint8_t old_col = *column;
     *text_on = 1;
@@ -151,6 +154,8 @@ __declspec(naked) void row_text_thunk()
         jne game
         cmp dword ptr [g_exitmenu_list], 0x00C07600 // kMenuDesc
         jne game
+        cmp dword ptr [g_exitmenu_english], 0
+        jne english
         cmp byte ptr [esp + 4], 0
         jne english
         mov eax, offset kRowZh
@@ -174,6 +179,8 @@ __declspec(naked) void message_thunk()
         push edi
         jmp dword ptr [g_exitmenu_6ae0_resume]
     ours:
+        cmp dword ptr [g_exitmenu_english], 0
+        jne english
         cmp byte ptr [esp + 4], 1
         jne english
         mov eax, offset kBoxZh
@@ -297,6 +304,7 @@ void install_ngb_exitmenu()
             logf("exit menu: code at 0x%08x does not match x2.1; no EXIT GAME row", s.addr);
             return;
         }
+    g_exitmenu_english = g_cfg.profile == &kProfileNgbUs;
     memcpy(g_spacing, (const void *)(uintptr_t)0x0045A9BA, 9 * sizeof(uint16_t)); // 0 rows .. 8 rows
     g_spacing[9] = 32;                                                             // nine rows (36 for eight, -4 a row)
     put_branch(0x0017A400, 0xE9, list_thunk, 6);

@@ -51,6 +51,7 @@ enum class Str {
     ImageDeleted,
     InstalledGame,
     GameChecked,
+    GameCheckedUs,
     GameWrong,
     ChooseExisting,
     NotAnImage,

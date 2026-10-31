@@ -25,8 +25,12 @@ void extract(const std::wstring &iso, const std::wstring &dest, Progress &p);
 // The space the image's files need, or 0 with *error set when it is not an Xbox disc image.
 uint64_t image_size(const std::wstring &iso, std::wstring *error);
 
-// Whether dir holds the supported build: default.xbe and the four programs it launches with their known SHA-256.
-// *detail: what was found (or what is missing / different).
-bool check_game(const std::wstring &dir, std::wstring *detail);
+// The supported builds: Ninja Gaiden Black Hurricane x2.1 (Chinese / English) and the original US release it was made
+// from (loader/src/build_profile.h).
+enum class Edition { None, X21, Us };
+
+// Whether dir holds a supported build: default.xbe and the programs it launches, with their known SHA-256 (x2.1: four,
+// the US release: its two NES trilogies). *detail: what was found (or what is missing / different); *edition: which.
+bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition = nullptr);
 
 } // namespace install
