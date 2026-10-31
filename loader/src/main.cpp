@@ -550,7 +550,7 @@ void prefer_dedicated_gpu()
 void startup_error(const std::string &text)
 {
     logc("%s", text.c_str());
-    if (!g_cfg.background) MessageBoxW(nullptr, widen(text).c_str(), L"Ninja Gaiden Black Hurricane", MB_OK | MB_ICONERROR);
+    if (!g_cfg.background) MessageBoxW(nullptr, widen(text).c_str(), L"Ninja Gaiden Black", MB_OK | MB_ICONERROR);
 }
 
 int run(void *reserve, unsigned reserve_size)
@@ -589,9 +589,9 @@ int run(void *reserve, unsigned reserve_size)
         wchar_t full[MAX_PATH];
         if (!GetFullPathNameW(g_cfg.xbe_path.c_str(), MAX_PATH, full, nullptr)) wcscpy_s(full, g_cfg.xbe_path.c_str());
         startup_error("The game was not found (" + narrow(full) + ": " + err + ").\n\n"
-                      "Install it with Ninja Gaiden Black Hurricane Launcher.exe (Install page), or give the folder with "
+                      "Install it with Ninja Gaiden Black Any Launcher.exe (Install page), or give the folder with "
                       "the game's files on the command line.\n\n"
-                      "找不到游戏。请先用启动器（Ninja Gaiden Black Hurricane Launcher.exe）的「安装」页安装游戏。");
+                      "找不到游戏。请先用启动器（Ninja Gaiden Black Any Launcher.exe）的「安装」页安装游戏。");
         return 1;
     }
     std::string title = narrow(g_xbe.title);

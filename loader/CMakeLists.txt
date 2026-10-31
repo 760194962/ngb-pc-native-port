@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(POLICY CMP0184)
   cmake_policy(SET CMP0184 NEW) # MSVC_RUNTIME_CHECKS property
 endif()
-project(black_loader VERSION 1.1.12 LANGUAGES C CXX) # the release number (About box, first log line)
+project(black_loader VERSION 1.2.0 LANGUAGES C CXX) # the release number (About box, first log line)
 set(NGB_VERSION_STRING "${PROJECT_VERSION}") # 1.1.5-t..1.1.8-t carried a -t suffix; none from 1.1.10 (the user, 2026-10-31)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -118,7 +118,7 @@ FetchContent_MakeAvailable(SDL3)
 target_sources(blackrt PRIVATE src/input/sdlpad.cpp)
 target_link_libraries(blackrt PRIVATE SDL3::SDL3-static)
 # Xbox SEH handlers run through the same fs:[0] chain; no SafeSEH tables anywhere in the process.
-ngb_version_info(blackrt VFT_DLL "Ninja Gaiden Black Hurricane runtime" "blackrt.dll")
+ngb_version_info(blackrt VFT_DLL "Ninja Gaiden Black runtime" "blackrt.dll")
 target_link_options(blackrt PRIVATE /SAFESEH:NO /MAP) # blackrt.map: port addresses in crash logs -> functions
 
 # black.exe: tiny stub with no CRT. Linked at 0x10000 with a large BSS so its own image owns the
@@ -126,8 +126,9 @@ target_link_options(blackrt PRIVATE /SAFESEH:NO /MAP) # blackrt.map: port addres
 # blackrt.dll then maps the XBE over this image (headers included) and never returns.
 # A Windows-subsystem program: no console window; started from a command prompt it attaches to that one (main.cpp).
 add_executable(black stub/stub.c)
-# The program is named after the game it runs (the user's names, 2026-10-22: no "X21").
-set_target_properties(black PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Hurricane")
+# The program is named after the game it runs (the user's names: 2026-10-22 no "X21"; 2026-10-31 "Any", for every
+# supported build, was "Hurricane").
+set_target_properties(black PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Any")
 # PORT_ICON: the programs' icon (icon group 1, also the windows'): the Dragon Sword from the game's weapons page,
 # launcher/art/icon.ico, in the repository and the release at the user's decision (2026-10-22; CLAUDE.md, README
 # Legal). Another .ico can be given; empty builds without an icon.
@@ -137,7 +138,7 @@ if(PORT_ICON AND EXISTS "${PORT_ICON}")
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc" "1 ICON \"${_port_icon}\"\n")
   target_sources(black PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc")
 endif()
-ngb_version_info(black VFT_APP "Ninja Gaiden Black Hurricane" "Ninja Gaiden Black Hurricane.exe")
+ngb_version_info(black VFT_APP "Ninja Gaiden Black" "Ninja Gaiden Black Any.exe")
 target_link_libraries(black PRIVATE blackrt kernel32)
 set_property(TARGET black PROPERTY MSVC_RUNTIME_CHECKS "")
 target_compile_options(black PRIVATE /GS- /Gs999999)
@@ -149,8 +150,8 @@ target_link_options(black PRIVATE
 add_executable(launcher WIN32 ../launcher/src/main.cpp ../launcher/src/strings.cpp ../launcher/src/install.cpp
   ../launcher/src/saves.cpp ../launcher/src/keys.cpp
   ../launcher/src/launcher.rc)
-set_target_properties(launcher PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Hurricane Launcher")
-ngb_version_info(launcher VFT_APP "Ninja Gaiden Black Hurricane Launcher" "Ninja Gaiden Black Hurricane Launcher.exe")
+set_target_properties(launcher PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Any Launcher")
+ngb_version_info(launcher VFT_APP "Ninja Gaiden Black Launcher" "Ninja Gaiden Black Any Launcher.exe")
 target_compile_definitions(launcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00 WINVER=0x0A00
   GAME_VERSION="${NGB_VERSION_STRING}") # the game program's release number, for the About page
 target_compile_options(launcher PRIVATE /W3 /utf-8 /EHsc)

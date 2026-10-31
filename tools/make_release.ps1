@@ -22,8 +22,8 @@ if ($cmake -match 'set\(NGB_VERSION_STRING "([^"]+)"\)') {
 }
 if (-not $Bin) { $Bin = "$root\loader\build\win32\$Config" }
 $Bin = (Resolve-Path $Bin).Path
-$game = "$Bin\Ninja Gaiden Black Hurricane.exe"
-$launcher = "$Bin\Ninja Gaiden Black Hurricane Launcher.exe"
+$game = "$Bin\Ninja Gaiden Black Any.exe"
+$launcher = "$Bin\Ninja Gaiden Black Any Launcher.exe"
 foreach ($f in $game, $launcher, "$Bin\blackrt.dll") { if (-not (Test-Path $f)) { throw "missing ${f}: build first" } }
 
 # The programs' icon (icon group 1): a build made with PORT_ICON empty would ship without one

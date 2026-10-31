@@ -1,4 +1,4 @@
-// Ninja Gaiden Black Hurricane launcher: starts the game and (in later steps) installs it, sets the display, the
+// Ninja Gaiden Black launcher: starts the game and (in later steps) installs it, sets the display, the
 // graphics card, the controls and manages the saves (project/docs/08). The window is drawn with Direct2D and
 // DirectWrite in the colours and art of the project's website (launcher/art/SOURCES.md).
 //
@@ -266,7 +266,7 @@ std::wstring ini_get(const wchar_t *key, const wchar_t *def = L"")
 
 void ini_set(const wchar_t *key, const std::wstring &v) { WritePrivateProfileStringW(L"launcher", key, v.c_str(), g.ini.c_str()); }
 
-std::wstring game_exe() { return g.dir + L"\\Ninja Gaiden Black Hurricane.exe"; }
+std::wstring game_exe() { return g.dir + L"\\Ninja Gaiden Black Any.exe"; }
 
 // The default game folder: game next to the launcher (the release layout; the game program looks there too when
 // double-clicked). 0.1.0 used game\x21: a launcher.ini from then keeps its path.

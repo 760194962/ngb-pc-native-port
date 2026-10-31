@@ -21,7 +21,7 @@ BEGIN
             VALUE "FileVersion", "@NGB_VERSION_STRING@"
             VALUE "InternalName", "@NGB_RC_INTERNAL@"
             VALUE "OriginalFilename", "@NGB_RC_FILE@"
-            VALUE "ProductName", "Ninja Gaiden Black Hurricane PC Native Port"
+            VALUE "ProductName", "Ninja Gaiden Black PC Native Port"
             VALUE "ProductVersion", "@NGB_VERSION_STRING@"
             VALUE "Comments", "Fan-made native PC port; https://github.com/akirahayabusa/ngb-pc-native-port-release"
         END

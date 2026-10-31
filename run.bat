@@ -4,7 +4,7 @@ rem Paths are relative to this file's folder. To use other locations, set EXE / 
 rem calling this file, or drop a default.xbe onto it.
 setlocal
 cd /d "%~dp0"
-if not defined EXE set "EXE=build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe"
+if not defined EXE set "EXE=build\RelWithDebInfo\Ninja Gaiden Black Any.exe"
 if not defined GAME set "GAME=game\x21\default.xbe"
 if not defined HDD set "HDD=savedata"
 if not defined LOGDIR set "LOGDIR=logs"

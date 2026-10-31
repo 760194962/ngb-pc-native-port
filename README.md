@@ -1,10 +1,10 @@
 **简体中文** | [English](README.en.md)
 
-# NGB PC Native Port（忍者龙剑传 黑之章 飓风版 · PC 原生加载器）
+# NGB PC Native Port（忍者龙剑传 黑之章 · PC 原生加载器）
 
-《忍者龙剑传 黑之章》飓风版中文汉化 **vb-zh-x2.1**（初代 Xbox）的非官方 Windows 原生移植。
+《忍者龙剑传 黑之章》（初代 Xbox）的非官方 Windows 原生移植。支持美版原版，以及基本版 va-zh-x2、飓风版 vb-zh-x2.1 / vb-jp-x2.1。
 
-`Ninja Gaiden Black Hurricane.exe` 读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
+`Ninja Gaiden Black Any.exe` 读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
 等系统部分由加载器在 PC 上重新实现（HLE）。游戏代码不经模拟器逐条解释，也不在磁盘上修改。
 
 本项目从 [black-pc](https://github.com/Spark198rus/black-pc)（BLACK 的原生移植）分支而来，在它的加载器上加入了
@@ -14,15 +14,24 @@
 
 ## 支持的版本
 
-加载器按 XBE 的 SHA-256 识别版本，其他版本不运行。
+加载器按 XBE 的 SHA-256 识别版本，其他版本不运行。支持四种光盘镜像：美版原版，以及哈雅布撒在它基础上做的三个改版。
 
-| 程序 | SHA-256 |
+| 主程序 `default.xbe` | 语言 | 附带程序 | SHA-256 |
+|---|---|---|---|
+| 美版原版 NINJA GAIDEN BLACK（NTSC-U） | 英文 | 街机版 2 个 | `df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda` |
+| 基本版 va-zh-x2 | 中英 | 街机版 2 个 | `00cef52546618eb0149d7895f9042403e95f361b5483aac38933e799c67a50e1` |
+| 飓风版 vb-zh-x2.1 | 中英 | 街机版 + SFC 共 4 个 | `aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6` |
+| 飓风版 vb-jp-x2.1 | 日英 | 街机版 + SFC 共 4 个 | `535778c8a4623195c8f320b85d2d139f20ff13c020d40150adaed54cfdeffc38` |
+
+三个改版都是在美版 `default.xbe` 上打的补丁：各段地址相同，Direct3D、DirectSound 等库逐字节相同，改动的地方都不碰加载器用到的
+地址，所以四个版本共用同一套表和修复。附带程序在各版本里完全相同：
+
+| 附带程序 | SHA-256 |
 |---|---|
-| 主程序 `default.xbe`（vb-zh-x2.1） | `aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6` |
 | `NinjaTomoe.xbe`（原版附带程序，日版） | `2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff` |
 | `NinjaTrilogy.xbe`（原版附带程序，美版） | `31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621` |
-| `NinjaFCJ.xbe`（SFC 三部曲，日版，x2.1 加入） | `b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31` |
-| `NinjaFCU.xbe`（SFC 三部曲，美版，x2.1 加入） | `9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1` |
+| `NinjaFCJ.xbe`（SFC 三部曲，日版，飓风版加入） | `b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31` |
+| `NinjaFCU.xbe`（SFC 三部曲，美版，飓风版加入） | `9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1` |
 
 附带程序从主菜单的"街机版忍者龙剑传"和"SFC忍者龙剑传"进入：游戏调用 `XLaunchNewImage`，加载器以同样的参数重启并
 载入目标 XBE。
@@ -64,7 +73,7 @@
 ## 运行
 
 **需要**：Windows 10 或 11（64 位系统即可，程序本身是 32 位），支持 Direct3D 9 的显卡（集成显卡也可以），以及你自己的
-vb-zh-x2.1 游戏镜像。不需要另外安装任何运行环境：用到的 Direct3D、XAudio2、XInput 都是 Windows 自带的，C++ 运行库已编进程序。
+游戏镜像（上面四种之一）。不需要另外安装任何运行环境：用到的 Direct3D、XAudio2、XInput 都是 Windows 自带的，C++ 运行库已编进程序。
 
 **用启动器（推荐）**：
 
@@ -72,15 +81,17 @@ vb-zh-x2.1 游戏镜像。不需要另外安装任何运行环境：用到的 Di
 
    ```
    NGB-Hurricane\
-     Ninja Gaiden Black Hurricane Launcher.exe   启动器：从这里进
-     Ninja Gaiden Black Hurricane.exe            游戏程序，连同 blackrt.dll
-     game\                                          游戏安装位置（启动器装进来）
-     savedata\                                      Xbox 硬盘：存档与游戏设定（第一次运行时自动建立）
+     Ninja Gaiden Black Any Launcher.exe   启动器：从这里进
+     Ninja Gaiden Black Any.exe            游戏程序，连同 blackrt.dll
+     game\                                 游戏安装位置（启动器装进来）
+     savedata\                             Xbox 硬盘：存档与游戏设定（第一次运行时自动建立）
    ```
 
-2. 打开启动器，在「安装」页选你的 x2.1 镜像（`.iso`），装到「游戏安装路径」（默认是启动器旁的 `game`）。装完会逐个核对游戏
+2. 打开启动器，在「安装」页选你的游戏镜像（`.iso`），装到「游戏安装路径」（默认是启动器旁的 `game`）。装完会逐个核对游戏
    程序，也可以选择把镜像移到回收站。已经解包过的游戏，在同一页选那个文件夹即可。
-   装好后直接双击 `Ninja Gaiden Black Hurricane.exe` 也能开始游戏（它会找启动器装好的游戏）。
+   装好后直接双击 `Ninja Gaiden Black Any.exe` 也能开始游戏（它会找启动器装好的游戏）。
+   从 1.1.12 或更早的版本升级：程序改名了（原来叫 `Ninja Gaiden Black Hurricane.exe` / `…Hurricane Launcher.exe`），覆盖解压后
+   可以删掉这两个旧程序，桌面快捷方式要重新建。存档和设置不受影响。
 3. 在「显示」「图形」「控制」页按需要调整（按「保存」才生效，每项旁的「?」有说明），回到「开始游戏」页开始。
 
 「存档」页可以备份 / 还原存档、与 xRevive 互相导入导出；「关于」页有版本与法律声明；「支持作者」页有作者的微信、支付宝收款码，赞助全凭自愿。
@@ -90,7 +101,7 @@ vb-zh-x2.1 游戏镜像。不需要另外安装任何运行环境：用到的 Di
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe   构建产物，连同 blackrt.dll（见"构建"）
+  build\RelWithDebInfo\Ninja Gaiden Black Any.exe   构建产物，连同 blackrt.dll（见"构建"）
   game\x21\default.xbe                                       你自己解包的 x2.1 镜像（整个镜像的文件）
   savedata\                                                  Xbox 硬盘
   logs\                                                      日志 black.log、截图 shots\、命令文件 presses.txt
@@ -114,7 +125,7 @@ device ... on '显卡名'` 一行记着实际用的是哪张卡。
 **放在别的位置**：把 `default.xbe` 拖到 `run.bat` 上启动；或者在命令行里先设好路径再运行：
 
 ```bat
-set EXE=D:\ngb\Ninja Gaiden Black Hurricane.exe
+set EXE=D:\ngb\Ninja Gaiden Black Any.exe
 set GAME=D:\ngb\x21\default.xbe
 set HDD=D:\ngb\savedata
 set LOGDIR=D:\ngb\logs
@@ -154,11 +165,11 @@ Esc 为 Start……），在启动器的「控制」页可改，也可把手柄�
 `run.bat` 实际执行的命令（也可以自己手动输入）：
 
 ```
-"Ninja Gaiden Black Hurricane.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+"Ninja Gaiden Black Any.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
 ```
 
 - `--shot-every 100000000` 让定时截图实际上不发生，只在你用 `shot:` 要求时才截。默认值 60 是每秒截一张，会造成卡顿。
-- `"Ninja Gaiden Black Hurricane.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
+- `"Ninja Gaiden Black Any.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
 
 **联网（Insignia 排行榜，可选）**
 
@@ -236,7 +247,7 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
 cmake --build build --config RelWithDebInfo
 ```
 
-得到 `build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe` 与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
+得到 `build\RelWithDebInfo\Ninja Gaiden Black Any.exe` 与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
 2022 / 2026 预设。
 
 **SDL3**：配置时 CMake 会下载 SDL3 3.4.18 的源码包（校验 SHA256）并与程序一起编译；已有解压好的源码时用
@@ -277,7 +288,7 @@ cmake --build build --config RelWithDebInfo
 
 ## 原理
 
-`Ninja Gaiden Black Hurricane.exe` 是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
+`Ninja Gaiden Black Any.exe` 是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
 `default.xbe` 映射进这段地址，提供游戏导入的 Xbox 内核函数，并在 Xbox 库（Direct3D 8、DirectSound、XAPI）的入口
 打补丁，转到 PC 上的实现。
 

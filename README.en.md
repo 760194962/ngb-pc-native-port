@@ -1,11 +1,11 @@
 [简体中文](README.md) | **English**
 
-# NGB PC Native Port (Ninja Gaiden Black "Hurricane" · native PC loader)
+# NGB PC Native Port (Ninja Gaiden Black · native PC loader)
 
-An unofficial native Windows port of **vb-zh-x2.1**, the Chinese-localized "Hurricane" edition of *Ninja Gaiden Black*
-(original Xbox).
+An unofficial native Windows port of *Ninja Gaiden Black* (original Xbox): the original US release, and the basic
+edition va-zh-x2 and the Hurricane editions vb-zh-x2.1 / vb-jp-x2.1 made from it.
 
-`Ninja Gaiden Black Hurricane.exe` loads your own `default.xbe` and runs the original x86 game code directly on the PC; the Xbox kernel,
+`Ninja Gaiden Black Any.exe` loads your own `default.xbe` and runs the original x86 game code directly on the PC; the Xbox kernel,
 Direct3D 8, DirectSound and the other system parts are reimplemented on the PC by the loader (HLE). The game code is
 not interpreted instruction by instruction, and it is never modified on disk.
 
@@ -17,15 +17,26 @@ support is kept.
 
 ## Supported builds
 
-The loader identifies the build by the XBE's SHA-256 and does not run any other.
+The loader identifies the build by the XBE's SHA-256 and does not run any other. Four disc images are supported: the
+original US release and three editions made from it by 哈雅布撒 (Hayabusa).
 
-| Program | SHA-256 |
+| Main program `default.xbe` | Language | Bundled programs | SHA-256 |
+|---|---|---|---|
+| Original US release NINJA GAIDEN BLACK (NTSC-U) | English | 2 arcade | `df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda` |
+| Basic edition va-zh-x2 | Chinese / English | 2 arcade | `00cef52546618eb0149d7895f9042403e95f361b5483aac38933e799c67a50e1` |
+| Hurricane edition vb-zh-x2.1 | Chinese / English | 2 arcade + 2 SNES | `aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6` |
+| Hurricane edition vb-jp-x2.1 | Japanese / English | 2 arcade + 2 SNES | `535778c8a4623195c8f320b85d2d139f20ff13c020d40150adaed54cfdeffc38` |
+
+The three editions are the US `default.xbe` patched: the same sections at the same addresses, the Direct3D, DirectSound
+and other library sections byte for byte identical, and no change at an address the loader uses, so all four share
+the same tables and fixes. The bundled programs are identical in every build:
+
+| Bundled program | SHA-256 |
 |---|---|
-| Main program `default.xbe` (vb-zh-x2.1) | `aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6` |
 | `NinjaTomoe.xbe` (bundled with the original release, Japanese) | `2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff` |
 | `NinjaTrilogy.xbe` (bundled with the original release, US) | `31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621` |
-| `NinjaFCJ.xbe` (SNES trilogy, Japanese, added by x2.1) | `b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31` |
-| `NinjaFCU.xbe` (SNES trilogy, US, added by x2.1) | `9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1` |
+| `NinjaFCJ.xbe` (SNES trilogy, Japanese, added by the Hurricane editions) | `b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31` |
+| `NinjaFCU.xbe` (SNES trilogy, US, added by the Hurricane editions) | `9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1` |
 
 The launched programs are entered from the main menu's arcade and SNES entries: the game calls `XLaunchNewImage`, and
 the loader restarts itself with the same options and loads the target XBE.
@@ -77,7 +88,7 @@ These also happen on the Xbox; the port fixes them. Each fix can be switched bac
 ## Running
 
 **Requirements**: Windows 10 or 11 (64-bit is fine; the program itself is 32-bit), a Direct3D 9 graphics card
-(integrated graphics work too), and your own vb-zh-x2.1 game image. Nothing else to install: Direct3D, XAudio2 and
+(integrated graphics work too), and your own game image (one of the four above). Nothing else to install: Direct3D, XAudio2 and
 XInput come with Windows, and the C++ runtime is built into the programs.
 
 **With the launcher (recommended)**:
@@ -86,17 +97,20 @@ XInput come with Windows, and the C++ runtime is built into the programs.
 
    ```
    NGB-Hurricane\
-     Ninja Gaiden Black Hurricane Launcher.exe   the launcher: start here
-     Ninja Gaiden Black Hurricane.exe            the game program, with blackrt.dll
-     game\                                          where the game is installed (by the launcher)
-     savedata\                                      the Xbox hard disk: saves and the game's settings (made on the first run)
+     Ninja Gaiden Black Any Launcher.exe   the launcher: start here
+     Ninja Gaiden Black Any.exe            the game program, with blackrt.dll
+     game\                                 where the game is installed (by the launcher)
+     savedata\                             the Xbox hard disk: saves and the game's settings (made on the first run)
    ```
 
-2. Open the launcher; on the Install page choose your x2.1 image (`.iso`) and install it to the game folder (by default
+2. Open the launcher; on the Install page choose your game image (`.iso`) and install it to the game folder (by default
    `game` beside the launcher). The install checks the game programs and can move the image to the Recycle Bin. A
    game already extracted: choose its folder on the same page.
-   Once installed, double-clicking `Ninja Gaiden Black Hurricane.exe` starts the game too (it finds what the launcher
+   Once installed, double-clicking `Ninja Gaiden Black Any.exe` starts the game too (it finds what the launcher
    installed).
+   Upgrading from 1.1.12 or earlier: the programs were renamed (they were `Ninja Gaiden Black Hurricane.exe` / `…Hurricane
+   Launcher.exe`); after extracting over the old folder you can delete those two, and make desktop shortcuts again. Saves
+   and settings are kept.
 3. Adjust the Display, Graphics and Controls pages if you like (changes apply once saved; each "?" explains its
    setting), then start from the Play page.
 
@@ -108,7 +122,7 @@ from this layout:
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe   the build, with blackrt.dll (see "Building")
+  build\RelWithDebInfo\Ninja Gaiden Black Any.exe   the build, with blackrt.dll (see "Building")
   game\x21\default.xbe                                       your own extracted x2.1 image (all of its files)
   savedata\                                                  the Xbox hard disk
   logs\                                                      the log black.log, screenshots shots\, the command file presses.txt
@@ -136,7 +150,7 @@ overrides that choice. The log line
 **Other locations**: drop `default.xbe` onto `run.bat`, or set the paths in a command prompt first:
 
 ```bat
-set EXE=D:\ngb\Ninja Gaiden Black Hurricane.exe
+set EXE=D:\ngb\Ninja Gaiden Black Any.exe
 set GAME=D:\ngb\x21\default.xbe
 set HDD=D:\ngb\savedata
 set LOGDIR=D:\ngb\logs
@@ -185,12 +199,12 @@ Deleting the folder does no harm; the shaders are just compiled again.
 The command `run.bat` runs (you can also type it yourself):
 
 ```
-"Ninja Gaiden Black Hurricane.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+"Ninja Gaiden Black Any.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
 ```
 
 - `--shot-every 100000000` keeps timed screenshots from ever happening; screenshots are taken only on a `shot:`
   request. The default of 60 is one a second, which makes the game stutter.
-- `"Ninja Gaiden Black Hurricane.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
+- `"Ninja Gaiden Black Any.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
   BLACK-only and have no effect on Ninja Gaiden.
 
 **Online (Insignia leaderboards, optional)**
@@ -286,7 +300,7 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
 cmake --build build --config RelWithDebInfo
 ```
 
-This produces `build\RelWithDebInfo\Ninja Gaiden Black Hurricane.exe` and `blackrt.dll`. `loader/CMakePresets.json` also has upstream's
+This produces `build\RelWithDebInfo\Ninja Gaiden Black Any.exe` and `blackrt.dll`. `loader/CMakePresets.json` also has upstream's
 Visual Studio 2022 / 2026 presets.
 
 **SDL3**: at configure time CMake downloads the SDL3 3.4.18 source release (SHA256 checked) and builds it with the
@@ -328,7 +342,7 @@ Decompiler and disassembler output, game files and test-run folders stay local a
 
 ## How it works
 
-`Ninja Gaiden Black Hurricane.exe` is a small stub linked at the XBE's base address, so that it holds that address range before Windows can
+`Ninja Gaiden Black Any.exe` is a small stub linked at the XBE's base address, so that it holds that address range before Windows can
 put anything there. `blackrt.dll` maps `default.xbe` into the range, provides the Xbox kernel functions the game
 imports, and patches the entry points of the Xbox libraries (Direct3D 8, DirectSound, XAPI) to go to PC
 implementations.
