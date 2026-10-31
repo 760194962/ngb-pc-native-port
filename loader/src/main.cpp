@@ -667,6 +667,7 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && profile->aspect_const) install_ngb_aspect(); // Ninja Gaiden Black's builds and Ninja Gaiden 2004
     else g_cfg.aspect_w = 16, g_cfg.aspect_h = 9;
     if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
+    install_ng04_exitmenu(); // Ninja Gaiden (2004)'s title menu: the same, its own way
     if (profile && !black && !profile->aux) install_ngb_livedash(); // Ⓐ in Ranking's Live boxes: cancel, not the dashboard
     nvnet_install_trap(); // online play: the NIC's registers (net/nvnet.cpp), after every other exception handler
     if (!profile) g_cfg.fps = 30;

@@ -39,6 +39,7 @@ add_library(blackrt SHARED
   src/fov.cpp
   src/ngb_aspect.cpp
   src/ngb_exitmenu.cpp
+  src/ng04_exitmenu.cpp
   src/ngb_livedash.cpp
   src/fe/calls.cpp
   src/fe/vars.cpp
