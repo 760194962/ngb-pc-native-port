@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <cwctype>
 #include <iterator>
 #include <vector>
 
@@ -260,6 +261,97 @@ DlcStatus dlc_status(const std::wstring &hdd)
     st.pack1 = pack(L"5443000300030002");
     st.pack2 = pack(L"5443000300030003");
     return st;
+}
+
+static uint64_t tree_bytes(const std::wstring &dir)
+{
+    uint64_t n = 0;
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    do {
+        if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) n += tree_bytes(dir + L"\\" + fd.cFileName);
+        else n += (uint64_t)fd.nFileSizeHigh << 32 | fd.nFileSizeLow;
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return n;
+}
+
+// A content package's name: ContentMeta.xbx holds UTF-16 text after its signed header, "[default]" then
+// Name="..." (then the same per language)
+static std::wstring content_name(const std::wstring &dir)
+{
+    HANDLE h = CreateFileW((dir + L"\\ContentMeta.xbx").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return L"";
+    std::vector<uint8_t> b(64 * 1024);
+    DWORD got = 0;
+    ReadFile(h, b.data(), (DWORD)b.size(), &got, nullptr);
+    CloseHandle(h);
+    b.resize(got & ~1u);
+    std::wstring text((const wchar_t *)b.data(), b.size() / 2);
+    size_t at = text.find(L"[default]");
+    size_t name = text.find(L"Name=\"", at == std::wstring::npos ? 0 : at);
+    if (name == std::wstring::npos) return L"";
+    name += 6;
+    size_t end = text.find(L'"', name);
+    if (end == std::wstring::npos || end - name > 64) return L"";
+    return text.substr(name, end - name);
+}
+
+std::vector<ContentItem> installed_content(const std::wstring &hdd)
+{
+    std::vector<ContentItem> out;
+    std::wstring t = ng04_tdata(hdd);
+    if (is_dir(t + L"\\$u")) out.push_back({L"$u", L"", tree_bytes(t + L"\\$u")});
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((t + L"\\$c\\*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == L'.') continue;
+            std::wstring d = t + L"\\$c\\" + fd.cFileName;
+            std::wstring name = content_name(d);
+            out.push_back({fd.cFileName, name.empty() ? std::wstring(fd.cFileName) : name, tree_bytes(d)});
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    return out;
+}
+
+static bool remove_tree(const std::wstring &dir)
+{
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
+            std::wstring p = dir + L"\\" + fd.cFileName;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) remove_tree(p);
+            else {
+                SetFileAttributesW(p.c_str(), FILE_ATTRIBUTE_NORMAL);
+                DeleteFileW(p.c_str());
+            }
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    return RemoveDirectoryW(dir.c_str()) != 0;
+}
+
+bool remove_content(const std::wstring &hdd, const std::wstring &id, std::wstring *error)
+{
+    // only the update folder or a content id (16 hex digits) under this title's folder
+    bool hex = id.size() == 16 && std::all_of(id.begin(), id.end(), [](wchar_t c) { return iswxdigit(c) != 0; });
+    if (id != L"$u" && !hex) {
+        *error = L"not a content id: " + id;
+        return false;
+    }
+    std::wstring dir = ng04_tdata(hdd) + (id == L"$u" ? std::wstring(L"\\$u") : L"\\$c\\" + id);
+    if (!is_dir(dir)) return true;
+    if (!remove_tree(dir)) {
+        *error = L"cannot delete " + dir + L" (is the game running?)";
+        return false;
+    }
+    return true;
 }
 
 // Copies every file under from into to (folders made), replacing files of the same name.

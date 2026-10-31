@@ -58,6 +58,7 @@ struct App {
     IWICImagingFactory *wic = nullptr;
     ID2D1HwndRenderTarget *rt = nullptr;
     IWICBitmapSource *hero_src = nullptr, *texture_src = nullptr; // decoded once, made into bitmaps per target
+    IWICBitmapSource *hero_ng04_src = nullptr; // the key art in the Ninja Gaiden 2004 module: its title screen
     IWICBitmapSource *pay_src[2] = {}; // the author's WeChat Pay and Alipay codes (the Support page)
     Page page = kStart;
     int hover = -1; // hit id under the mouse
@@ -71,6 +72,8 @@ struct App {
     // last result
     std::wstring dlc_dir;
     install::DlcStatus dlc;
+    std::vector<install::ContentItem> content; // what can be uninstalled (read with dlc)
+    std::wstring uninstall_id, uninstall_name, uninstall_size; // the one the confirmation asks about
     bool dlc_read = false;
     std::wstring dlc_result;
     bool dlc_bad = false;
@@ -116,7 +119,7 @@ struct App {
     bool dns_note_bad = false;
 };
 enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete, kAskReset, kAskUnsavedStart, kAskUnsavedClose, kAskRestore, kAskImport,
-       kAskExport, kAskResign };
+       kAskExport, kAskResign, kAskUninstall };
 App g;
 
 // Hit ids: 0..kPageCount-1 the navigation, then these
@@ -132,7 +135,8 @@ enum {
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
     kHitModule = 580, // + 0 Black, 1 Ninja Gaiden 2004
     kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc,
-    kHitResign = 590
+    kHitResign = 590,
+    kHitUninstall = 2000, // Ninja Gaiden 2004's content to uninstall: its drop-down list (+ 1 + row)
 };
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -705,6 +709,26 @@ void install_dlc_now()
     SetCursor(old);
     g.dlc_read = false;
     g.dlc_result = ok ? std::wstring(S(Str::DlcDone)) : std::wstring(S(Str::DlcFailed)) + err;
+    g.dlc_bad = !ok;
+}
+
+std::wstring content_size_text(uint64_t bytes)
+{
+    wchar_t b[32];
+    if (bytes >= (1ull << 20)) swprintf(b, 32, L"%.1f MB", bytes / 1048576.0);
+    else swprintf(b, 32, L"%u KB", (unsigned)((bytes + 1023) / 1024));
+    return b;
+}
+
+// Ninja Gaiden 2004: one installed item off the Xbox hard disk (the update, a pack, content the game downloaded)
+void uninstall_now()
+{
+    std::wstring err;
+    bool ok = install::remove_content(save_hdd(), g.uninstall_id, &err);
+    g.dlc_read = false;
+    wchar_t b[1024];
+    swprintf(b, 1024, S(ok ? Str::UninstallDone : Str::UninstallFailed), ok ? g.uninstall_name.c_str() : err.c_str());
+    g.dlc_result = b;
     g.dlc_bad = !ok;
 }
 
@@ -1367,11 +1391,18 @@ struct Painter {
         if (g.ask == kAskImport) title = Str::ImportX, body = Str::AskImport;
         if (g.ask == kAskExport) title = Str::ExportX, body = Str::AskExport;
         if (g.ask == kAskResign) title = Str::AskResignTitle, body = Str::AskResign;
+        if (g.ask == kAskUninstall) title = Str::AskUninstallTitle, body = Str::AskUninstall;
+        std::wstring body_text = S(body);
+        if (g.ask == kAskUninstall) {
+            wchar_t b[1024];
+            swprintf(b, 1024, S(body), g.uninstall_name.c_str(), g.uninstall_size.c_str());
+            body_text = b;
+        }
         const float pw = 560, ph = 300, px = (kW - pw) / 2, py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
         stroke(p, kInk3, 1.0f, 6);
-        fill({p.left, p.top + 6, p.left + 3, p.bottom - 6}, g.ask == kAskDelete ? kBlood : kGold, 0.85f);
+        fill({p.left, p.top + 6, p.left + 3, p.bottom - 6}, g.ask == kAskDelete || g.ask == kAskUninstall ? kBlood : kGold, 0.85f);
         g_hits.push_back({0x7fff, p});
         text(S(title), {p.left + 34, p.top + 22, p.right - 30, p.top + 58}, 19, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({p.left + 34, p.top + 62, p.left + 64, p.top + 64}, kBlood);
@@ -1382,7 +1413,7 @@ struct Painter {
             fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 23, 18);
             ID2D1SolidColorBrush *b = nullptr;
             rt->CreateSolidColorBrush(rgb(kBone, 0.92f), &b);
-            const wchar_t *s = S(body);
+            const wchar_t *s = body_text.c_str();
             if (b) rt->DrawText(s, (UINT32)wcslen(s), fmt, {p.left + 34, p.top + 78, p.right - 34, p.bottom - 74}, b), b->Release();
             fmt->Release();
         }
@@ -1506,6 +1537,7 @@ struct Painter {
         // Ninja Gaiden 2004: the Hurricane Packs (optional; they bring the 1.06 update)
         if (!g.dlc_read) {
             g.dlc = install::dlc_status(save_hdd());
+            g.content = install::installed_content(save_hdd());
             g.dlc_read = true;
         }
         D2D1_RECT_F c3 = {x, 526, x + w, 526 + 142};
@@ -1528,8 +1560,17 @@ struct Painter {
             if (g.dlc.pack1) st += std::wstring(g.dlc.update ? sep : L"") + S(Str::DlcPack1);
             if (g.dlc.pack2) st += std::wstring(g.dlc.update || g.dlc.pack1 ? sep : L"") + S(Str::DlcPack2);
         }
-        text(st, {c3.left + 222, y3, c3.right - 20, y3 + 36}, 13, g.dlc_bad ? kBlood : have_dlc ? kGold : kAsh, 1.0f,
+        text(st, {c3.left + 222, y3, c3.right - 186, y3 + 36}, 13, g.dlc_bad ? kBlood : have_dlc ? kGold : kAsh, 1.0f,
              DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+        // what is installed, to uninstall one (a confirmation first): the update, the packs, what the game downloaded
+        std::vector<ListRow> rows;
+        for (const install::ContentItem &c : g.content)
+            rows.push_back({c.id == L"$u" ? std::wstring(S(Str::DlcUpdate)) : c.name, L"", content_size_text(c.bytes)});
+        if (rows.empty()) rows.push_back({S(Str::UninstallNone), L"", L"", 0, true});
+        wchar_t count[32];
+        swprintf(count, 32, S(Str::UninstallCount), (int)g.content.size());
+        drop_list(kHitUninstall, c3.right - 176, y3 + 2, {156, 320, 0, 0}, {S(Str::UninstallBox), L"", g.content.empty() ? L"" : count},
+                  rows, -1, L"");
     }
 
     // A row of options; returns nothing, registers base + i for each
@@ -2231,22 +2272,25 @@ void paint()
         g.rt->SetDpi(dpi, dpi);
         g.rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     }
-    static ID2D1Bitmap *hero, *texture, *pay[2];
+    static ID2D1Bitmap *hero, *hero_ng04, *texture, *pay[2];
     static ID2D1RenderTarget *made_for;
     if (made_for != g.rt) {
         release(hero);
+        release(hero_ng04);
         release(texture);
         for (auto &b : pay) release(b);
         hero = to_bitmap(g.rt, g.hero_src);
+        hero_ng04 = to_bitmap(g.rt, g.hero_ng04_src);
         texture = to_bitmap(g.rt, g.texture_src);
         for (int i = 0; i < 2; i++) pay[i] = to_bitmap(g.rt, g.pay_src[i]);
         made_for = g.rt;
     }
     g.rt->BeginDraw();
-    Painter p{g.rt, hero, texture, pay};
+    Painter p{g.rt, g.module == 1 && hero_ng04 ? hero_ng04 : hero, texture, pay};
     p.draw();
     if (g.rt->EndDraw() == D2DERR_RECREATE_TARGET) {
         release(hero);
+        release(hero_ng04);
         release(texture);
         for (auto &b : pay) release(b);
         release(g.rt);
@@ -2582,6 +2626,13 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 black_ini_set("render", "scale");
                 black_ini_set("scale", std::to_string(row));
             }
+            if (g.list_open == kHitUninstall && row >= 0 && row < (int)g.content.size()) { // asked first
+                const install::ContentItem &c = g.content[row];
+                g.uninstall_id = c.id;
+                g.uninstall_name = c.id == L"$u" ? std::wstring(S(Str::DlcUpdate)) : c.name;
+                g.uninstall_size = content_size_text(c.bytes);
+                g.ask = kAskUninstall;
+            }
             g.list_open = 0;
             g.list_scroll = g.list_scroll_max = 0;
             InvalidateRect(h, nullptr, FALSE);
@@ -2601,6 +2652,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 if (ask == kAskRestore || ask == kAskImport || ask == kAskExport || ask == kAskResign) saves_action(ask);
                 else if (ask == kAskDelete) delete_image();
                 else if (ask == kAskReset) reset_page(g.page);
+                else if (ask == kAskUninstall) uninstall_now();
                 else start_install();
             }
             InvalidateRect(h, nullptr, FALSE);
@@ -2738,7 +2790,7 @@ int snap(const wchar_t *out, int page)
     D2D1_RENDER_TARGET_PROPERTIES p = D2D1::RenderTargetProperties(
         D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
     if (FAILED(g.d2d->CreateWicBitmapRenderTarget(bmp, p, &rt))) return 1;
-    ID2D1Bitmap *hero = to_bitmap(rt, g.hero_src), *texture = to_bitmap(rt, g.texture_src);
+    ID2D1Bitmap *hero = to_bitmap(rt, g.module == 1 && g.hero_ng04_src ? g.hero_ng04_src : g.hero_src), *texture = to_bitmap(rt, g.texture_src);
     ID2D1Bitmap *pay[2] = {to_bitmap(rt, g.pay_src[0]), to_bitmap(rt, g.pay_src[1])};
     rt->BeginDraw();
     Painter pt{rt, hero, texture, pay};
@@ -2787,6 +2839,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
         FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&g.wic))))
         return 1;
     g.hero_src = load_jpeg(IDR_HERO);
+    g.hero_ng04_src = load_jpeg(IDR_HERO_NG04);
     g.texture_src = load_jpeg(IDR_TEXTURE);
     g.pay_src[0] = load_jpeg(IDR_PAY_WECHAT);
     g.pay_src[1] = load_jpeg(IDR_PAY_ALIPAY);
@@ -2832,6 +2885,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
                             : !wcscmp(v, L"shadow") ? kHitShadow
                             : !wcscmp(v, L"aniso")  ? kHitAniso
                             : !wcscmp(v, L"padmap") ? kHitPadMap
+                            : !wcscmp(v, L"uninstall") ? kHitUninstall
                                                     : kHitResList;
         }
         if (!wcscmp(argv[i], L"--show-help") && i + 1 < argc) // with --snap: open a "?" panel (image | installed | register | 0..12 a setting's)

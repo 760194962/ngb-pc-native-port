@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace install {
 
@@ -48,5 +49,16 @@ DlcStatus dlc_status(const std::wstring &hdd);
 // folder holding $u and $c) into <hdd>\Partition1\TDATA\54430003. The game program signs the packs for the console at
 // start (loader kernel/k_content.cpp). *error: why not.
 bool install_dlc(const std::wstring &src, const std::wstring &hdd, std::wstring *error);
+
+// What is installed there, to uninstall: the title update (id "$u", no name: the launcher names it) first, then each
+// content folder of $c (its id, the name its ContentMeta.xbx gives, e.g. "Hurricane 1" or a notice downloaded in the
+// game), with its size on disk.
+struct ContentItem {
+    std::wstring id, name;
+    uint64_t bytes = 0;
+};
+std::vector<ContentItem> installed_content(const std::wstring &hdd);
+// Deletes one of them (its whole folder). *error: why not.
+bool remove_content(const std::wstring &hdd, const std::wstring &id, std::wstring *error);
 
 } // namespace install

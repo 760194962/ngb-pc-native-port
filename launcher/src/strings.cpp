@@ -526,6 +526,14 @@ const Pair kText[(int)Str::Count] = {
     {L"已重签 %d 个存档文件。原来的存档已备份到：%s", L"Re-signed %d save files. The saves before are backed up in: %s"},
     {L"所有存档的签名都正确，不需要重签。", L"Every save is signed right: nothing to re-sign."},
     {L"重签前自动备份", L"Before re-signing"},
+    {L"卸载内容", L"Uninstall"},
+    {L"%d 项", L"%d installed"},
+    {L"没有已安装的内容", L"Nothing installed"},
+    {L"卸载这项内容？", L"Uninstall this content?"},
+    {L"从游戏硬盘上删除「%s」（%s）。\n\n更新 1.06 和飓风包随时可以用上面的「安装飓风包」装回来；在游戏里下载的通知等内容，可以在忍者大师锦标赛的「NEW NOTICE!」里重新下载。",
+     L"Deletes “%s” (%s) from the game’s hard disk.\n\nUpdate 1.06 and the Hurricane Packs come back with Install above at any time; notices and other content downloaded in the game download again from “NEW NOTICE!” in the Master Ninja Tournament."},
+    {L"已卸载：%s", L"Uninstalled: %s"},
+    {L"卸载失败：%s", L"Could not uninstall: %s"},
 };
 
 } // namespace

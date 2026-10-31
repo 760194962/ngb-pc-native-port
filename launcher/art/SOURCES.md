@@ -12,6 +12,16 @@ launcher (2026-10-22).
 The Ryu Hayabusa artwork is Koei Tecmo's. It is used here as the interface of a non-commercial fan port, at the
 author's decision (2026-10-22); see the legal note in README.md.
 
+## `hero_ng04.jpg`: the key art of the Ninja Gaiden (2004) module
+
+Ninja Gaiden (2004)'s title screen ("PRESS START BUTTON"; the red sky, the ninja's silhouette and the logo), captured
+from the user's own game running in the port (title update 1.06.04, frame 480 of run r764, 1728x972) at the author's
+request (2026-11-01: "启动器切换到2004的时候，背景用ng2004标题界面的背景图，保持和ngb相同的摆放风格"). The source rectangle
+x 0-1466, y 30-700 (above "PRESS START BUTTON") was placed on a 1720x860 canvas at x 254, its left and bottom 140
+pixels feathered into the background's own dark red (58, 0, 0) that fills the rest, so the silhouette and the logo sit at
+the top right as Ryu does in `hero.jpg`; then scaled to 1024x512 (JPEG quality 90). SHA-256 (first 20 hex):
+`816d4de76dc108fe0f54`. The artwork is Koei Tecmo's.
+
 ## `icon.ico`: the programs' icon
 
 The Dragon Sword from the game's pause menu (weapons page): its texture dumped from the user's own game with the

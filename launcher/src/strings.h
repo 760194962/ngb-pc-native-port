@@ -333,6 +333,14 @@ enum class Str {
     ResignDone,
     ResignNone,
     NoteBeforeResign,
+    // Ninja Gaiden 2004: uninstalling content (the title update, the Hurricane Packs, what the game downloaded)
+    UninstallBox,
+    UninstallCount,
+    UninstallNone,
+    AskUninstallTitle,
+    AskUninstall,
+    UninstallDone,
+    UninstallFailed,
     Count
 };
 
