@@ -53,6 +53,15 @@ bool kmem_init()
     return true;
 }
 
+// The XBE's XNET section (kernel_resolve_thunks): the callers whose buffers the NIC reads (x2.1 0x3AF7C0-0x3C1558,
+// Ninja Gaiden 2004 0x397660-0x3A8990).
+static uint32_t g_xnet_lo, g_xnet_hi;
+void kmem_set_xnet_range(uint32_t lo, uint32_t hi)
+{
+    g_xnet_lo = lo;
+    g_xnet_hi = hi;
+}
+
 namespace xk {
 
 // --- pool ---
@@ -179,7 +188,7 @@ uint32_t __stdcall MmGetPhysicalAddress(void *BaseAddress)
     // read as contiguous memory (a frame of zeros on the wire, run user_online), so XNET gets the address with the top
     // bit set, which the NIC model (net/nvnet.cpp) maps back; real physical addresses are all below 64 MB.
     uint32_t caller = (uint32_t)(uintptr_t)_ReturnAddress();
-    if (online_enabled() && caller >= 0x003AF7C0 && caller < 0x003C1558) return (uint32_t)(uintptr_t)p | 0x80000000u;
+    if (online_enabled() && caller >= g_xnet_lo && caller < g_xnet_hi) return (uint32_t)(uintptr_t)p | 0x80000000u;
     KNOTE_ONCE("MmGetPhysicalAddress(%p) on non-contiguous memory; returning address & 0x7FFFFFFF", BaseAddress);
     return (uint32_t)(uintptr_t)p & 0x7FFFFFFF;
 }

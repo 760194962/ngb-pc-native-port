@@ -164,6 +164,8 @@ void kfile_add_symlink(const std::string &name, const std::string &target);
 
 // Contiguous memory (k_memory.cpp)
 bool kmem_init();
+void kmem_set_xnet_range(uint32_t lo, uint32_t hi); // the XBE's XNET section, for MmGetPhysicalAddress
+void sign_title_content(uint32_t title_id); // k_content.cpp: the title's downloadable content, signed for this console
 constexpr uint32_t CONTIGUOUS_BASE = 0x80000000;
 constexpr uint32_t CONTIGUOUS_SIZE = 64u << 20;
 

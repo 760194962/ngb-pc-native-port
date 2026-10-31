@@ -280,6 +280,9 @@ bool kernel_resolve_thunks(const Xbe &xbe)
     void *rtl_unwind = (void *)GetProcAddress(ntdll, "RtlUnwind");
     void *rtl_raise = (void *)GetProcAddress(ntdll, "RtlRaiseException");
 
+    for (const XbeSection &s : xbe.sections)
+        if (s.name == "XNET") kmem_set_xnet_range(s.vaddr, s.vaddr + s.vsize);
+
     uint32_t *thunk = (uint32_t *)(uintptr_t)xbe.thunk_addr;
     int implemented = 0, stubbed = 0, vars = 0;
     std::string stubs;

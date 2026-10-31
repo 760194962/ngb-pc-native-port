@@ -70,6 +70,7 @@ add_library(blackrt SHARED
   src/net/nvnet.cpp
   src/net/vnet.cpp
   src/fiber.cpp
+  src/kernel/k_content.cpp
   src/ngb/d3d_ngb.cpp
   src/d3d/dispatch.cpp
   src/d3d/device.cpp

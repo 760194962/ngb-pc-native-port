@@ -627,6 +627,7 @@ int run(void *reserve, unsigned reserve_size)
     if (!kernel_resolve_thunks(g_xbe)) return 1;
     if (!kfile_init()) return 1;
     online_init(); // before the hooks: online play keeps the game's own XNetStartup (d3d/dispatch.cpp)
+    sign_title_content(g_xbe.title_id); // after online_init: XboxHDKey is the EEPROM's with online play
     install_crash_handlers();
     install_probes();
     install_coverage();
