@@ -57,6 +57,10 @@ launcher to "2004" at the top left; the game installs into a folder of its own, 
   Gaiden DLC Installer") and installs it onto the game's hard disk; the game then starts with update 1.06. The same
   card's Uninstall list shows what is installed (update 1.06, packs 1 and 2, notices downloaded in the game) and
   deletes the one chosen after asking.
+- **Updating to 1.06 online**: without the Hurricane Packs, the Master Ninja Tournament asks for the update; yes runs
+  the disc's Xbox Live updater, which downloads update 1.06 from Insignia, installs it and goes back to the game
+  (from 2.0.1). The updater draws with the Xbox dashboard's fonts, copied the first time from the xemu hard disk
+  image registered on the Online page. If the update fails, OK goes back to the game.
 - **Master Ninja Tournament**: needs online play (Insignia, as in Black; see "Online" below). The packs are signed for
   this PC when the game starts, so packs installed elsewhere work too.
 - **NEW NOTICE!**: opens the Xbox Live downloader, which downloads notices and other content from Insignia and goes
