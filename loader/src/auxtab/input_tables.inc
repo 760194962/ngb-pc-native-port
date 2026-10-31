@@ -54,6 +54,20 @@ static const Hle kAuxInputNG04TU[] = {
     {0x003c1174u, "XInitDevices", (void *)&XInitDevices, "s s", false}, // by name; x2.1 0x003da5d4 // jmp thunk to 0x003c050f
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxInputNG04DISC[] = {
+    {0x003ac94fu, "XInitDevices", (void *)&XInitDevices, "s s", false}, // by name; x2.1 0x003da5d4
+    {0x003ad5b9u, "XGetDevices", (void *)&XGetDevices, "s", true}, // x2.1 0x003da5d9
+    {0x003ad578u, "XGetDevicesWithMasks", (void *)&XGetDevicesWithMasks, "s s s", true}, // x2.1 0x003da598
+    {0x003ad5dbu, "XGetDeviceChanges", (void *)&XGetDeviceChanges, "s s s", true}, // x2.1 0x003da5fb
+    {0x003add66u, "XGetDeviceEnumerationStatus", (void *)&XGetDeviceEnumerationStatus, "", true}, // x2.1 0x003dad86
+    {0x003ae911u, "XInputOpen", (void *)&XInputOpen, "s s s s", true}, // x2.1 0x003db931
+    {0x003ae967u, "XInputClose", (void *)&XInputClose, "s", false}, // by name; x2.1 0x003db987
+    {0x003ae973u, "XInputGetCapabilities", (void *)&XInputGetCapabilities, "s s", true}, // x2.1 0x003db993
+    {0x003aeb4bu, "XInputGetState", (void *)&XInputGetState, "s s", true}, // x2.1 0x003dbb6b
+    {0x003aebbeu, "XInputSetState", (void *)&XInputSetState, "s s", true}, // x2.1 0x003dbbde
+    {0x003ad5b4u, "XInitDevices", (void *)&XInitDevices, "s s", false}, // by name; x2.1 0x003da5d4 // jmp thunk to 0x003ac94f
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_input_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -75,6 +89,10 @@ const Hle *hle_input_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04TU")) {
         *count = sizeof kAuxInputNG04TU / sizeof kAuxInputNG04TU[0] - 1;
         return kAuxInputNG04TU;
+    }
+    if (!strcmp(xbe, "NG04DISC")) {
+        *count = sizeof kAuxInputNG04DISC / sizeof kAuxInputNG04DISC[0] - 1;
+        return kAuxInputNG04DISC;
     }
     *count = 0;
     return nullptr;

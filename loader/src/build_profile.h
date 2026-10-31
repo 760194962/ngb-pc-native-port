@@ -184,9 +184,49 @@ inline const BuildProfile kProfileNg04Tu = {
     &kWide2DNg04Tu,
 };
 
+// Ninja Gaiden 2004's disc program 1.02.04 (2004-02-20; XDK 5659): what runs when the title update is not installed
+// (main.cpp; the user, 2026-10-31). The same way as the update: tables from x2.1's by code matching ("NG04DISC";
+// work/functions_NG04DISC.csv), initializer tables from _rtinit 0x30A201 / _cinit 0x30A1A9, SwitchToFiber 0x30700B
+// (TLS index 0x422A7C), rdtsc in FUN_002EA520 / 2EBB60 / 2EBC40 / 2EC060 and QueryPerformanceCounter 0x34D550.
+// Load meter 0xDDD1A0 / B0 / B8 (4/4, 2/2, 3/3 votes), GPU callback 0x2EBB60 (paired with 0x30E060); 16/9 at 0x3DE74C
+// (3/3, value checked); the movie blit returns to 0x2FB15C (the only push 6 / call DrawVerticesUP 0x39C980 / push 0;
+// xor eax, eax), the ripples' draw to 0x129A26 (FUN_00129190 + 0x896 as in x2.1), the menus' 2D FUN_002007A0.
+inline const uint32_t kNg04DiscRdtscSites[] = {0x002EA58F, 0x002EA5F1, 0x002EBB60, 0x002EBD7A, 0x002EC06E, 0x0034D554};
+inline constexpr LoadMeter kLoadMeterNg04Disc = {0x00DDD1A0, 0x00DDD1B0, 0x00DDD1B8, 0x002EBB60};
+inline constexpr Wide2D kWide2DNg04Disc = {0x002FB15C, 0x00129A26, 0x002007A0, 0x0020088A};
+inline const BuildProfile kProfileNg04Disc = {
+    "NINJA GAIDEN (2004) disc 1.02.04",
+    "bea2a85eea7e6e0ba6c3e201966a46b24b27e25b3307a29bc3de5b4254791308",
+    0x54430003, 42, false,
+    {{0x3E00E0, 0x3E00EC}, {0x3E00F0, 0x3E013C}, {0x3E0140, 0x3E0158}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x003AC674, 0x0030700B, 0x00422A7C, kNg04DiscRdtscSites, 6, 0x0034D554, "NG04DISC", L"Ninja Gaiden", false,
+    &kLoadMeterNg04Disc, 0x003DE74C, &kWide2DNg04Disc,
+};
+
+// Ninja Gaiden 2004's own SNES trilogy programs: x2.1's NinjaFCJ / NinjaFCU are these with the title id changed and one
+// byte patched (0x3305C8 / 0x1CAE88: jl -> jmp, not in any hooked function), so they run on those programs' tables.
+inline const BuildProfile kProfileNg04Tomoe = {
+    "NINJA GAIDEN (2004): NinjaTomoe.xbe (SNES trilogy, Japanese)",
+    "d2aeab806769813bdf8a57449beb5725c02269b83e0a50f72768794f62986b1e",
+    0x54430003, -1, false,
+    {{0x35C3C0, 0x35C3CC}, {0x35C3D0, 0x35C3E8}, {0x35C3EC, 0x35C3FC}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x003547AC, 0, 0, kFcjQpc, 1, 0x0033B5D4, "NinjaFCJ", L"Ninja Gaiden",
+};
+inline const BuildProfile kProfileNg04Trilogy = {
+    "NINJA GAIDEN (2004): NinjaTrilogy.xbe (SNES trilogy, US)",
+    "18eaadc569f31dd239545444ba27fc7b9956177f344e9b421d440a1bc6786ca4",
+    0x54430003, -1, false,
+    {{0x1F6C00, 0x1F6C0C}, {0x1F6C10, 0x1F6C28}, {0x1F6C2C, 0x1F6C3C}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x001EF06C, 0, 0, kFcuQpc, 1, 0x001D5E94, "NinjaFCU", L"Ninja Gaiden",
+};
+
 inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNgbUs,
                                                 &kProfileNgbHurricaneJp, &kProfileNgbBasicX2, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
-                                                &kProfileNinjaFCJ, &kProfileNinjaFCU, &kProfileNg04Tu};
+                                                &kProfileNinjaFCJ, &kProfileNinjaFCU, &kProfileNg04Tu,
+                                                &kProfileNg04Tomoe, &kProfileNg04Trilogy, &kProfileNg04Disc};
 
 // The profile whose SHA-256 matches, or nullptr for an unknown build.
 inline const BuildProfile *build_profile_for(const char *sha256_hex)

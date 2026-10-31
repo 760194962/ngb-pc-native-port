@@ -46,13 +46,16 @@ void set_image_file_name(const std::wstring &xbe_path, const std::wstring &game_
         for (wchar_t &c : f) if (c == L'/') c = L'\\';
         for (wchar_t &c : d) if (c == L'/') c = L'\\';
         while (!d.empty() && d.back() == L'\\') d.pop_back();
+        std::wstring hdd = host_full_path(g_cfg.hdd_dir) + L"\\";
         if (f.size() > d.size() + 1 && _wcsnicmp(f.c_str(), d.c_str(), d.size()) == 0 && f[d.size()] == L'\\')
             rel = f.substr(d.size() + 1);
+        else if (f.size() > hdd.size() && _wcsnicmp(f.c_str(), hdd.c_str(), hdd.size()) == 0) // a title update on the disk
+            rel = L"*" + f.substr(hdd.size());
         else
             rel = f.substr(f.find_last_of(L'\\') + 1);
     }
     if (rel.empty()) return;
-    std::string name = "\\Device\\CdRom0\\" + narrow(rel);
+    std::string name = rel[0] == L'*' ? "\\Device\\Harddisk0\\" + narrow(rel.substr(1)) : "\\Device\\CdRom0\\" + narrow(rel);
     if (name.size() >= sizeof g_image_file_name) return;
     memcpy(g_image_file_name, name.c_str(), name.size() + 1);
     XeImageFileName.Length = (uint16_t)name.size();
@@ -271,6 +274,16 @@ static bool relaunch(const std::wstring &xbe, bool with_data = true)
     return true;
 }
 
+// The Xbox's own programs a game may launch to reach the dashboard: Ninja Gaiden 2004 starts the disc's dashupdate.xbe
+// (the dashboard updater, then its network settings) when Xbox Live cannot be reached (r701).
+static bool system_program(const std::wstring &xbe)
+{
+    std::wstring f = xbe.substr(xbe.find_last_of(L"\\/") + 1);
+    for (const wchar_t *n : {L"dashupdate.xbe", L"xonlinedash.xbe", L"xboxdash.xbe", L"update.xbe"})
+        if (!_wcsicmp(f.c_str(), n)) return true;
+    return false;
+}
+
 void __stdcall HalReturnToFirmware(uint32_t Routine)
 {
     logf("[k] HalReturnToFirmware(%u): the game asked to leave (0 halt, 1 reboot, 2 quick reboot, 3 fatal error)", Routine);
@@ -278,6 +291,16 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
         const char *path = (const char *)LaunchDataPage->Header + 8;
         std::wstring xbe = launch_target(path);
         logf("    launch path '%.64s' -> %s", path, xbe.empty() ? "(no XBE)" : narrow(xbe).c_str());
+        if (!xbe.empty() && system_program(xbe)) {
+            logf("    %s is the Xbox's own (the dashboard's network settings): a note, then the game afresh", narrow(xbe).c_str());
+            MessageBoxW(nullptr,
+                        L"游戏要打开 Xbox 的系统设置（通常是因为没有连上 Xbox Live）。PC 版没有 Xbox 的系统界面：联网请在启动器的「联网」页设置。"
+                        L"点「确定」后游戏重新开始。\n\n"
+                        L"The game asked for the Xbox's system settings (usually because Xbox Live could not be reached). The PC "
+                        L"port has no Xbox dashboard: set up online play on the launcher's Online page. The game starts again after OK.",
+                        L"Ninja Gaiden", MB_OK | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND);
+            xbe.clear(); // the dashboard: handled below
+        }
         if (!xbe.empty() && GetFileAttributesW(xbe.c_str()) != INVALID_FILE_ATTRIBUTES && relaunch(xbe)) {
             request_exit(0, "XLaunchNewImage");
             Sleep(INFINITE);

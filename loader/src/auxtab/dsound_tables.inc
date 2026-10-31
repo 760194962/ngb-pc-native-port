@@ -99,6 +99,43 @@ static const Hle kAuxDsoundNG04TU[] = {
     {0x00364c02u, "IDirectSound_Stub3", (void *)&IDirectSound_Stub3, "s s s", true}, // x2.1 0x0037a942
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxDsoundNG04DISC[] = {
+    {0x003533fau, "DirectSoundCreate", (void *)&DirectSoundCreate, "s s s", true}, // x2.1 0x0037ceef
+    {0x003531a6u, "IDirectSound_CreateSoundBuffer", (void *)&IDirectSound_CreateSoundBuffer, "s s s s", true}, // x2.1 0x0037cc9b
+    {0x00350e67u, "IDirectSound_Release", (void *)&IDirectSound_Release, "s", true}, // x2.1 0x0037a947
+    {0x00351b74u, "IDirectSound_GetSpeakerConfig", (void *)&IDirectSound_GetSpeakerConfig, "s s", true}, // x2.1 0x0037b685
+    {0x00351b90u, "IDirectSound_DownloadEffectsImage", (void *)&IDirectSound_DownloadEffectsImage, "s s s s s", true}, // x2.1 0x0037b6a1
+    {0x00351bb7u, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_Simple3, "s s s", true}, // by name; x2.1 0x0037b6c8
+    {0x00352ee9u, "IDirectSound_CommitDeferredSettings", (void *)&IDirectSound_Simple1, "s", true}, // x2.1 0x0037c9de
+    {0x003531cau, "IDirectSound_SetPosition", (void *)&IDirectSound_SetPosition, "s s s s s", true}, // by name; x2.1 0x0037ccbf
+    {0x003531ffu, "IDirectSound_SetVelocity", (void *)&IDirectSound_Simple5, "s s s s s", true}, // by name; x2.1 0x0037ccf4
+    {0x00353234u, "IDirectSound_SetI3DL2Listener", (void *)&IDirectSound_SetI3DL2Listener, "s s s", true}, // by name; x2.1 0x0037cd29
+    {0x00350e82u, "IDirectSoundBuffer_Release", (void *)&IDirectSoundBuffer_Release, "s", true}, // x2.1 0x0037a962
+    {0x00351bd7u, "IDirectSoundBuffer_SetVolume", (void *)&Voice_SetVolume, "s s", true}, // by name; x2.1 0x0037b6e8
+    {0x00351bf3u, "IDirectSoundBuffer_SetFilter", (void *)&IDirectSoundBuffer_Set1, "s s", true}, // by name; x2.1 0x0037b704
+    {0x00351c0fu, "IDirectSoundBuffer_SetHeadroom", (void *)&Voice_SetHeadroom, "s s", true}, // by name; x2.1 0x0037b720
+    {0x00351c2bu, "IDirectSoundBuffer_SetMixBinVolumes_8", (void *)&Voice_SetMixBinVolumes, "s s", true}, // by name; x2.1 0x0037b73c
+    {0x00351c47u, "IDirectSoundBuffer_Play", (void *)&IDirectSoundBuffer_Play, "s s s s", true}, // by name; x2.1 0x0037b758
+    {0x00351c83u, "IDirectSoundBuffer_StopEx", (void *)&IDirectSoundBuffer_StopEx, "s s s s", true}, // by name; x2.1 0x0037b794
+    {0x00351ca7u, "IDirectSoundBuffer_SetLoopRegion", (void *)&IDirectSoundBuffer_SetLoopRegion, "s s s", true}, // by name; x2.1 0x0037b7b8
+    {0x00351cc7u, "IDirectSoundBuffer_GetStatus", (void *)&IDirectSoundBuffer_GetStatus, "s s", true}, // by name; x2.1 0x0037b7d8
+    {0x00351ce3u, "IDirectSoundBuffer_GetCurrentPosition", (void *)&IDirectSoundBuffer_GetCurrentPosition, "s s s", true}, // by name; x2.1 0x0037b7f4
+    {0x00351d03u, "IDirectSoundBuffer_SetCurrentPosition", (void *)&IDirectSoundBuffer_SetCurrentPosition, "s s", true}, // by name; x2.1 0x0037b814
+    {0x003524aeu, "IDirectSoundBuffer_SetFrequency", (void *)&IDirectSoundBuffer_SetFrequency, "s s", true}, // by name; x2.1 0x0037bfbf
+    {0x003524cau, "IDirectSoundBuffer_SetMixBins", (void *)&Voice_SetMixBins, "s s", true}, // by name; x2.1 0x0037bfdb
+    {0x00352af6u, "IDirectSoundBuffer_SetBufferData", (void *)&IDirectSoundBuffer_SetBufferData, "s s s", true}, // by name; x2.1 0x0037c607
+    {0x00351d1fu, "IDirectSoundBuffer_Lock", (void *)&IDirectSoundBuffer_Lock, "s s s s s s s s", true}, // x2.1 0x0037b830
+    {0x00350e7du, "IDirectSoundBuffer_Unlock", (void *)&IDirectSoundBuffer_Unlock, "s s s s s", true}, // x2.1 0x0037a95d
+    {0x00351c6bu, "IDirectSoundBuffer_Stop", (void *)&IDirectSoundBuffer_Stop, "s", true}, // x2.1 0x0037b77c
+    {0x003524e6u, "IDirectSoundBuffer_SetMaxDistance", (void *)&IDirectSoundBuffer_SetMaxDistance, "s s s", true}, // by name; x2.1 0x0037bff7
+    {0x0035250au, "IDirectSoundBuffer_SetMinDistance", (void *)&IDirectSoundBuffer_SetMinDistance, "s s s", true}, // by name; x2.1 0x0037c01b
+    {0x0035252eu, "IDirectSoundBuffer_SetPosition", (void *)&IDirectSoundBuffer_SetPosition, "s s s s s", true}, // by name; x2.1 0x0037c03f
+    {0x00352563u, "IDirectSoundBuffer_SetVelocity", (void *)&IDirectSoundBuffer_SetVelocity, "s s s s s", true}, // by name; x2.1 0x0037c074
+    {0x00352598u, "IDirectSoundBuffer_SetDistanceFactor", (void *)&IDirectSoundBuffer_SetDistanceFactor, "s s s", true}, // by name; x2.1 0x0037c0a9
+    {0x003525bcu, "IDirectSoundBuffer_SetRolloffFactor", (void *)&IDirectSoundBuffer_SetRolloffFactor, "s s s", true}, // by name; x2.1 0x0037c0cd
+    {0x00350e62u, "IDirectSound_Stub3", (void *)&IDirectSound_Stub3, "s s s", true}, // x2.1 0x0037a942
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_dsound_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -120,6 +157,10 @@ const Hle *hle_dsound_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04TU")) {
         *count = sizeof kAuxDsoundNG04TU / sizeof kAuxDsoundNG04TU[0] - 1;
         return kAuxDsoundNG04TU;
+    }
+    if (!strcmp(xbe, "NG04DISC")) {
+        *count = sizeof kAuxDsoundNG04DISC / sizeof kAuxDsoundNG04DISC[0] - 1;
+        return kAuxDsoundNG04DISC;
     }
     *count = 0;
     return nullptr;

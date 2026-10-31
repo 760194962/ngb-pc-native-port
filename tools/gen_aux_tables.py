@@ -21,13 +21,14 @@ import os
 import re
 import sys
 
-XBES = ['NinjaTomoe', 'NinjaTrilogy', 'NinjaFCJ', 'NinjaFCU', 'NG04TU']
+XBES = ['NinjaTomoe', 'NinjaTrilogy', 'NinjaFCJ', 'NinjaFCU', 'NG04TU', 'NG04DISC']
 # where each XBE is, relative to the work dir (default: ../game/x21/<name>.xbe). NG04TU: Ninja Gaiden (2004) title
-# update 1.06.04 (TDATA/54430003/$u/default.xbe), the main program the Hurricane Packs need.
-XBE_PATHS = {'NG04TU': os.path.join('ng04', 'tu_default.xbe')}
+# update 1.06.04 (TDATA/54430003/$u/default.xbe), the main program the Hurricane Packs need; NG04DISC: its disc program
+# 1.02.04, run when the update is not installed.
+XBE_PATHS = {'NG04TU': os.path.join('ng04', 'tu_default.xbe'), 'NG04DISC': os.path.join('ng04', 'disc_default.xbe')}
 # Builds of x2.1's own libraries (same code at other addresses): their entries and D3D data layout are x2.1's, carried
 # over by code matching (tools/x21_map.py), so the register conventions verified on x2.1 hold.
-FROM_X21 = {'NG04TU'}
+FROM_X21 = {'NG04TU', 'NG04DISC'}
 
 
 def xbe_file(work, x):

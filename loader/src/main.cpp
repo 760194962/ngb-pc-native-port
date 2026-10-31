@@ -598,6 +598,23 @@ int run(void *reserve, unsigned reserve_size)
     logf("xbe: '%s' title id %08X, base 0x%08x size 0x%x entry 0x%08x, %zu sections, %zu kernel imports", title.c_str(),
          g_xbe.title_id, g_xbe.base, g_xbe.size_of_image, g_xbe.entry, g_xbe.sections.size(), g_xbe.kernel_imports().size());
     std::string hash = sha256_hex(g_xbe.data);
+    // Ninja Gaiden 2004's disc program (1.02.04): on the console, with the title update on the hard disk
+    // (TDATA\54430003\$u, from Xbox Live or the Hurricane Packs' installer) the update runs instead; without it the
+    // disc's own program does (the user, 2026-10-31). The disc stays D: either way.
+    if (hash == kProfileNg04Disc.sha256) {
+        std::wstring tu = host_full_path(g_cfg.hdd_dir) + L"\\Partition1\\TDATA\\54430003\\$u\\default.xbe";
+        Xbe update;
+        std::string why;
+        if (update.load(tu, why) && sha256_hex(update.data) == kProfileNg04Tu.sha256) {
+            logf("xbe: Ninja Gaiden 2004's disc program 1.02.04; the title update on the hard disk runs instead (%s)", narrow(tu).c_str());
+            g_xbe = std::move(update);
+            g_cfg.xbe_path = tu;
+            hash = sha256_hex(g_xbe.data);
+        } else {
+            logf("xbe: Ninja Gaiden 2004's disc program 1.02.04 runs: no title update 1.06.04 on the hard disk (%s: %s)",
+                 narrow(tu).c_str(), why.empty() ? "another build" : why.c_str());
+        }
+    }
     const BuildProfile *profile = build_profile_for(hash.c_str());
     bool known_build = profile != nullptr;
     g_cfg.known_build = known_build;

@@ -177,6 +177,41 @@ static const Hle kAuxDeviceNG04TU[] = {
     {0x0036dab5u, "FUN_0036dab5", nullptr, "", false}, // only sets registers and returns: runs natively
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxDeviceNG04DISC[] = {
+    {0x0039dc40u, "D3D_MakeRequestedSpace_4__LTCG_eax2", (void *)&D3D_MakeRequestedSpace, "s eax", true}, // x2.1 0x003cab80
+    {0x0039cee0u, "D3DDevice_End", (void *)&D3DDevice_End, "", false}, // x2.1 0x003c9e20
+    {0x0039d330u, "D3DDevice_Clear", (void *)&D3DDevice_Clear, "s s s s s s", true}, // x2.1 0x003ca270
+    {0x0039f180u, "D3DDevice_Swap_0__LTCG_eax1", (void *)&D3DDevice_Swap, "eax", true}, // by name; x2.1 0x003cc160
+    {0x0039a0a0u, "D3DDevice_SetRenderTarget", (void *)&D3DDevice_SetRenderTarget, "s s", true}, // x2.1 0x003c6a80
+    {0x0039a430u, "D3DDevice_SetTransform_0__LTCG_eax1_edx2", (void *)&D3DDevice_SetTransform, "eax edx", false}, // x2.1 0x003c7160
+    {0x0039a540u, "D3DDevice_SetViewport", (void *)&D3DDevice_SetViewport, "s", false}, // x2.1 0x003c7270
+    {0x00399670u, "D3DDevice_GetViewportOffsetAndScale_0__LTCG_edx1_ecx2", (void *)&D3DDevice_GetViewportOffsetAndScale, "edx ecx", false}, // x2.1 0x003c5fd0
+    {0x0039b3b0u, "D3DDevice_SetScreenSpaceOffset", (void *)&D3DDevice_SetScreenSpaceOffset, "s s", false}, // x2.1 0x003c82f0
+    {0x0039a760u, "D3DDevice_SetLight", (void *)&D3DDevice_SetLight, "s s", true}, // x2.1 0x003c7490
+    {0x0039ab20u, "D3DDevice_LightEnable_4__LTCG_eax1", (void *)&D3DDevice_LightEnable, "eax s", true}, // x2.1 0x003c7850
+    {0x0039b080u, "D3DDevice_SetScissors", (void *)&D3DDevice_SetScissors, "s s s", false}, // x2.1 0x003c7db0
+    {0x0039ac70u, "D3DDevice_SetTexture_4__LTCG_eax1", (void *)&D3DDevice_SetTexture, "eax s", false}, // x2.1 0x003c79a0
+    {0x0039ae20u, "D3DDevice_SetPalette_4__LTCG_eax1", (void *)&D3DDevice_SetPalette, "eax s", false}, // x2.1 0x003c7b50
+    {0x0039b7d0u, "D3DDevice_SetStreamSource_4__LTCG_eax1_ebx2", (void *)&D3DDevice_SetStreamSource, "eax ebx s", false}, // x2.1 0x003c8710
+    {0x00399300u, "D3DDevice_SetRenderState_Simple", (void *)&D3DDevice_SetRenderState_Simple, "ecx edx", false}, // x2.1 0x003c5c60
+    {0x00398ad0u, "D3DDevice_SetRenderState_NormalizeNormals", (void *)&D3DDevice_SetRenderState_NormalizeNormals, "s", false}, // x2.1 0x003c5410
+    {0x00398bc0u, "D3DDevice_SetRenderState_StencilEnable", (void *)&D3DDevice_SetRenderState_StencilEnable, "s", false}, // by name; x2.1 0x003c5500
+    {0x00398c50u, "D3DDevice_SetRenderState_StencilFail", (void *)&D3DDevice_SetRenderState_StencilFail, "s", false}, // by name; x2.1 0x003c55b0
+    {0x00398cd0u, "D3DDevice_SetRenderState_TextureFactor", (void *)&D3DDevice_SetRenderState_TextureFactor, "s", false}, // x2.1 0x003c5630
+    {0x00399540u, "D3DDevice_SetTextureStageStateNotInline_0__LTCG_eax1_edx2_ecx3", (void *)&D3DDevice_SetTextureStageStateNotInline, "eax edx ecx", false}, // x2.1 0x003c5ea0
+    {0x0039be80u, "D3DDevice_CreateVertexShader", (void *)&D3DDevice_CreateVertexShader, "s s s s", true}, // x2.1 0x003c8dc0
+    {0x0039c0f0u, "D3DDevice_SetVertexShader", (void *)&D3DDevice_SetVertexShader, "s", false}, // x2.1 0x003c9030
+    {0x0039c260u, "D3DDevice_SetVertexShaderConstant1", (void *)&D3DDevice_SetVertexShaderConstant1, "ecx edx", false}, // x2.1 0x003c91a0
+    {0x0039c2c0u, "D3DDevice_SetVertexShaderConstant4", (void *)&D3DDevice_SetVertexShaderConstant4, "ecx edx", false}, // x2.1 0x003c9200
+    {0x0039c3c0u, "D3DDevice_SetPixelShader_0__LTCG_eax1", (void *)&D3DDevice_SetPixelShader, "eax", false}, // x2.1 0x003c9300
+    {0x0039c5d0u, "D3DDevice_SetPixelShaderConstant_4__LTCG_ecx1_eax3", (void *)&D3DDevice_SetPixelShaderConstant, "ecx s eax", false}, // x2.1 0x003c9510
+    {0x0039d7e0u, "D3D_SetFence", (void *)&D3D_SetFence, "s", true}, // x2.1 0x003ca720
+    {0x0039dad0u, "D3D_BlockOnTime", (void *)&D3D_BlockOnTime, "s s", false}, // x2.1 0x003caa10
+    {0x00350e62u, "FUN_00350e62", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0x00350e7du, "IDirectSoundBuffer_Unlock", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0x00359d15u, "FUN_00359d15", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_device_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -198,6 +233,10 @@ const Hle *hle_device_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04TU")) {
         *count = sizeof kAuxDeviceNG04TU / sizeof kAuxDeviceNG04TU[0] - 1;
         return kAuxDeviceNG04TU;
+    }
+    if (!strcmp(xbe, "NG04DISC")) {
+        *count = sizeof kAuxDeviceNG04DISC / sizeof kAuxDeviceNG04DISC[0] - 1;
+        return kAuxDeviceNG04DISC;
     }
     *count = 0;
     return nullptr;
