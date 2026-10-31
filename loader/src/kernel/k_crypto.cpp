@@ -314,6 +314,17 @@ BOOLEAN __stdcall XcVerifyPKCS1Signature(const uint8_t *Signature, const uint8_t
     return TRUE;
 }
 
+// The length of an RSA1 public key blob's modulus in bytes, as the blob gives it (its second field, which includes
+// 8 bytes of padding): what XcPKEncPublic writes and the size of buffers for it (Ninja Gaiden 2004's downloader).
+uint32_t __stdcall XcPKGetKeyLen(const uint8_t *PublicKey)
+{
+    KTRACE("%p", PublicKey);
+    if (!PublicKey || memcmp(PublicKey, "RSA1", 4)) return 0;
+    uint32_t mod_bytes;
+    memcpy(&mod_bytes, PublicKey + 4, 4);
+    return mod_bytes;
+}
+
 void __stdcall XcDESKeyParity(uint8_t *Key, uint32_t KeyLength)
 {
     KTRACE("%p, %u", Key, KeyLength);

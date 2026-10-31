@@ -212,6 +212,45 @@ static const Hle kAuxDeviceNG04DISC[] = {
     {0x00359d15u, "FUN_00359d15", nullptr, "", false}, // only sets registers and returns: runs natively
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxDeviceNG04DL[] = {
+    {0x0004c570u, "Direct3D_CreateDevice", (void *)&Direct3D_CreateDevice, "s s s s s s", true},
+    {0x00041d00u, "D3D_MakeRequestedSpace_8", (void *)&D3D_MakeRequestedSpace, "s s", true},
+    {0x0004b800u, "D3DDevice_End", (void *)&D3DDevice_End, "", false},
+    {0x00046430u, "D3DDevice_Clear", (void *)&D3DDevice_Clear, "s s s s s s", true},
+    {0x0004c2b0u, "D3DDevice_Swap", (void *)&D3DDevice_Swap, "s", true},
+    {0x00040b10u, "D3DDevice_GetBackBuffer2", (void *)&D3DDevice_GetBackBuffer2, "s", true},
+    {0x00040890u, "D3DDevice_SetRenderTarget", (void *)&D3DDevice_SetRenderTarget, "s s", true},
+    {0x00040b60u, "D3DDevice_GetRenderTarget2", (void *)&D3DDevice_GetRenderTarget2, "", true},
+    {0x00040b80u, "D3DDevice_GetDepthStencilSurface2", (void *)&D3DDevice_GetDepthStencilSurface2, "", true},
+    {0x00040610u, "D3DDevice_SetTransform", (void *)&D3DDevice_SetTransform, "s s", false},
+    {0x00040ba0u, "D3DDevice_SetViewport", (void *)&D3DDevice_SetViewport, "s", false},
+    {0x00042840u, "D3DDevice_GetViewportOffsetAndScale", (void *)&D3DDevice_GetViewportOffsetAndScale, "s s", false},
+    {0x00041390u, "D3DDevice_SetScreenSpaceOffset", (void *)&D3DDevice_SetScreenSpaceOffset, "s s", false},
+    {0x00041090u, "D3DDevice_SetScissors", (void *)&D3DDevice_SetScissors, "s s s", false},
+    {0x00040dd0u, "D3DDevice_SetTexture", (void *)&D3DDevice_SetTexture, "s s", false},
+    {0x000427e0u, "D3DDevice_SetRenderStateNotInline", (void *)&D3DDevice_SetRenderStateNotInline, "s s", false},
+    {0x000427b0u, "D3DDevice_SetRenderState_Simple", (void *)&D3DDevice_SetRenderState_Simple, "ecx edx", false},
+    {0x00042c30u, "D3DDevice_SetRenderState_NormalizeNormals", (void *)&D3DDevice_SetRenderState_NormalizeNormals, "s", false},
+    {0x00043a90u, "D3DDevice_SetRenderState_StencilEnable", (void *)&D3DDevice_SetRenderState_StencilEnable, "s", false},
+    {0x00043b20u, "D3DDevice_SetRenderState_StencilFail", (void *)&D3DDevice_SetRenderState_StencilFail, "s", false},
+    {0x00042c70u, "D3DDevice_SetRenderState_TextureFactor", (void *)&D3DDevice_SetRenderState_TextureFactor, "s", false},
+    {0x00043220u, "D3DDevice_SetTextureStageStateNotInline", (void *)&D3DDevice_SetTextureStageStateNotInline, "s s s", false},
+    {0x00042610u, "D3DDevice_SetVertexShader", (void *)&D3DDevice_SetVertexShader, "s", false},
+    {0x0004c680u, "D3DDevice_SetPixelShader", (void *)&D3DDevice_SetPixelShader, "s", false},
+    {0x00041ae0u, "D3D_SetFence", (void *)&D3D_SetFence, "s", true},
+    {0x00041b90u, "D3D_BlockOnTime", (void *)&D3D_BlockOnTime, "s s", false},
+    {0x000404d0u, "D3DResource_Register", nullptr, "", false}, // plain code: runs natively
+    {0x00040440u, "D3DResource_GetType", nullptr, "", false}, // plain code: runs natively
+    {0x0004c620u, "D3D_AllocContiguousMemory", nullptr, "", false}, // plain code: runs natively
+    {0x0004c660u, "FUN_0004c660", nullptr, "", false}, // plain code: runs natively
+    {0x000aec00u, "FUN_000aec00", nullptr, "", false}, // plain code: runs natively
+    {0x000b0853u, "FUN_000b0853", nullptr, "", false}, // plain code: runs natively
+    {0x00041903u, "FUN_00041903", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0x000800ecu, "FUN_000800ec", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0x00080ee8u, "FUN_00080ee8", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0x000927d5u, "FUN_000927d5", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_device_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -237,6 +276,10 @@ const Hle *hle_device_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04DISC")) {
         *count = sizeof kAuxDeviceNG04DISC / sizeof kAuxDeviceNG04DISC[0] - 1;
         return kAuxDeviceNG04DISC;
+    }
+    if (!strcmp(xbe, "NG04DL")) {
+        *count = sizeof kAuxDeviceNG04DL / sizeof kAuxDeviceNG04DL[0] - 1;
+        return kAuxDeviceNG04DL;
     }
     *count = 0;
     return nullptr;

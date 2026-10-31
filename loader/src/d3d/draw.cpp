@@ -1489,6 +1489,7 @@ bool begin_draw(DrawCtx &ctx)
 {
     IDirect3DDevice9 *d = host3d::dev();
     if (!d) return false;
+    rt_cpu_upload(); // render targets the CPU wrote into since the last draw (the NG2004 downloader; nothing otherwise)
     g_draw_serial++;
     g_ffp_quad_stages = g_ffp_quad_weighted = 0; // a 2D quad's stage shader variant is picked by scale_rhw (QuadSnap)
     if (g_cfg.skip_texmodes && g_st.pixel_shader && render_state()[XRS_PSTEXTUREMODES] == g_cfg.skip_texmodes) return false;

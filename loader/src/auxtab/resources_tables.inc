@@ -60,6 +60,20 @@ static const Hle kAuxResourcesNG04DISC[] = {
     {0x003a1a30u, "Get2DSurfaceDesc", (void *)&D3D_Get2DSurfaceDesc, "edi ebx esi", false}, // x2.1 0x003cea10
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxResourcesNG04DL[] = {
+    {0x0004c460u, "D3DDevice_CreateTexture2", (void *)&D3DDevice_CreateTexture2, "s s s s s s s", true},
+    {0x000456d0u, "D3DPalette_Lock2", (void *)&D3DPalette_Lock2, "s s", true},
+    {0x000403b0u, "D3DResource_AddRef", (void *)&D3DResource_AddRef, "s", true},
+    {0x000403f0u, "D3DResource_Release", (void *)&D3DResource_Release, "s", true},
+    {0x00040290u, "D3D_DestroyResource", (void *)&D3D_DestroyResource, "s", false},
+    {0x00040500u, "D3DResource_BlockUntilNotBusy", (void *)&D3DResource_BlockUntilNotBusy, "s", false},
+    {0x0004c520u, "D3DTexture_GetSurfaceLevel2", (void *)&D3DTexture_GetSurfaceLevel2, "s s", true},
+    {0x00049760u, "D3DSurface_LockRect", (void *)&D3DSurface_LockRect, "s s s s", true},
+    {0x00045ba0u, "Get2DSurfaceDesc", (void *)&D3D_Get2DSurfaceDesc, "s s s", false},
+    {0x00049740u, "D3DSurface_GetDesc", (void *)&D3DSurface_GetDesc, "s s", false},
+    {0x0004c510u, "Get2DSurfaceDesc", (void *)&D3D_Get2DSurfaceDesc, "s s s", false}, // jmp thunk to 0x00045ba0
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_resource_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -85,6 +99,10 @@ const Hle *hle_resource_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04DISC")) {
         *count = sizeof kAuxResourcesNG04DISC / sizeof kAuxResourcesNG04DISC[0] - 1;
         return kAuxResourcesNG04DISC;
+    }
+    if (!strcmp(xbe, "NG04DL")) {
+        *count = sizeof kAuxResourcesNG04DL / sizeof kAuxResourcesNG04DL[0] - 1;
+        return kAuxResourcesNG04DL;
     }
     *count = 0;
     return nullptr;

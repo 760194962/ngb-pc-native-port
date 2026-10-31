@@ -189,6 +189,7 @@ void install_ngb_exitmenu();      // the main menu's EXIT GAME row for Ninja Gai
 void install_ng04_exitmenu();     // the title menu's EXIT GAME row for Ninja Gaiden (2004) (ng04_exitmenu.cpp)
 void install_ngb_aspect();        // black.ini aspect 16:10 / 21:9 for Ninja Gaiden Black x2.1 (ngb_aspect.cpp)
 void install_ngb_livedash();      // Ⓐ cancels Ranking's Xbox Live boxes instead of opening the dashboard (ngb_livedash.cpp)
+void install_ng04_livedash();     // the same in Ninja Gaiden (2004)'s Master Ninja Tournament (ngb_livedash.cpp)
 void logv(const char *fmt, va_list ap);
 void logc(const char *fmt, ...); // the log file and the console: startup, setup errors, exit, crashes
 [[noreturn]] void fatal(const char *fmt, ...);

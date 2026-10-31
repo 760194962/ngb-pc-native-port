@@ -43,6 +43,7 @@ void __stdcall XcRC4Key(uint8_t *KeyStruct, uint32_t KeyLength, const uint8_t *K
 void __stdcall XcRC4Crypt(uint8_t *KeyStruct, uint32_t InputLength, uint8_t *Input);
 uint32_t __stdcall XcModExp(uint32_t *A, const uint32_t *B, const uint32_t *C, const uint32_t *D, uint32_t N);
 BOOLEAN __stdcall XcVerifyPKCS1Signature(const uint8_t *Signature, const uint8_t *PublicKey, const uint8_t *Digest);
+uint32_t __stdcall XcPKGetKeyLen(const uint8_t *PublicKey);
 void __stdcall XcDESKeyParity(uint8_t *Key, uint32_t KeyLength);
 void __stdcall XcKeyTable(uint32_t Cipher, uint8_t *KeyTable, const uint8_t *Key);
 void __stdcall XcBlockCryptCBC(uint32_t Cipher, uint32_t InputLength, uint8_t *Output, const uint8_t *Input,
@@ -57,6 +58,9 @@ void *__stdcall MmAllocateContiguousMemoryEx(uint32_t NumberOfBytes, uint32_t Lo
                                              uint32_t HighestAcceptableAddress, uint32_t Alignment, uint32_t ProtectionType);
 void *__stdcall MmClaimGpuInstanceMemory(uint32_t NumberOfBytes, uint32_t *NumberOfPaddingBytes);
 void __stdcall MmFreeContiguousMemory(void *BaseAddress);
+void *__stdcall MmAllocateSystemMemory(uint32_t NumberOfBytes, uint32_t Protect);
+uint32_t __stdcall MmFreeSystemMemory(void *BaseAddress, uint32_t NumberOfBytes);
+NTSTATUS __stdcall FscSetCacheSize(uint32_t NumberOfCachePages);
 uint32_t __stdcall MmGetPhysicalAddress(void *BaseAddress);
 NTSTATUS __stdcall MmQueryStatistics(uint32_t *Statistics);
 void __stdcall MmLockUnlockBufferPages(void *BaseAddress, uint32_t NumberOfBytes, BOOLEAN UnlockPages);

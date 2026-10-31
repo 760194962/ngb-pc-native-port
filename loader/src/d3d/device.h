@@ -35,6 +35,8 @@ bool is_backbuffer(const Surface *s);
 int backbuffer_width(); // the game's back buffer in Xbox pixels (720 x 480 for Ninja Gaiden Black)
 int backbuffer_height();
 void backbuffer_cpu_lock(); // D3DSurface_LockRect on the back buffer: the title draws it with the CPU
+void rt_cpu_lock(const Surface *s); // D3DSurface_LockRect on a render target (the NG2004 downloader's XFONT labels)
+void rt_cpu_upload();               // those targets' memory into the host targets (before a draw or Swap)
 void vis_begin();                  // NV097_SET_ZPASS_PIXEL_COUNT_ENABLE = 1: start counting (host occlusion query)
 HRESULT vis_end(uint32_t Index);   // D3DDevice_EndVisibilityTest: finish the query, write the report slot
 void vis_release();                // device reset: the query goes (vis_begin makes it again)

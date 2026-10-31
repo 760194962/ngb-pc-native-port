@@ -291,14 +291,10 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
         const char *path = (const char *)LaunchDataPage->Header + 8;
         std::wstring xbe = launch_target(path);
         logf("    launch path '%.64s' -> %s", path, xbe.empty() ? "(no XBE)" : narrow(xbe).c_str());
+        // No note on the PC: the boxes that lead there answer Ⓐ as Ⓑ (ngb_livedash.cpp), so this is only a way left
+        // open; it goes back to the game as the dashboard would (the user, 2026-11-01: as the Gamertag boxes do)
         if (!xbe.empty() && system_program(xbe)) {
-            logf("    %s is the Xbox's own (the dashboard's network settings): a note, then the game afresh", narrow(xbe).c_str());
-            MessageBoxW(nullptr,
-                        L"游戏要打开 Xbox 的系统设置（通常是因为没有连上 Xbox Live）。PC 版没有 Xbox 的系统界面：联网请在启动器的「联网」页设置。"
-                        L"点「确定」后游戏重新开始。\n\n"
-                        L"The game asked for the Xbox's system settings (usually because Xbox Live could not be reached). The PC "
-                        L"port has no Xbox dashboard: set up online play on the launcher's Online page. The game starts again after OK.",
-                        L"Ninja Gaiden", MB_OK | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND);
+            logf("    %s is the Xbox's own (the dashboard's network settings): the game afresh instead", narrow(xbe).c_str());
             xbe.clear(); // the dashboard: handled below
         }
         if (!xbe.empty() && GetFileAttributesW(xbe.c_str()) != INVALID_FILE_ATTRIBUTES && relaunch(xbe)) {

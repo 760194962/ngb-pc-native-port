@@ -55,6 +55,11 @@ bool image_map(const Xbe &xbe)
     gaps.push_back({(xbe.base + xbe.size_of_headers + 15) & ~15u, by_va.empty() ? xbe.base : by_va.front().vaddr});
     for (size_t i = 0; i + 1 < by_va.size(); i++)
         gaps.push_back({(by_va[i].vaddr + by_va[i].vsize + 15) & ~15u, by_va[i + 1].vaddr});
+    // last: after the image, up to its last page's end (Ninja Gaiden 2004's downloader.xbe packs its headers and
+    // sections without room between them; 0x3A0 bytes are left there). Nothing of the XBE reaches past its image.
+    uint32_t image_end = (xbe.base + xbe.size_of_image + 15) & ~15u;
+    if (!by_va.empty()) image_end = std::max(image_end, (by_va.back().vaddr + by_va.back().vsize + 15) & ~15u);
+    gaps.push_back({image_end, xbe_end});
     uint32_t nt_off = 0;
     for (const auto &g : gaps) {
         if (g.second > g.first && g.second - g.first >= nt_size) {

@@ -136,6 +136,44 @@ static const Hle kAuxDsoundNG04DISC[] = {
     {0x00350e62u, "IDirectSound_Stub3", (void *)&IDirectSound_Stub3, "s s s", true}, // x2.1 0x0037a942
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxDsoundNG04DL[] = {
+    {0x0008b837u, "DirectSoundCreate", (void *)&DirectSoundCreate, "s s s", true},
+    {0x0008b629u, "IDirectSound_CreateSoundBuffer", (void *)&IDirectSound_CreateSoundBuffer, "s s s s", true},
+    {0x00088b7bu, "IDirectSound_Release", (void *)&IDirectSound_Release, "s", true},
+    {0x0008a2c2u, "DirectSoundDoWork", (void *)&DirectSoundDoWork, "", false},
+    {0x0008a07au, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_Simple3, "s s s", true},
+    {0x0008b3c1u, "IDirectSound_CommitDeferredSettings", (void *)&IDirectSound_Simple1, "s", true},
+    {0x0008b671u, "IDirectSound_SetI3DL2Listener", (void *)&IDirectSound_SetI3DL2Listener, "s s s", true},
+    {0x00088b91u, "IDirectSoundBuffer_Release", (void *)&IDirectSoundBuffer_Release, "s", true},
+    {0x0008a09au, "IDirectSoundBuffer_SetVolume", (void *)&Voice_SetVolume, "s s", true},
+    {0x0008a10au, "IDirectSoundBuffer_SetFilter", (void *)&IDirectSoundBuffer_Set1, "s s", true},
+    {0x0008a126u, "IDirectSoundBuffer_SetHeadroom", (void *)&Voice_SetHeadroom, "s s", true},
+    {0x0008a142u, "IDirectSoundBuffer_SetMixBinVolumes_8", (void *)&Voice_SetMixBinVolumes, "s s", true},
+    {0x0008a15eu, "IDirectSoundBuffer_Play", (void *)&IDirectSoundBuffer_Play, "s s s s", true},
+    {0x0008a19au, "IDirectSoundBuffer_StopEx", (void *)&IDirectSoundBuffer_StopEx, "s s s s", true},
+    {0x0008a1beu, "IDirectSoundBuffer_SetLoopRegion", (void *)&IDirectSoundBuffer_SetLoopRegion, "s s s", true},
+    {0x0008a1deu, "IDirectSoundBuffer_GetStatus", (void *)&IDirectSoundBuffer_GetStatus, "s s", true},
+    {0x0007fda1u, "XACTEngineCreate", (void *)&XACTEngineCreate, "s s", true},
+    {0x0007fd6fu, "XACTEngineDoWork", (void *)&XACTEngineDoWork, "", false},
+    {0x0007fea1u, "IXACTEngine_RegisterWaveBank", (void *)&IXACTEngine_RegisterWaveBank, "s s s s", true},
+    {0x0007fe5eu, "IXACTEngine_CreateSoundBank", (void *)&IXACTEngine_CreateSoundBank, "s s s s", true},
+    {0x0007fee4u, "IXACTSoundBank_GetSoundCueIndexFromFriendlyName", (void *)&IXACTSoundBank_GetSoundCueIndexFromFriendlyName, "s s s", true},
+    {0x0007ff17u, "IXACTSoundBank_PlayEx", (void *)&IXACTSoundBank_PlayEx, "s s s", true},
+    {0x0008a1fau, "IDirectSoundBuffer_SetCurrentPosition", (void *)&IDirectSoundBuffer_SetCurrentPosition, "s s", true},
+    {0x0008a823u, "IDirectSoundBuffer_SetOutputBuffer", (void *)&IDirectSoundBuffer_Set1, "s s", true},
+    {0x0008a83fu, "IDirectSoundBuffer_SetMixBins", (void *)&Voice_SetMixBins, "s s", true},
+    {0x0008a85bu, "IDirectSoundBuffer_SetPlayRegion", (void *)&IDirectSoundBuffer_SetPlayRegion, "s s s", true},
+    {0x0008aea4u, "IDirectSoundBuffer_SetFormat", (void *)&IDirectSoundBuffer_SetFormat, "s s", true},
+    {0x0008aec0u, "IDirectSoundBuffer_SetBufferData", (void *)&IDirectSoundBuffer_SetBufferData, "s s s", true},
+    {0x0008a26au, "IDirectSoundStream_SetVolume", (void *)&Voice_SetVolume, "s s", true},
+    {0x0008a283u, "IDirectSoundStream_SetHeadroom", (void *)&Voice_SetHeadroom, "s s", true},
+    {0x0008a288u, "IDirectSoundStream_SetMixBinVolumes_8", (void *)&Voice_SetMixBinVolumes, "s s", true},
+    {0x0008a28du, "IDirectSoundStream_Pause", (void *)&IDirectSoundStream_Pause, "s s", true},
+    {0x0008a292u, "IDirectSoundStream_FlushEx", (void *)&IDirectSoundStream_FlushEx, "s s s s", true},
+    {0x0008a880u, "IDirectSoundStream_SetMixBins", (void *)&Voice_SetMixBins, "s s", true},
+    {0x0008a182u, "IDirectSoundBuffer_Stop", (void *)&IDirectSoundBuffer_Stop, "s", true},
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_dsound_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -161,6 +199,10 @@ const Hle *hle_dsound_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04DISC")) {
         *count = sizeof kAuxDsoundNG04DISC / sizeof kAuxDsoundNG04DISC[0] - 1;
         return kAuxDsoundNG04DISC;
+    }
+    if (!strcmp(xbe, "NG04DL")) {
+        *count = sizeof kAuxDsoundNG04DL / sizeof kAuxDsoundNG04DL[0] - 1;
+        return kAuxDsoundNG04DL;
     }
     *count = 0;
     return nullptr;

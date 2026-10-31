@@ -716,6 +716,44 @@ uint32_t __stdcall IDirectSound_Release(Object *pThis)
 void __stdcall DirectSoundUseLightHRTF() { STRACE(""); }
 void __stdcall DirectSoundDoWork() { STRACE(""); }
 
+// The XACT engine of Ninja Gaiden 2004's downloader.xbe (its menu sounds): replaced by an engine that takes every call
+// and plays nothing, so XACT's own use of DirectSound's streams and 3D voices never runs (the downloader is silent).
+namespace {
+uint32_t g_xact_dummy[16]; // what the engine, wave bank and sound bank pointers point at
+}
+HRESULT __stdcall XACTEngineCreate(const void *pParams, void **ppEngine)
+{
+    STRACE("%p, %p", pParams, ppEngine);
+    logf("[dsound] XACT: the downloader's sound engine is silent here");
+    if (ppEngine) *ppEngine = g_xact_dummy;
+    return 0;
+}
+void __stdcall XACTEngineDoWork() {}
+HRESULT __stdcall IXACTEngine_RegisterWaveBank(void *pThis, const void *pvData, uint32_t dwSize, void **ppWaveBank)
+{
+    STRACE("%p, %p, %u, %p", pThis, pvData, dwSize, ppWaveBank);
+    if (ppWaveBank) *ppWaveBank = g_xact_dummy;
+    return 0;
+}
+HRESULT __stdcall IXACTEngine_CreateSoundBank(void *pThis, const void *pvData, uint32_t dwSize, void **ppSoundBank)
+{
+    STRACE("%p, %p, %u, %p", pThis, pvData, dwSize, ppSoundBank);
+    if (ppSoundBank) *ppSoundBank = g_xact_dummy;
+    return 0;
+}
+HRESULT __stdcall IXACTSoundBank_GetSoundCueIndexFromFriendlyName(void *pThis, const char *pFriendlyName, uint32_t *pdwIndex)
+{
+    STRACE("%p, %p, %p", pThis, pFriendlyName, pdwIndex);
+    if (pdwIndex) *pdwIndex = 0;
+    return 0;
+}
+HRESULT __stdcall IXACTSoundBank_PlayEx(void *pThis, const void *pPrepareData, void **ppSoundCue)
+{
+    STRACE("%p, %p, %p", pThis, pPrepareData, ppSoundCue);
+    if (ppSoundCue) *ppSoundCue = nullptr;
+    return 0;
+}
+
 HRESULT __stdcall IDirectSound_GetSpeakerConfig(Object *pThis, uint32_t *pdw)
 {
     STRACE("%p", pThis);
@@ -1127,6 +1165,12 @@ static const xd3d::Hle kTable[] = {
     H(0x002197f3, IDirectSoundBuffer_GetStatus, "s s", true),
     H(0x0021980f, IDirectSoundBuffer_GetCurrentPosition, "s s s", true),
     H(0x00000000, IDirectSoundBuffer_SetNotificationPositions, "s s s", true), // not used by BLACK (bundled programs)
+    H(0x00000000, XACTEngineCreate, "s s", true),                        // Ninja Gaiden 2004's downloader (its XACT)
+    H(0x00000000, XACTEngineDoWork, "", false),
+    H(0x00000000, IXACTEngine_RegisterWaveBank, "s s s s", true),
+    H(0x00000000, IXACTEngine_CreateSoundBank, "s s s s", true),
+    H(0x00000000, IXACTSoundBank_GetSoundCueIndexFromFriendlyName, "s s s", true),
+    H(0x00000000, IXACTSoundBank_PlayEx, "s s s", true),
     H(0x0021982f, IDirectSoundBuffer_SetCurrentPosition, "s s", true),
     H(0x0021a137, IDirectSoundBuffer_SetFrequency, "s s", true),
     HN(0x0021a153, "IDirectSoundBuffer_SetOutputBuffer", IDirectSoundBuffer_Set1, "s s", true),

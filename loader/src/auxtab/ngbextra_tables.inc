@@ -266,6 +266,47 @@ static const Hle kAuxNgbextraNG04DISC[] = {
     {0x00383e14u, "XNetStartup", (void *)&XNetStartup, "s", true}, // by name; x2.1 0x003afb34
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxNgbextraNG04DL[] = {
+    {0x00042ab0u, "D3DDevice_SetRenderState_EdgeAntiAlias", (void *)&SetRenderState_EdgeAntiAlias, "s", false},
+    {0x00042af0u, "D3DDevice_SetRenderState_ShadowFunc", (void *)&SetRenderState_ShadowFunc, "s", false},
+    {0x00042b30u, "D3DDevice_SetRenderState_FogColor", (void *)&SetRenderState_FogColor, "s", false},
+    {0x00042b80u, "D3DDevice_SetRenderState_CullMode", (void *)&SetRenderState_CullMode, "s", false},
+    {0x00042bf0u, "D3DDevice_SetRenderState_FrontFace", (void *)&SetRenderState_FrontFace, "s", false},
+    {0x00043a00u, "D3DDevice_SetRenderState_ZEnable", (void *)&SetRenderState_ZEnable, "s", false},
+    {0x00042cd0u, "D3DDevice_SetRenderState_LineWidth", (void *)&SetRenderState_LineWidth, "s", false},
+    {0x00042d40u, "D3DDevice_SetRenderState_Dxt1NoiseEnable", (void *)&SetRenderState_Dxt1NoiseEnable, "s", false},
+    {0x00043b90u, "D3DDevice_SetRenderState_YuvEnable", (void *)&SetRenderState_YuvEnable, "s", false},
+    {0x00043bc0u, "D3DDevice_SetRenderState_OcclusionCullEnable", (void *)&SetRenderState_OcclusionCullEnable, "s", false},
+    {0x00043c30u, "D3DDevice_SetRenderState_StencilCullEnable", (void *)&SetRenderState_StencilCullEnable, "s", false},
+    {0x00043ca0u, "D3DDevice_SetRenderState_RopZCmpAlwaysRead", (void *)&SetRenderState_RopZCmpAlwaysRead, "s", false},
+    {0x00043cc0u, "D3DDevice_SetRenderState_RopZRead", (void *)&SetRenderState_RopZRead, "s", false},
+    {0x00043ce0u, "D3DDevice_SetRenderState_DoNotCullUncompressed", (void *)&SetRenderState_DoNotCullUncompressed, "s", false},
+    {0x00042dc0u, "D3DDevice_SetRenderState_ZBias", (void *)&SetRenderState_ZBias, "s", false},
+    {0x00043d00u, "D3DDevice_SetRenderState_MultiSampleMode", (void *)&SetRenderState_MultiSampleMode, "s", false},
+    {0x00043d30u, "D3DDevice_SetRenderState_MultiSampleRenderTargetMode", (void *)&SetRenderState_MultiSampleRenderTargetMode, "s", false},
+    {0x00043d60u, "D3DDevice_SetRenderState_MultiSampleAntiAlias", (void *)&SetRenderState_MultiSampleAntiAlias, "s", false},
+    {0x00043de0u, "D3DDevice_SetRenderState_MultiSampleMask", (void *)&SetRenderState_MultiSampleMask, "s", false},
+    {0x00043e30u, "D3DDevice_SetRenderState_SampleAlpha", (void *)&SetRenderState_SampleAlpha, "s", false},
+    {0x00042e40u, "D3DDevice_SetRenderState_LogicOp", (void *)&SetRenderState_LogicOp, "s", false},
+    {0x00042ea0u, "D3DDevice_SetRenderState_FillMode", (void *)&SetRenderState_FillMode, "s", false},
+    {0x00042ef0u, "D3DDevice_SetRenderState_BackFillMode", (void *)&SetRenderState_BackFillMode, "s", false},
+    {0x00042f50u, "D3DDevice_SetRenderState_TwoSidedLighting", (void *)&SetRenderState_TwoSidedLighting, "s", false},
+    {0x00042fd0u, "D3DDevice_SetRenderState_VertexBlend", (void *)&SetRenderState_VertexBlend, "s", false},
+    {0x00042780u, "D3DDevice_SetRenderState_PSTextureModes", (void *)&SetRenderState_PSTextureModes, "s", false},
+    {0x00043020u, "D3DDevice_SetTextureState_TexCoordIndex", (void *)&SetTextureState_TexCoordIndex, "s s", false},
+    {0x00043130u, "D3DDevice_SetTextureState_BumpEnv", (void *)&SetTextureState_BumpEnv, "s s s", false},
+    {0x000431a0u, "D3DDevice_SetTextureState_BorderColor", (void *)&SetTextureState_BorderColor, "s s", false},
+    {0x000431e0u, "D3DDevice_SetTextureState_ColorKeyColor", (void *)&SetTextureState_ColorKeyColor, "s s", false},
+    {0x00042970u, "D3D_UpdateProjectionViewportTransform", (void *)&UpdateProjectionViewportTransform, "", false},
+    {0x00041ec0u, "D3D_BlockOnResource", (void *)&BlockOnResource, "s", false},
+    {0x000422c0u, "D3DDevice_LoadVertexShader", (void *)&LoadVertexShader, "s s", false},
+    {0x00042320u, "D3DDevice_SelectVertexShader", (void *)&SelectVertexShader, "s s", false},
+    {0x000423c0u, "D3DDevice_SetShaderConstantMode", (void *)&SetShaderConstantMode, "s", false},
+    {0x00040580u, "D3DDevice_SetGammaRamp", (void *)&SetGammaRamp, "s s", false},
+    {0x00040740u, "D3DDevice_BlockUntilVerticalBlank", (void *)&BlockUntilVerticalBlank, "", false},
+    {0x00040500u, "D3D_BlockOnResource", (void *)&BlockOnResource, "s", false}, // jmp thunk to 0x00041ec0
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_ngb_extra_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -291,6 +332,10 @@ const Hle *hle_ngb_extra_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04DISC")) {
         *count = sizeof kAuxNgbextraNG04DISC / sizeof kAuxNgbextraNG04DISC[0] - 1;
         return kAuxNgbextraNG04DISC;
+    }
+    if (!strcmp(xbe, "NG04DL")) {
+        *count = sizeof kAuxNgbextraNG04DL / sizeof kAuxNgbextraNG04DL[0] - 1;
+        return kAuxNgbextraNG04DL;
     }
     *count = 0;
     return nullptr;

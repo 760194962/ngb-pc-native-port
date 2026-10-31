@@ -249,11 +249,38 @@ inline const BuildProfile kProfileNg04Trilogy = {
     0x001EF06C, 0, 0, kFcuQpc, 1, 0x001D5E94, "NinjaFCU", L"Ninja Gaiden",
 };
 
+// NINJA GAIDEN (2004)'s downloader.xbe (disc 1.02.04): the XDK's Xbox Live content downloader (library DOWNLDR, XDK
+// 5659, plain D3D8 / DSOUND), which the Xbox Live "NEW NOTICE!" starts (r750) and which goes back to the game when done.
+// _rtinit 0x1DA0C / _cinit 0x1D9B4 (XbSymbolDatabase), no fibers; every rdtsc of .text is trapped (XONLINE's timing),
+// QueryPerformanceCounter's at full rate (work/ng04/profile_probe.py, 2026-10-31).
+inline const uint32_t kNg04DlRdtsc[] = {0x14FC0, 0x15004, 0x15033, 0x15067, 0x150AC, 0x150DC, 0x15700, 0x1577A,
+                                        0x16DB7, 0x16DCB, 0x1711A, 0x17159, 0x172BF, 0x27A36, 0x27D81, 0x27E2B,
+                                        0x27FC9, 0x2800A, 0x28163, 0x281EC, 0x3FBF1};
+inline const BuildProfile kProfileNg04Downloader = {
+    "NINJA GAIDEN (2004): downloader.xbe (Xbox Live content downloader)",
+    "fcce4a17781b5a84483b821e0e8e39f4b4ea97e6b386cbb206f2b6df887f04ce",
+    0x54430003, -1, false,
+    {{0xB6440, 0xB644C}, {0xB6450, 0xB6468}, {0xB646C, 0xB647C}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x000AEB14, 0, 0, kNg04DlRdtsc, sizeof kNg04DlRdtsc / sizeof kNg04DlRdtsc[0], 0x0003FBF1, "NG04DL", L"Ninja Gaiden",
+};
+// The title update's downloader.xbe (1.06.04, TDATA\54430003\$u): the disc's with one byte of .text changed (0x1D895
+// jmp -> jge) and a new certificate; everything above holds. It is the one that runs once the update is installed.
+inline const BuildProfile kProfileNg04DownloaderTu = {
+    "NINJA GAIDEN (2004) title update 1.06.04: downloader.xbe (Xbox Live content downloader)",
+    "a99574a8ac0d17702b20e4e5821372ab964cfdbecdaee6d4863f296d924b2e92",
+    0x54430003, -1, false,
+    {{0xB6440, 0xB644C}, {0xB6450, 0xB6468}, {0xB646C, 0xB647C}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x000AEB14, 0, 0, kNg04DlRdtsc, sizeof kNg04DlRdtsc / sizeof kNg04DlRdtsc[0], 0x0003FBF1, "NG04DL", L"Ninja Gaiden",
+};
+
 inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNgbUs,
                                                 &kProfileNgbHurricaneJp, &kProfileNgbBasicX2, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
                                                 &kProfileNinjaFCJ, &kProfileNinjaFCU, &kProfileNg04Tu,
                                                 &kProfileNg04Tomoe, &kProfileNg04Trilogy, &kProfileNg04Disc,
-                                                &kProfileNgbUsRetail, &kProfileNinjaTomoeRetail, &kProfileNinjaTrilogyRetail};
+                                                &kProfileNgbUsRetail, &kProfileNinjaTomoeRetail, &kProfileNinjaTrilogyRetail,
+                                                &kProfileNg04Downloader, &kProfileNg04DownloaderTu};
 
 // The profile whose SHA-256 matches, or nullptr for an unknown build.
 inline const BuildProfile *build_profile_for(const char *sha256_hex)

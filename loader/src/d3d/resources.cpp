@@ -259,6 +259,7 @@ HRESULT __stdcall D3DSurface_LockRect(Surface *pThis, D3DLOCKED_RECT *pLockedRec
     lock_rect(pThis, 0, 0, pLockedRect, pRect);
     if (pThis->Parent) texture_mark_dirty(pThis->Parent);
     if (is_backbuffer(pThis)) backbuffer_cpu_lock();
+    else rt_cpu_lock(pThis);
     return D3D_OK;
 }
 

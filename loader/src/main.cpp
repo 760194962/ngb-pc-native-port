@@ -600,12 +600,18 @@ int run(void *reserve, unsigned reserve_size)
     std::string hash = sha256_hex(g_xbe.data);
     // Ninja Gaiden 2004's disc program (1.02.04): on the console, with the title update on the hard disk
     // (TDATA\54430003\$u, from Xbox Live or the Hurricane Packs' installer) the update runs instead; without it the
-    // disc's own program does (the user, 2026-10-31). The disc stays D: either way.
-    if (hash == kProfileNg04Disc.sha256) {
-        std::wstring tu = host_full_path(g_cfg.hdd_dir) + L"\\Partition1\\TDATA\\54430003\\$u\\default.xbe";
+    // disc's own program does (the user, 2026-10-31). The disc stays D: either way. The same for the disc's
+    // downloader.xbe (Xbox Live "NEW NOTICE!"): the update carries a newer one (1.06.04), and Xbox Live (Insignia) turns
+    // the disc's away with "update required" (r755).
+    const BuildProfile *disc_prog = hash == kProfileNg04Disc.sha256         ? &kProfileNg04Tu
+                                    : hash == kProfileNg04Downloader.sha256 ? &kProfileNg04DownloaderTu
+                                                                            : nullptr;
+    if (disc_prog) {
+        std::wstring file = g_cfg.xbe_path.substr(g_cfg.xbe_path.find_last_of(L"\\/") + 1);
+        std::wstring tu = host_full_path(g_cfg.hdd_dir) + L"\\Partition1\\TDATA\\54430003\\$u\\" + file;
         Xbe update;
         std::string why;
-        if (update.load(tu, why) && sha256_hex(update.data) == kProfileNg04Tu.sha256) {
+        if (update.load(tu, why) && sha256_hex(update.data) == disc_prog->sha256) {
             logf("xbe: Ninja Gaiden 2004's disc program 1.02.04; the title update on the hard disk runs instead (%s)", narrow(tu).c_str());
             g_xbe = std::move(update);
             g_cfg.xbe_path = tu;
@@ -669,6 +675,7 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
     install_ng04_exitmenu(); // Ninja Gaiden (2004)'s title menu: the same, its own way
     if (profile && !black && !profile->aux) install_ngb_livedash(); // Ⓐ in Ranking's Live boxes: cancel, not the dashboard
+    install_ng04_livedash(); // and in Ninja Gaiden (2004)'s Master Ninja Tournament
     nvnet_install_trap(); // online play: the NIC's registers (net/nvnet.cpp), after every other exception handler
     if (!profile) g_cfg.fps = 30;
     if (!kdpc_init()) {

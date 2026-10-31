@@ -1219,6 +1219,90 @@ void upload_cpu_backbuffer()
     if (from) from->Release();
     if (to) to->Release();
 }
+// Render targets the CPU writes into: Ninja Gaiden 2004's downloader draws a button picture into a small target and
+// then writes the label beside it with XFONT (D3DSurface_LockRect, then the glyphs into the memory; r760). The picture
+// lives in the host target, the label in Xbox memory: on the lock the host picture is read into the memory (so the
+// glyphs land on it), and before the next draw or Swap the memory goes back into the host target. Only the downloader
+// does this (a lock of a game's target keeps its old behaviour), and only for 32-bit linear surfaces.
+namespace {
+struct CpuRt {
+    uint32_t data, w, h, pitch;
+};
+std::vector<CpuRt> g_cpu_rts;
+IDirect3DSurface9 *cpu_rt_sys(uint32_t w, uint32_t h)
+{
+    static std::map<uint64_t, IDirect3DSurface9 *> sys;
+    IDirect3DSurface9 *&s = sys[mem_key(0, w, h)];
+    if (!s) host3d::dev()->CreateOffscreenPlainSurface(w, h, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &s, nullptr);
+    return s;
+}
+bool cpu_rt_enabled()
+{
+    static int on = -1;
+    if (on < 0) on = g_cfg.profile && g_cfg.profile->aux && !strcmp(g_cfg.profile->aux, "NG04DL");
+    return on != 0;
+}
+} // namespace
+
+void rt_cpu_lock(const Surface *s)
+{
+    if (!cpu_rt_enabled() || !s || is_backbuffer(s)) return;
+    uint32_t fmt = (s->Format >> FMT_FORMAT_SHIFT) & 0xFF;
+    if (fmt != XFMT_LIN_A8R8G8B8 && fmt != XFMT_LIN_X8R8G8B8) return;
+    uint32_t w, h;
+    surface_size(s, &w, &h);
+    auto it = g_rts.find(mem_key(s->Data, w, h));
+    if (it == g_rts.end() || !it->second.tex) return; // never drawn into: the memory is all there is
+    uint32_t pitch = (((s->Size >> SIZE_PITCH_SHIFT) & 0xFF) + 1) * 64;
+    for (const CpuRt &c : g_cpu_rts)
+        if (c.data == s->Data && c.w == w && c.h == h) return; // already read since the last upload
+    IDirect3DDevice9 *d = host3d::dev();
+    IDirect3DTexture9 *xbox_size_rt = scratch_rt(w, h);
+    IDirect3DSurface9 *from = nullptr, *to = nullptr, *sys = cpu_rt_sys(w, h);
+    if (!xbox_size_rt || !sys || FAILED(it->second.tex->GetSurfaceLevel(0, &from)) || FAILED(xbox_size_rt->GetSurfaceLevel(0, &to))) {
+        if (from) from->Release();
+        return;
+    }
+    host3d::end_scene();
+    D3DLOCKED_RECT lr;
+    if (SUCCEEDED(d->StretchRect(from, nullptr, to, nullptr, D3DTEXF_LINEAR)) && SUCCEEDED(d->GetRenderTargetData(to, sys)) &&
+        SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+        uint8_t *mem = (uint8_t *)phys_to_virt(s->Data);
+        for (uint32_t y = 0; y < h; y++) memcpy(mem + y * pitch, (const uint8_t *)lr.pBits + y * lr.Pitch, w * 4);
+        sys->UnlockRect();
+        g_cpu_rts.push_back({s->Data, w, h, pitch});
+        static bool noted;
+        if (!noted) noted = true, logf("[d3d] a render target is written by the CPU (%ux%u at 0x%08x): read back, uploaded before the next draw", w, h, s->Data);
+    }
+    from->Release();
+    to->Release();
+}
+
+void rt_cpu_upload()
+{
+    if (g_cpu_rts.empty()) return;
+    IDirect3DDevice9 *d = host3d::dev();
+    for (const CpuRt &c : g_cpu_rts) {
+        auto it = g_rts.find(mem_key(c.data, c.w, c.h));
+        IDirect3DSurface9 *sys = cpu_rt_sys(c.w, c.h);
+        IDirect3DTexture9 *xbox_size_rt = scratch_rt(c.w, c.h);
+        if (it == g_rts.end() || !it->second.tex || !sys || !xbox_size_rt) continue;
+        D3DLOCKED_RECT lr;
+        if (FAILED(sys->LockRect(&lr, nullptr, 0))) continue;
+        const uint8_t *mem = (const uint8_t *)phys_to_virt(c.data);
+        for (uint32_t y = 0; y < c.h; y++) memcpy((uint8_t *)lr.pBits + y * lr.Pitch, mem + y * c.pitch, c.w * 4);
+        sys->UnlockRect();
+        IDirect3DSurface9 *mid = nullptr, *to = nullptr;
+        if (SUCCEEDED(xbox_size_rt->GetSurfaceLevel(0, &mid)) && SUCCEEDED(it->second.tex->GetSurfaceLevel(0, &to))) {
+            host3d::end_scene();
+            if (SUCCEEDED(d->UpdateSurface(sys, nullptr, mid, nullptr))) d->StretchRect(mid, nullptr, to, nullptr, D3DTEXF_LINEAR);
+        }
+        if (mid) mid->Release();
+        if (to) to->Release();
+    }
+    g_cpu_rts.clear();
+}
+
 uint32_t backbuffer_data() { return g_backbuffer ? g_backbuffer->Data : 0; }
 uint32_t depthbuffer_data() { return g_depthbuffer ? g_depthbuffer->Data : 0; }
 
@@ -1855,6 +1939,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     pb_flush();
     perf::swap_begin();
     pace_swap();
+    rt_cpu_upload();
     upload_cpu_backbuffer();
     present_backbuffer();
     if (perfhud::active()) { // the performance overlay / an online message over the finished picture

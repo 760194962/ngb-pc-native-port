@@ -261,6 +261,21 @@ void __stdcall MmSetAddressProtect(void *BaseAddress, uint32_t NumberOfBytes, ui
         logf("[k] MmSetAddressProtect: VirtualProtect failed (%lu)", GetLastError());
 }
 
+// System memory (the kernel's own pages for a title: Ninja Gaiden 2004's downloader takes its file buffers from it)
+void *__stdcall MmAllocateSystemMemory(uint32_t NumberOfBytes, uint32_t Protect)
+{
+    void *p = VirtualAlloc(nullptr, NumberOfBytes, MEM_COMMIT | MEM_RESERVE, strip_cache_bits(Protect));
+    KTRACE("0x%x, 0x%x) -> %p (", NumberOfBytes, Protect, p);
+    return p;
+}
+
+uint32_t __stdcall MmFreeSystemMemory(void *BaseAddress, uint32_t NumberOfBytes)
+{
+    KTRACE("%p, 0x%x", BaseAddress, NumberOfBytes);
+    uint32_t pages = (NumberOfBytes + 0xFFF) >> 12;
+    return VirtualFree(BaseAddress, 0, MEM_RELEASE) ? pages : 0;
+}
+
 // --- virtual memory ---
 
 NTSTATUS __stdcall NtAllocateVirtualMemory(void **BaseAddress, uint32_t ZeroBits, uint32_t *RegionSize, uint32_t AllocationType,

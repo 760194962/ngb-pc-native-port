@@ -11,6 +11,7 @@
 #include "perf.h"
 namespace xd3d { void texture_note_write(const void *p, uint32_t len); void flash_note_read(uint32_t bytes); } // d3d/texture.cpp, d3d/device.cpp
 
+#include <algorithm>
 #include <cctype>
 #include <map>
 #include <mutex>
@@ -129,6 +130,9 @@ NTSTATUS resolve(HANDLE root, const XANSI_STRING *name, Resolved &r)
     while (!rest.empty() && rest.back() == '\\') rest.pop_back();
     for (char &c : rest)
         if (c == '/') c = '\\';
+    // "a\\b" names a\b on the Xbox (its file systems skip empty names; Ninja Gaiden 2004's downloader writes
+    // "$c\<id>\\ContentMeta.xbx", r757); Windows would call the path invalid
+    rest.erase(std::unique(rest.begin(), rest.end(), [](char a, char b) { return a == '\\' && b == '\\'; }), rest.end());
     r.host_nt = L"\\??\\" + best->host + widen(rest);
     // --game-override, then the port's rebuilt menus: a file of the same relative path there replaces the game's
     if (best->partition == -1 && !rest.empty())
@@ -313,6 +317,13 @@ bool kfile_init()
 
 namespace xk {
 
+// The file system cache's size in pages (Ninja Gaiden 2004's downloader sets one): Windows caches files itself
+NTSTATUS __stdcall FscSetCacheSize(uint32_t NumberOfCachePages)
+{
+    KTRACE("%u", NumberOfCachePages);
+    return XSTATUS_SUCCESS;
+}
+
 NTSTATUS __stdcall NtCreateFile(HANDLE *FileHandle, ACCESS_MASK DesiredAccess, XOBJECT_ATTRIBUTES *ObjectAttributes,
                                 XIO_STATUS_BLOCK *IoStatusBlock, LARGE_INTEGER *AllocationSize, uint32_t FileAttributes,
                                 uint32_t ShareAccess, uint32_t CreateDisposition, uint32_t CreateOptions)
@@ -463,8 +474,18 @@ NTSTATUS __stdcall NtSetInformationFile(HANDLE FileHandle, XIO_STATUS_BLOCK *IoS
     case 4: case 13: case 14: case 19: case 20: {
         NTSTATUS s = host::NtSetInformationFile(FileHandle, (host::IO_STATUS_BLOCK *)IoStatusBlock, FileInformation, Length,
                                                 FileInformationClass);
-        if (!NT_OK(s))
+        if (!NT_OK(s)) {
+            // FileAllocationInformation (19) is a hint; Wine/Android file systems can reject it with
+            // STATUS_INVALID_PARAMETER (0xc0000003). Ignoring it lets the following writes and the save complete;
+            // the file system allocates on write anyway. Do NOT mark the handle for deletion here: class 19 is not
+            // FileDispositionInformation (that is class 13).
+            if (FileInformationClass == 19) {
+                logf("[k] NtSetInformationFile('%s', class 19 allocation hint) refused 0x%08x; ignored", handle_desc(FileHandle).c_str(), s);
+                complete(IoStatusBlock, XSTATUS_SUCCESS, 0, nullptr);
+                return XSTATUS_SUCCESS;
+            }
             logf("[k] NtSetInformationFile('%s', class %u) failed 0x%08x", handle_desc(FileHandle).c_str(), FileInformationClass, s);
+        }
         return s;
     }
     case 10: { // FileRenameInformation: { BOOLEAN Replace; HANDLE Root; OBJECT_STRING Name; }
