@@ -218,6 +218,32 @@ NTSTATUS __stdcall NtSetEvent(HANDLE EventHandle, int32_t *PreviousState)
     return s;
 }
 
+NTSTATUS __stdcall NtClearEvent(HANDLE EventHandle)
+{
+    KTRACE("%p", EventHandle);
+    return ResetEvent(EventHandle) ? XSTATUS_SUCCESS : XSTATUS_INVALID_HANDLE;
+}
+
+// Mutants are Windows mutexes (Ninja Gaiden 2004's update.xbe takes one); STATUS_MUTANT_NOT_OWNED when the caller
+// does not hold it
+NTSTATUS __stdcall NtCreateMutant(HANDLE *MutantHandle, XOBJECT_ATTRIBUTES *ObjectAttributes, BOOLEAN InitialOwner)
+{
+    std::string name = oa_name(ObjectAttributes);
+    HANDLE h = CreateMutexA(nullptr, InitialOwner, name.empty() ? nullptr : name.c_str());
+    DWORD err = GetLastError();
+    KTRACE("%p, '%s', %u) -> %p (", MutantHandle, name.c_str(), InitialOwner, h);
+    if (!h) return XSTATUS_NO_MEMORY;
+    *MutantHandle = h;
+    return err == ERROR_ALREADY_EXISTS ? 0x40000000 /* STATUS_OBJECT_NAME_EXISTS */ : XSTATUS_SUCCESS;
+}
+
+NTSTATUS __stdcall NtReleaseMutant(HANDLE MutantHandle, int32_t *PreviousCount)
+{
+    KTRACE("%p", MutantHandle);
+    if (PreviousCount) *PreviousCount = 0;
+    return ReleaseMutex(MutantHandle) ? XSTATUS_SUCCESS : 0xC0000046 /* STATUS_MUTANT_NOT_OWNED */;
+}
+
 NTSTATUS __stdcall NtCreateSemaphore(HANDLE *SemaphoreHandle, XOBJECT_ATTRIBUTES *ObjectAttributes, int32_t InitialCount,
                                      int32_t MaximumCount)
 {

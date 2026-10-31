@@ -1430,6 +1430,12 @@ uint32_t __stdcall D3DDevice_Release()
     return 1;
 }
 
+uint32_t __stdcall D3DDevice_AddRef()
+{
+    DTRACE("");
+    return 2;
+}
+
 // ---- push buffer ----
 
 uint32_t *__stdcall D3D_MakeRequestedSpace(uint32_t MinimumSpace, uint32_t RequestedSpace)
@@ -1932,6 +1938,20 @@ void check_render_size()
     change_render_scale(w, h);
 }
 
+// The swap callback (D3DSWAPCALLBACK, cdecl, a D3DSWAPDATA {Swap, SwapVBlank, MissedVBlanks, TimeUntilSwapVBlank,
+// TimeBetweenSwapVBlanks}): the Xbox calls it when a Swap takes effect. Ninja Gaiden 2004's title updater sets one
+// that clears its "frame pending" flag; without the call it drew one frame and then waited for ever (r767). Only a
+// callback set through D3DDevice_SetSwapCallback is called (no other program sets one: their behaviour is as before).
+bool g_swap_callback_set;
+void swap_callback_after_swap()
+{
+    if (!g_swap_callback_set) return;
+    auto cb = dev_field<void(__cdecl *)(uint32_t *)>(DEV_SWAPCALLBACK);
+    if (!cb) return;
+    uint32_t data[5] = {dev_field<uint32_t>(DEV_SWAPCOUNT), g_vblank_count.load(), 0, 0, 16683};
+    cb(data);
+}
+
 uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
 {
     DTRACE("0x%x", Flags);
@@ -2003,6 +2023,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
                                                  texture_matrix_stale_count());
     dev_field<uint32_t>(DEV_SWAPCOUNT)++;
     g_swap_count++;
+    swap_callback_after_swap();
     if (frames % 60 == 0 || frames < 4)
         logf("[d3d] frame %u presented (%u draws, %u skipped since last report)", frames, g_st.draws, g_st.draws_skipped);
     if (frames % 60 == 0 || frames < 4) g_st.draws = g_st.draws_skipped = 0;
@@ -2493,6 +2514,13 @@ void __stdcall D3DDevice_SetTransform(uint32_t State, const D3DMATRIX *pMatrix)
     host_texture_transform_changed((int)State - 2, pMatrix);
 }
 
+// Ninja Gaiden 2004's update.xbe reads transforms back (its device keeps them at another offset than the HLE's)
+void __stdcall D3DDevice_GetTransform(uint32_t State, D3DMATRIX *pMatrix)
+{
+    DTRACE("%u, %p", State, pMatrix);
+    if (pMatrix && State < 10) *pMatrix = g_st.transforms[State];
+}
+
 void __stdcall D3DDevice_SetViewport(const Viewport *pViewport)
 {
     DTRACE("%p: %u,%u %ux%u z %f-%f", pViewport, pViewport->X, pViewport->Y, pViewport->Width, pViewport->Height, pViewport->MinZ,
@@ -2917,6 +2945,7 @@ void __stdcall D3DDevice_SetSwapCallback(void *cb)
 {
     DTRACE("%p", cb);
     dev_field<void *>(DEV_SWAPCALLBACK) = cb;
+    g_swap_callback_set = true;
 }
 
 static const Hle kTable[] = {
@@ -2939,6 +2968,8 @@ static const Hle kTable[] = {
     H(0x0026aa60, D3DDevice_GetRenderTarget2, "", true),
     H(0x0026aaa0, D3DDevice_GetDepthStencilSurface2, "", true),
     H(0x0026aae0, D3DDevice_SetTransform, "s s", false),
+    H(0x00000000, D3DDevice_GetTransform, "s s", false), // not called by BLACK (Ninja Gaiden 2004's update.xbe)
+    H(0x00000000, D3DDevice_AddRef, "", true),           // not called by BLACK (Ninja Gaiden 2004's update.xbe)
     H(0x0026ac00, D3DDevice_SetViewport, "s", false),
     H(0x0026e9c0, D3DDevice_GetViewportOffsetAndScale, "s s", false),
     H(0x0026ba50, D3DDevice_SetScreenSpaceOffset, "s s", false),

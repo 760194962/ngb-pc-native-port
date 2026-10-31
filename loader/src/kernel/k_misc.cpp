@@ -275,11 +275,12 @@ static bool relaunch(const std::wstring &xbe, bool with_data = true)
 }
 
 // The Xbox's own programs a game may launch to reach the dashboard: Ninja Gaiden 2004 starts the disc's dashupdate.xbe
-// (the dashboard updater, then its network settings) when Xbox Live cannot be reached (r701).
+// (the dashboard updater, then its network settings) when Xbox Live cannot be reached (r701). (Its update.xbe, the
+// title updater, runs: build_profile.h kProfileNg04Updater.)
 static bool system_program(const std::wstring &xbe)
 {
     std::wstring f = xbe.substr(xbe.find_last_of(L"\\/") + 1);
-    for (const wchar_t *n : {L"dashupdate.xbe", L"xonlinedash.xbe", L"xboxdash.xbe", L"update.xbe"})
+    for (const wchar_t *n : {L"dashupdate.xbe", L"xonlinedash.xbe", L"xboxdash.xbe"})
         if (!_wcsicmp(f.c_str(), n)) return true;
     return false;
 }

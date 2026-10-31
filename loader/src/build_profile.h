@@ -275,12 +275,27 @@ inline const BuildProfile kProfileNg04DownloaderTu = {
     0x000AEB14, 0, 0, kNg04DlRdtsc, sizeof kNg04DlRdtsc / sizeof kNg04DlRdtsc[0], 0x0003FBF1, "NG04DL", L"Ninja Gaiden",
 };
 
+// NINJA GAIDEN (2004)'s update.xbe (disc 1.02.04): the XDK's online updater ("Online Updater Application", library
+// UPDATE, XDK 5659, plain D3D8 / DSOUND), which the game starts when Xbox Live asks for the title update (the Master
+// Ninja Tournament without the Hurricane Packs' update installed). _rtinit 0x1AC49 / _cinit 0x1ABF1, no fibers; the one
+// rdtsc of .text is QueryPerformanceCounter's (work/ng04/profile_probe.py, 2026-11-01).
+inline const uint32_t kNg04UpQpc[] = {0x17F5A};
+inline const BuildProfile kProfileNg04Updater = {
+    "NINJA GAIDEN (2004): update.xbe (Xbox Live title updater)",
+    "ca827a33c4b82e41f6eb3c10f78277ca4c01a329aa8c5ab49981bad4eb9097c3",
+    0x54430003, -1, false,
+    {{0x93CE0, 0x93CEC}, {0x93CF0, 0x93D30}, {0x93D34, 0x93D4C}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x0008C5B4, 0, 0, kNg04UpQpc, 1, 0x00017F5A, "NG04UP", L"Ninja Gaiden",
+};
+
 inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNgbUs,
                                                 &kProfileNgbHurricaneJp, &kProfileNgbBasicX2, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
                                                 &kProfileNinjaFCJ, &kProfileNinjaFCU, &kProfileNg04Tu,
                                                 &kProfileNg04Tomoe, &kProfileNg04Trilogy, &kProfileNg04Disc,
                                                 &kProfileNgbUsRetail, &kProfileNinjaTomoeRetail, &kProfileNinjaTrilogyRetail,
-                                                &kProfileNg04Downloader, &kProfileNg04DownloaderTu};
+                                                &kProfileNg04Downloader, &kProfileNg04DownloaderTu,
+                                                &kProfileNg04Updater};
 
 // The profile whose SHA-256 matches, or nullptr for an unknown build.
 inline const BuildProfile *build_profile_for(const char *sha256_hex)

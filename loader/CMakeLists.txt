@@ -70,6 +70,7 @@ add_library(blackrt SHARED
   src/net/online.cpp
   src/net/nvnet.cpp
   src/net/vnet.cpp
+  src/net/dashfonts.cpp
   src/fiber.cpp
   src/kernel/k_content.cpp
   src/ngb/d3d_ngb.cpp

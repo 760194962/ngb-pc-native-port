@@ -251,6 +251,56 @@ static const Hle kAuxDeviceNG04DL[] = {
     {0x000927d5u, "FUN_000927d5", nullptr, "", false}, // only sets registers and returns: runs natively
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxDeviceNG04UP[] = {
+    {0x0003cac0u, "Direct3D_CreateDevice", (void *)&Direct3D_CreateDevice, "s s s s s s", true},
+    {0x0003e420u, "D3DDevice_Release", (void *)&D3DDevice_Release, "", true},
+    {0x00043a40u, "D3D_MakeRequestedSpace_8", (void *)&D3D_MakeRequestedSpace, "s s", true},
+    {0x00041fb0u, "D3DDevice_End", (void *)&D3DDevice_End, "", false},
+    {0x00040820u, "D3DDevice_Clear", (void *)&D3DDevice_Clear, "s s s s s s", true},
+    {0x00040670u, "D3DDevice_Swap", (void *)&D3DDevice_Swap, "s", true},
+    {0x0003e470u, "D3DDevice_SetSwapCallback", (void *)&D3DDevice_SetSwapCallback, "s", false},
+    {0x0003e8e0u, "D3DDevice_GetBackBuffer2", (void *)&D3DDevice_GetBackBuffer2, "s", true},
+    {0x0003e660u, "D3DDevice_SetRenderTarget", (void *)&D3DDevice_SetRenderTarget, "s s", true},
+    {0x0003ec60u, "D3DDevice_GetDepthStencilSurface2", (void *)&D3DDevice_GetDepthStencilSurface2, "", true},
+    {0x0003e280u, "D3DDevice_SetTransform", (void *)&D3DDevice_SetTransform, "s s", false},
+    {0x0003e3a0u, "D3DDevice_GetTransform", (void *)&D3DDevice_GetTransform, "s s", false},
+    {0x0003e400u, "D3DDevice_AddRef", (void *)&D3DDevice_AddRef, "", true},
+    {0x0003ec80u, "D3DDevice_SetViewport", (void *)&D3DDevice_SetViewport, "s", false},
+    {0x0003cc30u, "D3DDevice_GetViewportOffsetAndScale", (void *)&D3DDevice_GetViewportOffsetAndScale, "s s", false},
+    {0x0003f970u, "D3DDevice_SetScreenSpaceOffset", (void *)&D3DDevice_SetScreenSpaceOffset, "s s", false},
+    {0x0003e3d0u, "D3DDevice_SetMaterial", (void *)&D3DDevice_SetMaterial, "s", false},
+    {0x0003eeb0u, "D3DDevice_SetLight", (void *)&D3DDevice_SetLight, "s s", true},
+    {0x0003f4c0u, "D3DDevice_SetScissors", (void *)&D3DDevice_SetScissors, "s s s", false},
+    {0x0003f170u, "D3DDevice_SetTexture", (void *)&D3DDevice_SetTexture, "s s", false},
+    {0x00041370u, "D3DDevice_SetStreamSource", (void *)&D3DDevice_SetStreamSource, "s s s", false},
+    {0x0003cbd0u, "D3DDevice_SetRenderStateNotInline", (void *)&D3DDevice_SetRenderStateNotInline, "s s", false},
+    {0x0003cba0u, "D3DDevice_SetRenderState_Simple", (void *)&D3DDevice_SetRenderState_Simple, "ecx edx", false},
+    {0x0003d020u, "D3DDevice_SetRenderState_NormalizeNormals", (void *)&D3DDevice_SetRenderState_NormalizeNormals, "s", false},
+    {0x0003de80u, "D3DDevice_SetRenderState_StencilEnable", (void *)&D3DDevice_SetRenderState_StencilEnable, "s", false},
+    {0x0003df10u, "D3DDevice_SetRenderState_StencilFail", (void *)&D3DDevice_SetRenderState_StencilFail, "s", false},
+    {0x0003d060u, "D3DDevice_SetRenderState_TextureFactor", (void *)&D3DDevice_SetRenderState_TextureFactor, "s", false},
+    {0x0003d610u, "D3DDevice_SetTextureStageStateNotInline", (void *)&D3DDevice_SetTextureStageStateNotInline, "s s s", false},
+    {0x00041120u, "D3DDevice_CreateVertexShader", (void *)&D3DDevice_CreateVertexShader, "s s s s", true},
+    {0x00041750u, "D3DDevice_SetVertexShader", (void *)&D3DDevice_SetVertexShader, "s", false},
+    {0x00041260u, "D3DDevice_SetVertexShaderConstant1", (void *)&D3DDevice_SetVertexShaderConstant1, "ecx edx", false},
+    {0x000412c0u, "D3DDevice_SetVertexShaderConstant4", (void *)&D3DDevice_SetVertexShaderConstant4, "ecx edx", false},
+    {0x000480c0u, "D3DDevice_SetPixelShader", (void *)&D3DDevice_SetPixelShader, "s", false},
+    {0x00043820u, "D3D_SetFence", (void *)&D3D_SetFence, "s", true},
+    {0x000438d0u, "D3D_BlockOnTime", (void *)&D3D_BlockOnTime, "s s", false},
+    {0x00042290u, "D3DResource_Register", nullptr, "", false}, // plain code: runs natively
+    {0x00042200u, "D3DResource_GetType", nullptr, "", false}, // plain code: runs natively
+    {0x000418c0u, "D3D_AllocContiguousMemory", nullptr, "", false}, // plain code: runs natively
+    {0x00041900u, "FUN_00041900", nullptr, "", false}, // plain code: runs natively
+    {0x0003f320u, "D3DDevice_SetIndices", nullptr, "", false}, // plain code: runs natively
+    {0x00041920u, "D3DDevice_CreateIndexBuffer2", nullptr, "", false}, // plain code: runs natively
+    {0x0003e270u, "FUN_0003e270", nullptr, "", false}, // plain code: runs natively
+    {0x0008c9fbu, "FUN_0008c9fb", nullptr, "", false}, // plain code: runs natively
+    {0x00040c10u, "FUN_00040c10", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0x00058432u, "IDirectSoundBuffer_Unlock", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0x0005eeb4u, "FUN_0005eeb4", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0x0009004cu, "FUN_0009004c", nullptr, "", false}, // only sets registers and returns: runs natively
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_device_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -280,6 +330,10 @@ const Hle *hle_device_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04DL")) {
         *count = sizeof kAuxDeviceNG04DL / sizeof kAuxDeviceNG04DL[0] - 1;
         return kAuxDeviceNG04DL;
+    }
+    if (!strcmp(xbe, "NG04UP")) {
+        *count = sizeof kAuxDeviceNG04UP / sizeof kAuxDeviceNG04UP[0] - 1;
+        return kAuxDeviceNG04UP;
     }
     *count = 0;
     return nullptr;

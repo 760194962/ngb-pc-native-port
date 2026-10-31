@@ -174,6 +174,27 @@ static const Hle kAuxDsoundNG04DL[] = {
     {0x0008a182u, "IDirectSoundBuffer_Stop", (void *)&IDirectSoundBuffer_Stop, "s", true},
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxDsoundNG04UP[] = {
+    {0x00059e8bu, "DirectSoundCreate", (void *)&DirectSoundCreate, "s s s", true},
+    {0x00059cc1u, "IDirectSound_CreateSoundBuffer", (void *)&IDirectSound_CreateSoundBuffer, "s s s s", true},
+    {0x0005841cu, "IDirectSound_Release", (void *)&IDirectSound_Release, "s", true},
+    {0x00058ff8u, "DirectSoundDoWork", (void *)&DirectSoundDoWork, "", false},
+    {0x00058ebcu, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_Simple3, "s s s", true},
+    {0x00058437u, "IDirectSoundBuffer_Release", (void *)&IDirectSoundBuffer_Release, "s", true},
+    {0x00058edcu, "IDirectSoundBuffer_SetVolume", (void *)&Voice_SetVolume, "s s", true},
+    {0x00058ef8u, "IDirectSoundBuffer_SetHeadroom", (void *)&Voice_SetHeadroom, "s s", true},
+    {0x00058f14u, "IDirectSoundBuffer_Play", (void *)&IDirectSoundBuffer_Play, "s s s s", true},
+    {0x00058f50u, "IDirectSoundBuffer_GetStatus", (void *)&IDirectSoundBuffer_GetStatus, "s s", true},
+    {0x00058f6cu, "IDirectSoundBuffer_GetCurrentPosition", (void *)&IDirectSoundBuffer_GetCurrentPosition, "s s s", true},
+    {0x00058fd8u, "IDirectSoundBuffer_SetNotificationPositions", (void *)&IDirectSoundBuffer_SetNotificationPositions, "s s s", true},
+    {0x00058f8cu, "IDirectSoundBuffer_SetCurrentPosition", (void *)&IDirectSoundBuffer_SetCurrentPosition, "s s", true},
+    {0x0005937fu, "IDirectSoundBuffer_SetFrequency", (void *)&IDirectSoundBuffer_SetFrequency, "s s", true},
+    {0x000598b1u, "IDirectSoundBuffer_SetBufferData", (void *)&IDirectSoundBuffer_SetBufferData, "s s s", true},
+    {0x00058fa8u, "IDirectSoundBuffer_Lock", (void *)&IDirectSoundBuffer_Lock, "s s s s s s s s", true},
+    {0x00058432u, "IDirectSoundBuffer_Unlock", (void *)&IDirectSoundBuffer_Unlock, "s s s s s", true},
+    {0x00058f38u, "IDirectSoundBuffer_Stop", (void *)&IDirectSoundBuffer_Stop, "s", true},
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_dsound_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -203,6 +224,10 @@ const Hle *hle_dsound_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04DL")) {
         *count = sizeof kAuxDsoundNG04DL / sizeof kAuxDsoundNG04DL[0] - 1;
         return kAuxDsoundNG04DL;
+    }
+    if (!strcmp(xbe, "NG04UP")) {
+        *count = sizeof kAuxDsoundNG04UP / sizeof kAuxDsoundNG04UP[0] - 1;
+        return kAuxDsoundNG04UP;
     }
     *count = 0;
     return nullptr;

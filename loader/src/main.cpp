@@ -21,6 +21,7 @@
 #include "kernel/xboxkrnl.h"
 #include "net/nvnet.h"
 #include "net/online.h"
+#include "net/dashfonts.h"
 #include "xbe.h"
 #include "xthread.h"
 
@@ -650,6 +651,12 @@ int run(void *reserve, unsigned reserve_size)
     if (!kernel_resolve_thunks(g_xbe)) return 1;
     if (!kfile_init()) return 1;
     online_init(); // before the hooks: online play keeps the game's own XNetStartup (d3d/dispatch.cpp)
+    // Ninja Gaiden 2004's title updater draws with the dashboard's fonts (C:\fonts): from the registered xemu disk, once;
+    // and it patches the disc's programs as they were signed (net/dashfonts.h)
+    if (profile == &kProfileNg04Updater) {
+        dash_fonts_ensure(g_cfg.online_hdd, host_full_path(g_cfg.hdd_dir) + L"\\Partition2");
+        updater_signed_sources(host_full_path(g_cfg.game_dir), g_cfg.port_dir + L"\\cache\\ng04_signed");
+    }
     sign_title_content(g_xbe.title_id); // after online_init: XboxHDKey is the EEPROM's with online play
     install_crash_handlers();
     install_probes();

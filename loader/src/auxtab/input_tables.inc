@@ -79,6 +79,17 @@ static const Hle kAuxInputNG04DL[] = {
     {0x000b088fu, "XInitDevices", (void *)&XInitDevices, "s s", false}, // jmp thunk to 0x000aefaa
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxInputNG04UP[] = {
+    {0x0008c73cu, "XInitDevices", (void *)&XInitDevices, "s s", false},
+    {0x0008d55du, "XGetDeviceChanges", (void *)&XGetDeviceChanges, "s s s", true},
+    {0x0009180au, "XInputOpen", (void *)&XInputOpen, "s s s s", true},
+    {0x00091860u, "XInputClose", (void *)&XInputClose, "s", false},
+    {0x00091a44u, "XInputGetState", (void *)&XInputGetState, "s s", true},
+    {0x0008d53bu, "XGetDevices", (void *)&XGetDevices, "s", true},
+    {0x0009186cu, "XInputGetCapabilities", (void *)&XInputGetCapabilities, "s s", true},
+    {0x0008d536u, "XInitDevices", (void *)&XInitDevices, "s s", false}, // jmp thunk to 0x0008c73c
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_input_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -108,6 +119,10 @@ const Hle *hle_input_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04DL")) {
         *count = sizeof kAuxInputNG04DL / sizeof kAuxInputNG04DL[0] - 1;
         return kAuxInputNG04DL;
+    }
+    if (!strcmp(xbe, "NG04UP")) {
+        *count = sizeof kAuxInputNG04UP / sizeof kAuxInputNG04UP[0] - 1;
+        return kAuxInputNG04UP;
     }
     *count = 0;
     return nullptr;

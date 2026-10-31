@@ -93,6 +93,9 @@ void __fastcall ObfDereferenceObject(void *Object);
 NTSTATUS __stdcall NtCreateEvent(HANDLE *EventHandle, XOBJECT_ATTRIBUTES *ObjectAttributes, uint32_t EventType,
                                  BOOLEAN InitialState);
 NTSTATUS __stdcall NtSetEvent(HANDLE EventHandle, int32_t *PreviousState);
+NTSTATUS __stdcall NtClearEvent(HANDLE EventHandle);
+NTSTATUS __stdcall NtCreateMutant(HANDLE *MutantHandle, XOBJECT_ATTRIBUTES *ObjectAttributes, BOOLEAN InitialOwner);
+NTSTATUS __stdcall NtReleaseMutant(HANDLE MutantHandle, int32_t *PreviousCount);
 NTSTATUS __stdcall NtCreateSemaphore(HANDLE *SemaphoreHandle, XOBJECT_ATTRIBUTES *ObjectAttributes, int32_t InitialCount,
                                      int32_t MaximumCount);
 NTSTATUS __stdcall NtReleaseSemaphore(HANDLE SemaphoreHandle, int32_t ReleaseCount, int32_t *PreviousCount);
