@@ -29,6 +29,8 @@ struct BuildProfile {
     uint32_t rdtsc_qpc_site;       // the one inside XAPI's QueryPerformanceCounter: full rate; the engine's timer sites get --tsc-divisor
     const char *aux;               // a bundled program of Ninja Gaiden Black (loader/src/aux, tools/gen_aux_tables.py): its tables'
                                    // name; nullptr for BLACK and Ninja Gaiden Black itself
+    const wchar_t *window_title = nullptr; // Ninja Gaiden Black builds: the game window's title (nullptr: BLACK)
+    bool chinese = false;                  // its menus have Chinese text (x2.1's language switch, [0xDB9890] = 0)
 };
 
 // BLACK (Criterion, NTSC-U): numbers from black-pc NOTES.md.
@@ -61,42 +63,41 @@ inline const BuildProfile kProfileBlack = {
 // HLE-replaced sections and are left alone.
 inline const uint32_t kNgbRdtscSites[] = {0x0030CA3F, 0x0030CAA1, 0x0030E060, 0x0030E284, 0x0030E58E, 0x00376E44};
 
-inline const BuildProfile kProfileNgbHurricaneX21 = {
-    "NINJA GAIDEN BLACK Hurricane vb-zh-x2.1",
-    "aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6",
-    0x5443000D,
-    41,
-    false,
-    {{0x4162C0, 0x4162CC}, {0x4162D0, 0x41634C}, {0x416350, 0x416368}},
-    {"D3D", "DSOUND", "XPP", nullptr},
-    0x003D9694,
-    0x0032A293,
-    0x0045E84C,
-    kNgbRdtscSites,
-    6,
-    0x00376E44,
-};
+// Ninja Gaiden Black and the builds patched from it: everything but the name, the hash, the fs site count (a patch's
+// added HANZI section is code too), the window title and whether it has Chinese is the US release's.
+constexpr BuildProfile ngb_family(const char *name, const char *sha256, int fs_patch_count, const wchar_t *title, bool chinese)
+{
+    return {name, sha256, 0x5443000D, fs_patch_count, false,
+            {{0x4162C0, 0x4162CC}, {0x4162D0, 0x41634C}, {0x416350, 0x416368}},
+            {"D3D", "DSOUND", "XPP", nullptr},
+            0x003D9694, 0x0032A293, 0x0045E84C, kNgbRdtscSites, 6, 0x00376E44, nullptr, title, chinese};
+}
 
-// NINJA GAIDEN BLACK NTSC-U, the original retail release (title 5443000D, version 5, XBE 2005-08-31). x2.1 is this
-// XBE patched: the same 16 sections at the same addresses, the library sections (D3D, DSOUND, XPP, XGRPH, D3DX,
-// XONLINE, XNET, DOLBY) byte for byte identical, .text differing in 360 bytes at 65 places (the Chinese text hooks into
-// x2.1's added HANZI section) and none of them at an address the port uses (scratchpad xbe_hits.py, 2026-10-31). So
-// every x2.1 table and patch address holds here too.
-inline const BuildProfile kProfileNgbUs = {
-    "NINJA GAIDEN BLACK NTSC-U",
-    "df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda",
-    0x5443000D,
-    41,
-    false,
-    {{0x4162C0, 0x4162CC}, {0x4162D0, 0x41634C}, {0x416350, 0x416368}},
-    {"D3D", "DSOUND", "XPP", nullptr},
-    0x003D9694,
-    0x0032A293,
-    0x0045E84C,
-    kNgbRdtscSites,
-    6,
-    0x00376E44,
-};
+// The user's Hurricane edition, Chinese / English: the port's own target. "Ninja Gaiden Black·Hurricane[中英文版]" (the
+// user's name, 2026-10-22: no "X21" in the names).
+inline const BuildProfile kProfileNgbHurricaneX21 = ngb_family(
+    "NINJA GAIDEN BLACK Hurricane vb-zh-x2.1", "aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6", 41,
+    L"Ninja Gaiden Black\u00B7Hurricane[\u4E2D\u82F1\u6587\u7248]", true);
+
+// NINJA GAIDEN BLACK NTSC-U, the original retail release (title 5443000D, version 5, XBE 2005-08-31), which every
+// build here is patched from: the same 16 sections at the same addresses, the library sections (D3D, DSOUND, XPP,
+// XGRPH, D3DX, XONLINE, XNET, DOLBY) byte for byte identical. x2.1's .text differs from it in 360 bytes at 65 places,
+// the Japanese x2.1's in 341 at 61, the basic x2's in 153 at 31; none of them at an address the port uses (scratchpad
+// xbe_hits.py, 2026-10-31). So x2.1's tables and patches hold for all four. Only English on its menus.
+inline const BuildProfile kProfileNgbUs = ngb_family(
+    "NINJA GAIDEN BLACK NTSC-U", "df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda", 41,
+    L"Ninja Gaiden Black", false);
+
+// The user's Hurricane edition, Japanese / English (vb-jp-x2.1): x2.1's gameplay changes without the translation.
+inline const BuildProfile kProfileNgbHurricaneJp = ngb_family(
+    "NINJA GAIDEN BLACK Hurricane vb-jp-x2.1", "535778c8a4623195c8f320b85d2d139f20ff13c020d40150adaed54cfdeffc38", 41,
+    L"Ninja Gaiden Black\u00B7Hurricane[\u65E5\u82F1\u7248]", false);
+
+// The user's basic edition, Chinese / English (va-zh-x2): the original game translated, with the camera fix and the
+// bow's crosshair; no SFC trilogy.
+inline const BuildProfile kProfileNgbBasicX2 = ngb_family(
+    "NINJA GAIDEN BLACK va-zh-x2 (basic)", "00cef52546618eb0149d7895f9042403e95f361b5483aac38933e799c67a50e1", 41,
+    L"Ninja Gaiden Black[\u4E2D\u82F1\u6587\u7248]", true);
 
 // The programs Ninja Gaiden Black x2.1 launches (docs/06 of the port project): the NES trilogy of the original release
 // (NinjaTomoe.xbe Japanese, NinjaTrilogy.xbe US; XDK 5849) and the SNES trilogy added by x2.1 (NinjaFCJ.xbe Japanese,
@@ -138,7 +139,8 @@ inline const BuildProfile kProfileNinjaFCU = {
     0x001EF06C, 0, 0, kFcuQpc, 1, 0x001D5E94, "NinjaFCU",
 };
 
-inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNgbUs, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
+inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNgbUs,
+                                                &kProfileNgbHurricaneJp, &kProfileNgbBasicX2, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
                                                 &kProfileNinjaFCJ, &kProfileNinjaFCU};
 
 // The profile whose SHA-256 matches, or nullptr for an unknown build.

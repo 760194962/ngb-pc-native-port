@@ -52,6 +52,8 @@ enum class Str {
     InstalledGame,
     GameChecked,
     GameCheckedUs,
+    GameCheckedJp,
+    GameCheckedBasic,
     GameWrong,
     ChooseExisting,
     NotAnImage,

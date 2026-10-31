@@ -34,8 +34,8 @@ extern "C" {
 // Read by the thunks
 volatile uint32_t g_exitmenu_list;      // the list descriptor FUN_0017A400 is laying a row out for
 volatile uint32_t g_exitmenu_dialog;    // 1 while the box is up
-uint32_t g_exitmenu_english;            // 1: English only (the original US release: no Chinese font, and [0xDB9890]
-                                        // is x2.1's language switch)
+uint32_t g_exitmenu_english;            // 1: English only (a build without Chinese: the US release, the Japanese
+                                        // x2.1; [0xDB9890] is the Chinese builds' language switch)
 uint32_t g_exitmenu_a400_resume = 0x0017A406;
 uint32_t g_exitmenu_6ae0 = 0x001E6AE0;
 uint32_t g_exitmenu_6ae0_resume = 0x001E6AE6;
@@ -304,7 +304,7 @@ void install_ngb_exitmenu()
             logf("exit menu: code at 0x%08x does not match x2.1; no EXIT GAME row", s.addr);
             return;
         }
-    g_exitmenu_english = g_cfg.profile == &kProfileNgbUs;
+    g_exitmenu_english = !(g_cfg.profile && g_cfg.profile->chinese);
     memcpy(g_spacing, (const void *)(uintptr_t)0x0045A9BA, 9 * sizeof(uint16_t)); // 0 rows .. 8 rows
     g_spacing[9] = 32;                                                             // nine rows (36 for eight, -4 a row)
     put_branch(0x0017A400, 0xE9, list_thunk, 6);

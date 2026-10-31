@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <vector>
 
 namespace install {
@@ -139,13 +140,22 @@ std::string sha256_file(const std::wstring &path)
 }
 
 // The builds the port knows (loader/src/build_profile.h): default.xbe tells which, then the programs it launches. The
-// US release has the NES trilogies only; x2.1 added the SNES ones.
-const char kDefaultX21[] = "aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6";
-const char kDefaultUs[] = "df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda";
+// US release and the basic edition have the NES trilogies only; the Hurricane editions added the SNES ones.
+const struct {
+    const char *sha256;
+    Edition edition;
+    bool snes; // has the SNES trilogy
+    const wchar_t *name;
+} kBuilds[] = {
+    {"aa3c5bec2923f83ccb37fe6a63ea5516b26d477b53c679a1620d19e4a8e4e8f6", Edition::X21, true, L"x2.1 zh"},
+    {"535778c8a4623195c8f320b85d2d139f20ff13c020d40150adaed54cfdeffc38", Edition::X21Jp, true, L"x2.1 jp"},
+    {"00cef52546618eb0149d7895f9042403e95f361b5483aac38933e799c67a50e1", Edition::BasicX2, false, L"x2 basic"},
+    {"df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda", Edition::Us, false, L"US"},
+};
 const struct {
     const wchar_t *file;
     const char *sha256;
-    bool x21_only;
+    bool snes;
 } kFiles[] = {
     {L"NinjaTomoe.xbe", "2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff", false},
     {L"NinjaTrilogy.xbe", "31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621", false},
@@ -174,13 +184,13 @@ bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition)
         return false;
     }
     std::string hash = sha256_file(xbe);
-    bool x21 = hash == kDefaultX21;
-    if (!x21 && hash != kDefaultUs) {
+    const auto *build = std::find_if(std::begin(kBuilds), std::end(kBuilds), [&](const auto &b) { return hash == b.sha256; });
+    if (build == std::end(kBuilds)) {
         *detail = L"default.xbe: another build";
         return false;
     }
     for (const auto &f : kFiles) {
-        if (f.x21_only && !x21) continue;
+        if (f.snes && !build->snes) continue;
         std::wstring p = dir + L"\\" + f.file;
         if (GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES) {
             *detail = std::wstring(f.file) + L": missing";
@@ -191,8 +201,8 @@ bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition)
             return false;
         }
     }
-    *detail = x21 ? L"x2.1: default.xbe + 4" : L"US: default.xbe + 2";
-    if (edition) *edition = x21 ? Edition::X21 : Edition::Us;
+    *detail = std::wstring(build->name) + (build->snes ? L": default.xbe + 4" : L": default.xbe + 2");
+    if (edition) *edition = build->edition;
     return true;
 }
 

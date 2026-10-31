@@ -9,8 +9,8 @@ struct Pair {
 };
 
 const Pair kText[(int)Str::Count] = {
-    {L"Ninja Gaiden Black·Hurricane[中英文版] 启动器", L"Ninja Gaiden Black·Hurricane Launcher"},
-    {L"飓风版 · 中英文版", L"Hurricane \u00B7 Chinese / English"},
+    {L"忍者龙剑传 黑之章 PC 原生移植 启动器", L"Ninja Gaiden Black PC Launcher"},
+    {L"PC 原生移植", L"Native PC port"},
     {L"开始游戏", L"Play"},
     {L"安装", L"Install"},
     {L"显示", L"Display"},
@@ -21,7 +21,7 @@ const Pair kText[(int)Str::Count] = {
     {L"关于", L"About"},
     {L"支持作者", L"Support"},
     {L"忍者龙剑传  黑之章", L"NINJA GAIDEN BLACK"},
-    {L"飓风版 · 中英文版 · PC 原生移植", L"Hurricane edition · Chinese / English · native PC port"},
+    {L"PC 原生移植 · 美版原版与汉化 / 飓风版都能玩", L"Native PC port \u00B7 the US release and its translated / Hurricane editions"},
     {L"开始游戏", L"PLAY"},
     {L"还没有找到游戏，或缺少游戏程序：请在「安装」页安装；缺少游戏程序时请重新解压下载的压缩包。",
      L"The game is not installed yet, or the game program is missing: install on the Install page; if the program is missing, extract the download again."},
@@ -56,27 +56,29 @@ const Pair kText[(int)Str::Count] = {
     {L"游戏安装路径", L"Game folder"},
     {L"已核对：飓风版 x2.1 中英文版（default.xbe 与 4 个附带程序）", L"Checked: Hurricane x2.1, Chinese / English (default.xbe and 4 bundled programs)"},
     {L"已核对：美版原版（default.xbe 与 2 个附带程序）", L"Checked: the original US release (default.xbe and 2 bundled programs)"},
+    {L"已核对：飓风版 x2.1 日英版（default.xbe 与 4 个附带程序）", L"Checked: Hurricane x2.1, Japanese / English (default.xbe and 4 bundled programs)"},
+    {L"已核对：基本版 x2 中英文版（default.xbe 与 2 个附带程序）", L"Checked: basic edition x2, Chinese / English (default.xbe and 2 bundled programs)"},
     {L"不是支持的版本：", L"Not the supported build: "},
     {L"选择已有游戏…", L"Use an installed copy…"},
     {L"不是 Xbox 光盘镜像", L"Not an Xbox disc image"},
     {L"Xbox 光盘镜像 (*.iso)", L"Xbox disc image (*.iso)"},
-    {L"选择你自己的《忍者龙剑传 黑之章 飓风版》x2.1 中英文版光盘镜像（.iso），或美版原版《NINJA GAIDEN BLACK》的光盘镜像（英文）。extract-xiso 做的精简镜像和完整的 redump 镜像都可以。\n\n"
-     L"安装会把镜像里的全部文件（约 5.9 GB）写到下方「游戏安装路径」的文件夹，写完后核对 default.xbe 与附带程序（x2.1：街机版与 SFC 三部曲，日版、美版各一，共 4 个；美版原版：街机版三部曲 2 个）的 SHA-256，"
+    {L"选择你自己的《忍者龙剑传 黑之章》光盘镜像（.iso）：飓风版 x2.1（中英 / 日英）、基本版 x2（中英），或美版原版（英文）。extract-xiso 做的精简镜像和完整的 redump 镜像都可以。\n\n"
+     L"安装会把镜像里的全部文件（约 5.9 GB）写到下方「游戏安装路径」的文件夹，写完后核对 default.xbe 与附带程序（飓风版：街机版与 SFC 三部曲，日版、美版各一，共 4 个；基本版与美版原版：街机版三部曲 2 个）的 SHA-256，"
      L"确认是支持的版本。\n\n"
      L"安装中可以随时取消；已经写出的文件会留在文件夹里，再次安装时会被覆盖。\n\n"
      L"核对通过后，可以把镜像移到回收站来节省空间；以后需要时，还能从回收站还原。",
-     L"Choose your own disc image (.iso) of NINJA GAIDEN BLACK, Hurricane edition x2.1 (Chinese / English), or of the "
-     L"original US release (English). Both an "
+     L"Choose your own disc image (.iso) of NINJA GAIDEN BLACK: the Hurricane edition x2.1 (Chinese / English or "
+     L"Japanese / English), the basic edition x2 (Chinese / English) or the original US release (English). Both an "
      L"extract-xiso image and a full redump image will do.\n\n"
      L"Installing writes every file of the image (about 5.9 GB) to the game folder below, then checks the SHA-256 of "
-     L"default.xbe and the bundled programs (x2.1: the arcade version and the SNES trilogy, a Japanese and a US build of each; the US "
-     L"release: the two arcade trilogies) to make sure this is a supported build.\n\n"
+     L"default.xbe and the bundled programs (Hurricane: the arcade version and the SNES trilogy, a Japanese and a US build of each; "
+     L"basic and US: the two arcade trilogies) to make sure this is a supported build.\n\n"
      L"You can cancel at any time; the files written so far stay in the folder and are overwritten by the next install.\n\n"
      L"Once the check passes you can move the image to the Recycle Bin to save space, and restore it from there later."},
     {L"这里是游戏所在的文件夹：从镜像安装时装到这里，开始游戏时也从这里启动。\n\n"
      L"点「更改…」选一个文件夹：如果里面已经有解包好的游戏（有 default.xbe），就直接使用，不需要重新安装；"
      L"如果是空文件夹，就可以从上方的镜像安装到这里。「默认路径」会改回启动器旁边的 game 文件夹。\n\n"
-     L"核对会计算 default.xbe 与附带程序的 SHA-256：金色的「已核对」表示是支持的版本（x2.1 中英文版或美版原版）；红色表示缺少文件或是别的版本，"
+     L"核对会计算 default.xbe 与附带程序的 SHA-256：金色的「已核对」表示是支持的版本（飓风版 x2.1 中英 / 日英、基本版 x2、美版原版）；红色表示缺少文件或是别的版本，"
      L"游戏可能无法启动。\n\n"
      L"存档不在游戏文件夹里，更换路径不会影响存档。",
      L"This is the game's folder: an install from an image goes here, and the game starts from here.\n\n"
@@ -84,7 +86,7 @@ const Pair kText[(int)Str::Count] = {
      L"is used as it is, with no need to install again; if the folder is empty, install into it from an image above. "
      L"\"Default\" goes back to the game folder next to the launcher.\n\n"
      L"The check computes the SHA-256 of default.xbe and the bundled programs: a gold \"Checked\" line means a "
-     L"supported build (x2.1 or the original US release); red means a file is missing or another build, and the game may not start.\n\n"
+     L"supported build (Hurricane x2.1, basic x2 or the US release); red means a file is missing or another build, and the game may not start.\n\n"
      L"Saved games are not kept in the game folder, so changing it does not touch them."},
     {L"知道了", L"Got it"},
     {L"覆盖已安装的游戏？", L"Replace the installed game?"},
@@ -206,9 +208,12 @@ const Pair kText[(int)Str::Count] = {
      L"The game writes its saves to the emulated Xbox hard disk: Partition1\\UDATA\\5443000d under the location (one folder "
      L"per slot) and TDATA\\5443000d (the system save). The location is launcher.ini\u2019s hdd, by default the savedata "
      L"folder beside the launcher.\n\nThe saves are in the standard Xbox format; a copy of the whole savedata folder is a full backup."},
-    {L"忍者龙剑传 黑之章 · 飓风版", L"Ninja Gaiden Black \u00B7 Hurricane"},
-    {L"《忍者龙剑传 黑之章》飓风版中文汉化 vb-zh-x2.1（初代 Xbox）的非官方 Windows 原生移植，中英文版。需要你自己合法取得的游戏镜像。",
-     L"An unofficial native Windows port of Ninja Gaiden Black\u2019s Hurricane Chinese translation vb-zh-x2.1 (the original Xbox), in Chinese and English. Your own legally obtained game image is required."},
+    {L"忍者龙剑传 黑之章 · PC 原生移植", L"Ninja Gaiden Black \u00B7 native PC port"},
+    {L"《忍者龙剑传 黑之章》（初代 Xbox）的非官方 Windows 原生移植。支持的光盘镜像：美版原版（英文）；基本版 va\u2011zh\u2011x2（中英）；"
+     L"飓风版 vb\u2011zh\u2011x2.1（中英）、vb\u2011jp\u2011x2.1（日英）。需要你自己合法取得的游戏镜像。",
+     L"An unofficial native Windows port of Ninja Gaiden Black (the original Xbox). Supported disc images: the original US "
+     L"release (English); the basic edition va\u2011zh\u2011x2 (Chinese / English); the Hurricane editions vb\u2011zh\u2011x2.1 (Chinese / "
+     L"English) and vb\u2011jp\u2011x2.1 (Japanese / English). Your own legally obtained game image is required."},
     {L"版本", L"Version"},
     {L"启动器 %ls · 游戏程序 %ls", L"Launcher %ls \u00B7 game program %ls"},
     {L"网站", L"Website"},

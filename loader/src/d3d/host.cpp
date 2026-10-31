@@ -435,9 +435,9 @@ void set_title(const wchar_t *text)
 
 const wchar_t *game_title()
 {
-    // "Ninja Gaiden Black·Hurricane[中英文版]" (the user's name, 2026-10-22: no "X21" in the names)
-    if (g_cfg.profile == &kProfileNgbUs) return L"Ninja Gaiden Black";
-    if (g_cfg.profile && !g_cfg.profile->black) return L"Ninja Gaiden Black\u00B7Hurricane[\u4E2D\u82F1\u6587\u7248]";
+    // each Ninja Gaiden Black build has its own (build_profile.h); its bundled programs keep x2.1's
+    if (g_cfg.profile && g_cfg.profile->window_title) return g_cfg.profile->window_title;
+    if (g_cfg.profile && !g_cfg.profile->black) return kProfileNgbHurricaneX21.window_title;
     return L"BLACK";
 }
 

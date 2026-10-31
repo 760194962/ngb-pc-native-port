@@ -1127,7 +1127,7 @@ struct Painter {
     void start_page()
     {
         const float x = kNavW + 56;
-        text(L"NINJA GAIDEN BLACK  \x00B7  HURRICANE", {x, 104, x + 600, 126}, 12.5f, kGold, 1.0f,
+        text(L"NINJA GAIDEN BLACK  \x00B7  NATIVE PC PORT", {x, 104, x + 600, 126}, 12.5f, kGold, 1.0f,
              DWRITE_FONT_WEIGHT_SEMI_BOLD, L"Segoe UI", DWRITE_TEXT_ALIGNMENT_LEADING, 2.6f);
         // the title with a soft shadow (the website's h1: text-shadow 0 2px 20px #000)
         for (int i = 0; i < 3; i++)
@@ -1426,7 +1426,10 @@ struct Painter {
         button(kHitDefaultPath, {c2.right - 256, y2 + 1, c2.right - 146, y2 + 31}, S(Str::DefaultPath), false, !busy && !is_default);
         button(kHitPickGame, {c2.right - 136, y2 + 1, c2.right - 20, y2 + 31}, S(Str::Change), false, !busy);
         text(!have ? std::wstring(S(Str::NotInstalledHere))
-                   : g.game_ok ? std::wstring(S(g.game_edition == install::Edition::Us ? Str::GameCheckedUs : Str::GameChecked))
+                   : g.game_ok ? std::wstring(S(g.game_edition == install::Edition::Us        ? Str::GameCheckedUs
+                                         : g.game_edition == install::Edition::X21Jp   ? Str::GameCheckedJp
+                                         : g.game_edition == install::Edition::BasicX2 ? Str::GameCheckedBasic
+                                                                                       : Str::GameChecked))
                               : std::wstring(S(Str::GameWrong)) + g.game_detail,
              {c2.left + 26, y2 + 36, c2.right - 20, y2 + 64}, 12.5f, !have ? kAsh : g.game_ok ? kGold : kBlood);
     }
