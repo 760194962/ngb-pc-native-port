@@ -210,10 +210,10 @@ const Pair kText[(int)Str::Count] = {
      L"folder beside the launcher.\n\nThe saves are in the standard Xbox format; a copy of the whole savedata folder is a full backup."},
     {L"忍者龙剑传 黑之章 · PC 原生移植", L"Ninja Gaiden Black \u00B7 native PC port"},
     {L"《忍者龙剑传 黑之章》（初代 Xbox）的非官方 Windows 原生移植。支持的光盘镜像：美版原版（英文）；基本版 va\u2011zh\u2011x2（中英）；"
-     L"飓风版 vb\u2011zh\u2011x2.1（中英）、vb\u2011jp\u2011x2.1（日英）。需要你自己合法取得的游戏镜像。",
+     L"飓风版 vb\u2011zh\u2011x2.1（中英）、vb\u2011jp\u2011x2.1（日英）；另可切换到《忍者龙剑传》（2004）光盘版，可选装飓风包。需要你自己合法取得的游戏镜像。",
      L"An unofficial native Windows port of Ninja Gaiden Black (the original Xbox). Supported disc images: the original US "
      L"release (English); the basic edition va\u2011zh\u2011x2 (Chinese / English); the Hurricane editions vb\u2011zh\u2011x2.1 (Chinese / "
-     L"English) and vb\u2011jp\u2011x2.1 (Japanese / English). Your own legally obtained game image is required."},
+     L"English) and vb\u2011jp\u2011x2.1 (Japanese / English); switched at the top left, Ninja Gaiden (2004)'s disc with the optional Hurricane Packs. Your own legally obtained game image is required."},
     {L"版本", L"Version"},
     {L"启动器 %ls · 游戏程序 %ls", L"Launcher %ls \u00B7 game program %ls"},
     {L"网站", L"Website"},
@@ -500,6 +500,26 @@ const Pair kText[(int)Str::Count] = {
     {L"全屏与无边框时画面按多大的分辨率输出。\n「跟随屏幕」（默认）：按屏幕的分辨率输出，最清晰。\n「窗口大小」：按上面「窗口大小」选的尺寸输出（保持屏幕的比例，不会变形），再放大到整个屏幕，画面会软一些，但显卡要处理的像素少。无边框时由系统放大，全屏（独占）时由显卡在交给显示器前放大，都不切换显示器的分辨率。窗口大小不小于屏幕时没有区别。\n\n性能：给配置较低的电脑用。省下的是每帧最后几道全屏处理（伽马、抗锯齿、接缝填补）；「图形」页的渲染分辨率选「跟随窗口」时，3D 画面本身也按这个尺寸画，省得更多。屏幕越大（2K、4K）省得越多。想减轻显卡负担，先调低「图形」页的渲染分辨率，效果最明显。",
      L"The resolution the picture is shown at in fullscreen and borderless.\n\u201CThe screen\u201D (default): the screen\u2019s own, the sharpest.\n\u201CWindow size\u201D: the window size chosen above (kept at the screen\u2019s shape, so nothing is stretched), scaled up to the whole screen: a little softer, but fewer pixels for the graphics card. Borderless, Windows scales it; in (exclusive) fullscreen the graphics card scales it before the display shows it. The display\u2019s resolution is not changed. With a window size no smaller than the screen nothing changes.\n\nPerformance: for slow machines. It saves the last full-screen passes of each frame (gamma, anti-aliasing, seam fill); with the render resolution at \u201CWindow size\u201D on the Graphics page the 3D picture itself is drawn at this size too, saving more. The larger the screen (1440p, 4K), the more it saves. To lighten the load, lower the render resolution on the Graphics page first: that matters most."},
     {L"全屏与无边框也按这个大小输出，再放大到整个屏幕。", L"Fullscreen and borderless show the picture at this size too, scaled up to the screen."},
+    {L"黑之章", L"Black"},
+    {L"2004", L"2004"},
+    {L"忍者龙剑传", L"NINJA GAIDEN"},
+    {L"PC 原生移植 · 2004 原版，装上飓风包可打忍者大师锦标赛", L"Native PC port \u00B7 the 2004 original; with the Hurricane Packs, the Master Ninja Tournament"},
+    {L"已核对：忍者龙剑传（2004）光盘版（default.xbe 与 2 个附带程序）", L"Checked: Ninja Gaiden (2004), the disc (default.xbe and 2 bundled programs)"},
+    {L"这是忍者龙剑传（2004）：请在左上角切换到「2004」", L"This is Ninja Gaiden (2004): switch to 2004 at the top left"},
+    {L"这是黑之章：请在左上角切换到「黑之章」", L"This is Ninja Gaiden Black: switch to Black at the top left"},
+    {L"飓风包（可选）", L"Hurricane Packs (optional)"},
+    {L"安装包", L"Installer"},
+    {L"安装飓风包", L"Install"},
+    {L"未安装：运行光盘原版 1.02（没有飓风包和锦标赛）", L"Not installed: the disc\u2019s 1.02 runs (no Hurricane Packs, no tournament)"},
+    {L"已安装：", L"Installed: "},
+    {L"更新 1.06", L"update 1.06"},
+    {L"飓风包 1", L"Hurricane Pack 1"},
+    {L"飓风包 2", L"Hurricane Pack 2"},
+    {L"飓风包已安装。开始游戏时会自动运行 1.06 更新版。", L"Installed. The game now starts with the 1.06 update."},
+    {L"安装失败：", L"Could not install: "},
+    {L"飓风包是 2004 年在 Xbox Live 上免费发布的追加内容（新关卡、新敌人、新武器与服装），配合「忍者大师锦标赛」。它带着游戏的 1.06 更新版。\n\n先把「Ninja Gaiden DLC Installer.rar」解压，再点「选择文件夹…」选解压出来的文件夹（选「Ninja Gaiden DLC Installer」或里面的「content」都可以），然后点「安装飓风包」。它会装进存档所在的 Xbox 硬盘（TDATA\\54430003），和真机一样。\n\n装了：开始游戏时自动运行 1.06 更新版；游戏每次启动时会按本机密钥给飓风包签名，所以不会提示「内容损坏」。锦标赛菜单需要联网：先在「联网」页配好 Insignia。\n\n没装：运行光盘原版 1.02，可以正常单机游玩。", L"The Hurricane Packs were free downloads on Xbox Live in 2004 (new stages, enemies, weapons and costumes), played in the Master Ninja Tournament. They bring the game\u2019s 1.06 update.\n\nExtract \u201CNinja Gaiden DLC Installer.rar\u201D first, then choose the extracted folder with \u201CChoose folder\u201D (\u201CNinja Gaiden DLC Installer\u201D or the \u201Ccontent\u201D inside it) and press Install. They go onto the Xbox hard disk with the saves (TDATA\\54430003), as on the console.\n\nInstalled: the game starts with the 1.06 update, and signs the packs for this console each time it starts, so they are not \u201Cdamaged\u201D. The tournament needs online play: set up Insignia on the Online page first.\n\nNot installed: the disc\u2019s 1.02 runs, fine for playing on your own."},
+    {L"选择你自己的《忍者龙剑传》（2004，初代 Xbox）光盘镜像（.iso）。extract-xiso 做的精简镜像和完整的 redump 镜像都可以。\n\n安装会把镜像里的全部文件（约 5.9 GB）写到下方「游戏安装路径」的文件夹（默认是启动器旁边的 game_ng04，和黑之章分开），写完后核对 default.xbe 与 2 个附带程序（SFC 三部曲，日版、美版各一）的 SHA-256。\n\n安装中可以随时取消；核对通过后，可以把镜像移到回收站来节省空间。飓风包在下方单独安装。", L"Choose your own disc image (.iso) of NINJA GAIDEN (2004, the original Xbox). Both an extract-xiso image and a full redump image will do.\n\nInstalling writes every file of the image (about 5.9 GB) to the game folder below (by default game_ng04 next to the launcher, apart from Black), then checks the SHA-256 of default.xbe and the 2 bundled programs (the SNES trilogy, a Japanese and a US build).\n\nYou can cancel at any time; once the check passes you can move the image to the Recycle Bin. The Hurricane Packs install below."},
+    {L"xRevive 导入导出只用于黑之章。", L"xRevive import and export are for Black only."},
 };
 
 } // namespace

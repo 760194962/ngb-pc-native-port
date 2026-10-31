@@ -151,7 +151,17 @@ const struct {
     {"535778c8a4623195c8f320b85d2d139f20ff13c020d40150adaed54cfdeffc38", Edition::X21Jp, true, L"x2.1 jp"},
     {"00cef52546618eb0149d7895f9042403e95f361b5483aac38933e799c67a50e1", Edition::BasicX2, false, L"x2 basic"},
     {"df1d2af0154d771f42b77ec4df03a862417ac457ff0d39fec846c40cb55ffbda", Edition::Us, false, L"US"},
+    {"bea2a85eea7e6e0ba6c3e201966a46b24b27e25b3307a29bc3de5b4254791308", Edition::Ng04, false, L"NG2004"},
 };
+// Ninja Gaiden (2004)'s own two programs (the SNES trilogy, Japanese and US): x2.1's NinjaFCJ / NinjaFCU before its patch
+const struct {
+    const wchar_t *file;
+    const char *sha256;
+} kNg04Files[] = {
+    {L"NinjaTomoe.xbe", "d2aeab806769813bdf8a57449beb5725c02269b83e0a50f72768794f62986b1e"},
+    {L"NinjaTrilogy.xbe", "18eaadc569f31dd239545444ba27fc7b9956177f344e9b421d440a1bc6786ca4"},
+};
+const char kNg04Update[] = "86475ba502c0e7f147334b167041c3fd310f8fb34f9e77b0ee6e6866e0764ee3"; // 1.06.04
 const struct {
     const wchar_t *file;
     const char *sha256;
@@ -189,6 +199,18 @@ bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition)
         *detail = L"default.xbe: another build";
         return false;
     }
+    if (build->edition == Edition::Ng04) {
+        for (const auto &f : kNg04Files) {
+            std::wstring p = dir + L"\\" + f.file;
+            if (GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES || sha256_file(p) != f.sha256) {
+                *detail = std::wstring(f.file) + L": missing or another build";
+                return false;
+            }
+        }
+        *detail = L"NG2004: default.xbe + 2";
+        if (edition) *edition = Edition::Ng04;
+        return true;
+    }
     for (const auto &f : kFiles) {
         if (f.snes && !build->snes) continue;
         std::wstring p = dir + L"\\" + f.file;
@@ -203,6 +225,82 @@ bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition)
     }
     *detail = std::wstring(build->name) + (build->snes ? L": default.xbe + 4" : L": default.xbe + 2");
     if (edition) *edition = build->edition;
+    return true;
+}
+
+static bool is_file(const std::wstring &p)
+{
+    DWORD a = GetFileAttributesW(p.c_str());
+    return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static bool is_dir(const std::wstring &p)
+{
+    DWORD a = GetFileAttributesW(p.c_str());
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static std::wstring ng04_tdata(const std::wstring &hdd) { return hdd + L"\\Partition1\\TDATA\\54430003"; }
+
+DlcStatus dlc_status(const std::wstring &hdd)
+{
+    DlcStatus st;
+    std::wstring t = ng04_tdata(hdd);
+    st.update = is_file(t + L"\\$u\\default.xbe") && sha256_file(t + L"\\$u\\default.xbe") == kNg04Update;
+    auto pack = [&](const wchar_t *id) {
+        std::wstring d = t + L"\\$c\\" + id;
+        return is_file(d + L"\\ContentMeta.xbx") && is_file(d + L"\\live00.afs");
+    };
+    st.pack1 = pack(L"5443000300030002");
+    st.pack2 = pack(L"5443000300030003");
+    return st;
+}
+
+// Copies every file under from into to (folders made), replacing files of the same name.
+static bool copy_tree(const std::wstring &from, const std::wstring &to, std::wstring *error)
+{
+    if (!make_dirs(to)) {
+        *error = L"cannot make " + to;
+        return false;
+    }
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((from + L"\\*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return true;
+    bool ok = true;
+    do {
+        if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
+        std::wstring a = from + L"\\" + fd.cFileName, b = to + L"\\" + fd.cFileName;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ok = copy_tree(a, b, error);
+        else if (!CopyFileW(a.c_str(), b.c_str(), FALSE)) {
+            *error = L"cannot copy " + a;
+            ok = false;
+        } else {
+            SetFileAttributesW(b.c_str(), FILE_ATTRIBUTE_NORMAL); // a read-only source stays writable here (the signature)
+        }
+    } while (ok && FindNextFileW(h, &fd));
+    FindClose(h);
+    return ok;
+}
+
+bool install_dlc(const std::wstring &src, const std::wstring &hdd, std::wstring *error)
+{
+    std::wstring content;
+    for (const std::wstring &c : {src + L"\\content", src + L"\\Ninja Gaiden DLC Installer\\content", src})
+        if (is_dir(c + L"\\$u") || is_dir(c + L"\\$c")) {
+            content = c;
+            break;
+        }
+    if (content.empty()) {
+        *error = L"no $u / $c folder";
+        return false;
+    }
+    if (!is_file(content + L"\\$u\\default.xbe") || sha256_file(content + L"\\$u\\default.xbe") != kNg04Update) {
+        *error = L"$u\\default.xbe: missing or another build";
+        return false;
+    }
+    std::wstring t = ng04_tdata(hdd);
+    if (!copy_tree(content + L"\\$u", t + L"\\$u", error)) return false;
+    if (is_dir(content + L"\\$c") && !copy_tree(content + L"\\$c", t + L"\\$c", error)) return false;
     return true;
 }
 

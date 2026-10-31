@@ -20,6 +20,9 @@ struct Backup {
     int slots;
 };
 
+// The game whose saves these are: its title id folder name ("5443000d" Ninja Gaiden Black, the default; "54430003"
+// Ninja Gaiden 2004). Downloadable content in TDATA ($u, $c) is no save: nothing here copies or moves it.
+void set_title(const std::wstring &title);
 std::wstring our_root(const std::wstring &hdd);           // <hdd>\Partition1
 std::wstring xrevive_root(const std::wstring &folder);    // <xRevive folder>\SaveData\Ninja Gaiden_ Black\HddData
 bool has_saves(const std::wstring &root);                 // a slot or the system save there (not just icons)

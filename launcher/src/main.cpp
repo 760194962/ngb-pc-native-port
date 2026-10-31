@@ -65,6 +65,15 @@ struct App {
     std::wstring dir;  // the launcher's folder
     std::wstring ini;  // launcher.ini
     std::wstring game; // default.xbe
+    int module = 0;    // the game: 0 Ninja Gaiden Black, 1 Ninja Gaiden (2004) (launcher.ini module = black | ng04)
+    bool game_other = false; // the game folder holds the other game (Black in the 2004 module, or the reverse)
+    // Ninja Gaiden 2004's Hurricane Packs (its Install page): the installer folder chosen, what the hard disk has, the
+    // last result
+    std::wstring dlc_dir;
+    install::DlcStatus dlc;
+    bool dlc_read = false;
+    std::wstring dlc_result;
+    bool dlc_bad = false;
 
     // the install page
     std::wstring iso, dest;        // the chosen image, where it goes
@@ -120,7 +129,9 @@ enum {
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
-    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister
+    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
+    kHitModule = 580, // + 0 Black, 1 Ninja Gaiden 2004
+    kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc
 };
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -270,7 +281,11 @@ std::wstring game_exe() { return g.dir + L"\\Ninja Gaiden Black Any.exe"; }
 
 // The default game folder: game next to the launcher (the release layout; the game program looks there too when
 // double-clicked). 0.1.0 used game\x21: a launcher.ini from then keeps its path.
-std::wstring default_game_folder() { return g.dir + L"\\game"; }
+bool ng04() { return g.module == 1; } // the Ninja Gaiden 2004 module
+// launcher.ini's key for the game's default.xbe, and its default folder: each game its own (2004: game_ng04)
+const wchar_t *game_key() { return ng04() ? L"game_ng04" : L"game"; }
+std::wstring default_game_folder() { return g.dir + (ng04() ? L"\\game_ng04" : L"\\game"); }
+std::wstring save_hdd(); // the Xbox hard disk (below)
 
 bool exists(const std::wstring &p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; }
 
@@ -448,7 +463,7 @@ std::wstring gpu_label(const GpuChoice &ch)
 
 void launch_game()
 {
-    if (!exists(game_exe()) || !exists(g.game)) {
+    if (!exists(game_exe()) || !exists(g.game) || g.game_other) {
         MessageBeep(MB_ICONWARNING);
         return;
     }
@@ -485,6 +500,8 @@ void check_game()
     g.checked_game = dir;
     g.game_ok = exists(g.game) && install::check_game(dir, &g.game_detail, &g.game_edition);
     if (!exists(g.game)) g.game_detail.clear();
+    g.game_other = g.game_ok && (g.game_edition == install::Edition::Ng04) != ng04();
+    if (g.game_other) g.game_ok = false;
 }
 
 // A folder or a file (filter: the file types offered first, default disc images)
@@ -609,7 +626,7 @@ void install_finished()
     int st = g.prog.state;
     if (st == 2) {
         g.game = g.dest + L"\\default.xbe";
-        ini_set(L"game", g.game);
+        ini_set(game_key(), g.game);
         g.checked_game.clear();
         check_game();
         g.status = S(Str::InstallDone);
@@ -647,10 +664,47 @@ void delete_image()
 void set_game_folder(const std::wstring &dir)
 {
     g.game = dir + L"\\default.xbe";
-    ini_set(L"game", g.game);
+    ini_set(game_key(), g.game);
     set_dest(dir);
     g.checked_game.clear();
     check_game();
+}
+
+// The game shown (the switch under the brand): its folder, check, saves and install page
+void switch_module(int m)
+{
+    if (m == g.module || installing()) return;
+    g.module = m;
+    ini_set(L"module", m ? L"ng04" : L"black");
+    saves::set_title(m ? L"54430003" : L"5443000d");
+    g.game = ini_get(game_key(), (default_game_folder() + L"\\default.xbe").c_str());
+    set_dest(folder_of(g.game));
+    g.checked_game.clear();
+    check_game();
+    g.iso.clear();
+    g.iso_need = 0;
+    g.status.clear();
+    g.offer_delete = false;
+    g.saves_read = false;
+    g.save_status.clear();
+    g.restore_index = -1;
+    g.dlc_read = false;
+    g.dlc_result.clear();
+    g.dlc_dir.clear();
+    g.list_open = 0;
+    g.help = 0;
+}
+
+// Ninja Gaiden 2004: the Hurricane Packs' installer content onto the Xbox hard disk (install.cpp install_dlc)
+void install_dlc_now()
+{
+    std::wstring err;
+    HCURSOR old = SetCursor(LoadCursorW(nullptr, IDC_WAIT));
+    bool ok = install::install_dlc(g.dlc_dir, save_hdd(), &err);
+    SetCursor(old);
+    g.dlc_read = false;
+    g.dlc_result = ok ? std::wstring(S(Str::DlcDone)) : std::wstring(S(Str::DlcFailed)) + err;
+    g.dlc_bad = !ok;
 }
 
 void choose_existing()
@@ -1075,10 +1129,19 @@ struct Painter {
         fill({kNavW - 1, 0, kNavW, kH}, kInk3);
         // brand
         text(L"\x5FCD\x8005\x9F99\x5251\x4F20", {28, 30, kNavW - 12, 72}, 30, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, L"Microsoft YaHei UI");
-        text(L"NINJA GAIDEN BLACK", {29, 74, kNavW - 12, 94}, 11.5f, kGold, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, L"Segoe UI",
-             DWRITE_TEXT_ALIGNMENT_LEADING, 2.2f);
-        text(S(Str::Edition), {29, 96, kNavW - 12, 118}, 12.5f, kAsh);
-        fill({28, 134, 64, 136}, kBlood);
+        text(ng04() ? L"NINJA GAIDEN" : L"NINJA GAIDEN BLACK", {29, 74, kNavW - 12, 94}, 11.5f, kGold, 1.0f,
+             DWRITE_FONT_WEIGHT_SEMI_BOLD, L"Segoe UI", DWRITE_TEXT_ALIGNMENT_LEADING, 2.2f);
+        // the game: Black | 2004
+        for (int i = 0; i < 2; i++) {
+            D2D1_RECT_F r = {28.0f + i * 92, 100, 28.0f + i * 92 + 88, 124};
+            bool on = g.module == i, hov = g.hover == kHitModule + i;
+            g_hits.push_back({kHitModule + i, r});
+            if (on) fill(r, kBlood, 0.16f, 3);
+            stroke(r, on ? kBlood : kInk3, on ? 0.9f : 1.0f, 3);
+            text(S(i ? Str::ModuleNg04 : Str::ModuleBlack), r, 12.5f, on || hov ? kBone : kAsh, 1.0f,
+                 on ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_CENTER);
+        }
+        fill({28, 138, 64, 140}, kBlood);
         // pages
         for (int i = 0; i < kPageCount; i++) {
             D2D1_RECT_F r = {12, 160.0f + i * 50, kNavW - 13, 160.0f + i * 50 + 44};
@@ -1127,17 +1190,17 @@ struct Painter {
     void start_page()
     {
         const float x = kNavW + 56;
-        text(L"NINJA GAIDEN BLACK  \x00B7  NATIVE PC PORT", {x, 104, x + 600, 126}, 12.5f, kGold, 1.0f,
+        text(ng04() ? L"NINJA GAIDEN  \x00B7  NATIVE PC PORT" : L"NINJA GAIDEN BLACK  \x00B7  NATIVE PC PORT", {x, 104, x + 600, 126}, 12.5f, kGold, 1.0f,
              DWRITE_FONT_WEIGHT_SEMI_BOLD, L"Segoe UI", DWRITE_TEXT_ALIGNMENT_LEADING, 2.6f);
         // the title with a soft shadow (the website's h1: text-shadow 0 2px 20px #000)
         for (int i = 0; i < 3; i++)
-            text(S(Str::Title), {x + 1.0f + i, 132.0f + 2 + i, x + 760, 196.0f + 2 + i}, 46, 0x000000, 0.28f,
+            text(S(ng04() ? Str::TitleNg04 : Str::Title), {x + 1.0f + i, 132.0f + 2 + i, x + 760, 196.0f + 2 + i}, 46, 0x000000, 0.28f,
                  DWRITE_FONT_WEIGHT_BLACK, L"Microsoft YaHei UI");
-        text(S(Str::Title), {x, 132, x + 760, 196}, 46, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, L"Microsoft YaHei UI");
-        text(S(Str::Subtitle), {x, 200, x + 640, 228}, 17, kAsh);
+        text(S(ng04() ? Str::TitleNg04 : Str::Title), {x, 132, x + 760, 196}, 46, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, L"Microsoft YaHei UI");
+        text(S(ng04() ? Str::SubtitleNg04 : Str::Subtitle), {x, 200, x + 760, 228}, 17, kAsh);
 
         // the start button
-        bool ready = exists(game_exe()) && exists(g.game);
+        bool ready = exists(game_exe()) && exists(g.game) && !g.game_other;
         D2D1_RECT_F b = {x, 268, x + 236, 326};
         g_hits.push_back({kHitStart, b});
         bool hov = g.hover == kHitStart;
@@ -1336,9 +1399,11 @@ struct Painter {
         bool image = g.help == kHitHelpImage, setting = g.help >= kHitHelpSet && g.help < kHitHelpSet + kSettingHelpCount;
         bool reg = g.help == kHitHelpRegister; // the registration steps: a larger panel
         bool big = reg || (setting && kSettingHelp[g.help - kHitHelpSet].label == Str::DnsCard); // so is DNS's
-        Str title = setting ? kSettingHelp[g.help - kHitHelpSet].label : image ? Str::FromImage : reg ? Str::RegisterTitle : Str::InstalledGame;
-        Str body_text = setting ? kSettingHelp[g.help - kHitHelpSet].help : image ? Str::HelpFromImage
-                      : reg ? Str::HelpRegister : Str::HelpInstalled;
+        bool dlc = g.help == kHitHelpDlc;
+        Str title = setting ? kSettingHelp[g.help - kHitHelpSet].label : image ? Str::FromImage : reg ? Str::RegisterTitle
+                  : dlc ? Str::DlcCard : Str::InstalledGame;
+        Str body_text = setting ? kSettingHelp[g.help - kHitHelpSet].help : image ? (ng04() ? Str::HelpFromImageNg04 : Str::HelpFromImage)
+                      : reg ? Str::HelpRegister : dlc ? Str::HelpDlc : Str::HelpInstalled;
         const float pw = big ? 820.0f : 640.0f, ph = big ? 640.0f : 460.0f, px = (kW - pw) / 2, py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
@@ -1426,12 +1491,43 @@ struct Painter {
         button(kHitDefaultPath, {c2.right - 256, y2 + 1, c2.right - 146, y2 + 31}, S(Str::DefaultPath), false, !busy && !is_default);
         button(kHitPickGame, {c2.right - 136, y2 + 1, c2.right - 20, y2 + 31}, S(Str::Change), false, !busy);
         text(!have ? std::wstring(S(Str::NotInstalledHere))
-                   : g.game_ok ? std::wstring(S(g.game_edition == install::Edition::Us        ? Str::GameCheckedUs
+                   : g.game_other ? std::wstring(S(ng04() ? Str::GameIsBlack : Str::GameIsNg04))
+                   : g.game_ok ? std::wstring(S(g.game_edition == install::Edition::Ng04      ? Str::GameCheckedNg04
+                                         : g.game_edition == install::Edition::Us        ? Str::GameCheckedUs
                                          : g.game_edition == install::Edition::X21Jp   ? Str::GameCheckedJp
                                          : g.game_edition == install::Edition::BasicX2 ? Str::GameCheckedBasic
                                                                                        : Str::GameChecked))
                               : std::wstring(S(Str::GameWrong)) + g.game_detail,
              {c2.left + 26, y2 + 36, c2.right - 20, y2 + 64}, 12.5f, !have ? kAsh : g.game_ok ? kGold : kBlood);
+
+        if (!ng04()) return;
+        // Ninja Gaiden 2004: the Hurricane Packs (optional; they bring the 1.06 update)
+        if (!g.dlc_read) {
+            g.dlc = install::dlc_status(save_hdd());
+            g.dlc_read = true;
+        }
+        D2D1_RECT_F c3 = {x, 526, x + w, 526 + 142};
+        float y3 = card(c3, S(Str::DlcCard), kHitHelpDlc);
+        text(S(Str::DlcFolder), {c3.left + 26, y3, c3.left + 110, y3 + 36}, 13.5f, kAsh);
+        text(g.dlc_dir.empty() ? S(Str::NotChosen) : g.dlc_dir, {c3.left + 112, y3, c3.right - 150, y3 + 36}, 13.5f,
+             g.dlc_dir.empty() ? kAsh : kBone, g.dlc_dir.empty() ? 0.7f : 1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
+             DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+        button(kHitPickDlc, {c3.right - 136, y3 + 3, c3.right - 20, y3 + 33}, S(Str::ChooseFolder), false, !busy);
+        y3 += 44;
+        button(kHitInstallDlc, {c3.left + 26, y3, c3.left + 206, y3 + 36}, S(Str::DlcInstall), true, !busy && !g.dlc_dir.empty());
+        std::wstring st;
+        bool have_dlc = g.dlc.update || g.dlc.pack1 || g.dlc.pack2;
+        if (!g.dlc_result.empty()) st = g.dlc_result;
+        else if (!have_dlc) st = S(Str::DlcNone);
+        else {
+            const wchar_t *sep = g_lang == Lang::Zh ? L"\x3001" : L", ";
+            st = S(Str::DlcHave);
+            if (g.dlc.update) st += S(Str::DlcUpdate);
+            if (g.dlc.pack1) st += std::wstring(g.dlc.update ? sep : L"") + S(Str::DlcPack1);
+            if (g.dlc.pack2) st += std::wstring(g.dlc.update || g.dlc.pack1 ? sep : L"") + S(Str::DlcPack2);
+        }
+        text(st, {c3.left + 222, y3, c3.right - 20, y3 + 36}, 13, g.dlc_bad ? kBlood : have_dlc ? kGold : kAsh, 1.0f,
+             DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
     }
 
     // A row of options; returns nothing, registers base + i for each
@@ -1867,10 +1963,16 @@ struct Painter {
             button(kHitRestore + i, {c2.right - 120, y + 1, c2.right - 20, y + 29}, S(Str::RestoreBtn), false);
             y += 34;
         }
-        // xRevive
+        // xRevive (Black only: where it keeps Ninja Gaiden 2004's saves is not known here)
+        float bottom = c2.bottom;
+        if (ng04()) {
+            text(S(Str::NoXreviveNg04), {x, c2.bottom + 12, x + w, c2.bottom + 36}, 12.5f, kAsh, 0.85f);
+            bottom = c2.bottom + 36;
+        }
         std::wstring xr = ini_get(L"xrevive");
         bool xr_ok = !xr.empty() && saves::has_saves(saves::xrevive_root(xr));
         D2D1_RECT_F c3 = {x, c2.bottom + 12, x + w, c2.bottom + 12 + 50 + 2 * 40 + 4};
+        if (!ng04()) {
         y = card(c3, S(Str::XreviveCard), help_id(Str::XreviveCard));
         text(S(Str::XreviveFolder), {lx, y, vx - 10, y + 32}, 13.5f, kAsh);
         value(xr.empty() ? std::wstring(S(Str::NotChosen)) : xr + (xr_ok ? L"" : std::wstring(L"  \x00B7  ") + S(Str::XreviveNoSaves)),
@@ -1879,8 +1981,10 @@ struct Painter {
         y += 40;
         button(kHitImport, {lx, y, lx + 180, y + 32}, S(Str::ImportX), false, xr_ok);
         button(kHitExport, {lx + 192, y, lx + 372, y + 32}, S(Str::ExportX), false, !xr.empty() && !g.slots.empty());
+        bottom = c3.bottom;
+        }
         if (!g.save_status.empty())
-            text(g.save_status, {x, c3.bottom + 8, x + w, c3.bottom + 32}, 12.5f, g.save_status_bad ? kBlood : kGold, 1.0f,
+            text(g.save_status, {x, bottom + 8, x + w, bottom + 32}, 12.5f, g.save_status_bad ? kBlood : kGold, 1.0f,
                  DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
     }
 
@@ -1932,10 +2036,10 @@ struct Painter {
         const float x = kNavW + 56, w = 800, lx = x + 26, vx = x + 150;
         text(S(Str::NavAbout), {x, 46, x + 700, 98}, 32, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({x, 102, x + 36, 104}, kBlood);
-        D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 52 + 8 * 31 + 6};
+        D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 72 + 8 * 31 + 6}; // the description: four lines of English
         float y = card(c, S(Str::AboutTitle));
-        text(S(Str::AboutDesc), {lx, y, c.right - 20, y + 48}, 13.5f, kBone, 0.92f);
-        y += 52;
+        text(S(Str::AboutDesc), {lx, y, c.right - 20, y + 68}, 13.5f, kBone, 0.92f);
+        y += 72;
         auto row = [&](Str label, const std::wstring &v, int link) { // link: kLinks index to open on a click, or -1
             text(S(label), {lx, y, vx - 10, y + 28}, 13.5f, kAsh);
             D2D1_RECT_F r = {vx, y, vx + std::min(c.right - 26 - vx, measure(v, 13.5f, DWRITE_FONT_WEIGHT_NORMAL) + 4), y + 28};
@@ -2181,7 +2285,7 @@ std::wstring save_hdd()
     if (h.size() < 2 || (h[1] != L':' && h[0] != L'\\')) h = g.dir + L"\\" + h;
     return h;
 }
-std::wstring backup_root() { return g.dir + L"\\savedata_backups"; }
+std::wstring backup_root() { return g.dir + (ng04() ? L"\\savedata_backups_ng2004" : L"\\savedata_backups"); }
 bool game_running() { return FindWindowW(L"BlackLoaderWindow", nullptr) != nullptr; } // the game's window class (d3d/host.cpp)
 void open_folder(const std::wstring &dir) { ShellExecuteW(g.hwnd, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }
 
@@ -2487,7 +2591,18 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
-        if (id == kHitHelpImage || id == kHitHelpInstalled || id == kHitHelpRegister || (id >= kHitHelpSet && id < kHitHelpSet + kSettingHelpCount)) g.help = id;
+        if (id == kHitHelpImage || id == kHitHelpInstalled || id == kHitHelpRegister || id == kHitHelpDlc ||
+            (id >= kHitHelpSet && id < kHitHelpSet + kSettingHelpCount))
+            g.help = id;
+        else if (id == kHitModule || id == kHitModule + 1) switch_module(id - kHitModule);
+        else if (id == kHitPickDlc) {
+            std::wstring d;
+            if (!installing() && pick(true, &d)) {
+                g.dlc_dir = d;
+                g.dlc_result.clear();
+            }
+        }
+        else if (id == kHitInstallDlc && !g.dlc_dir.empty() && !installing()) install_dlc_now();
         else if (id >= 0 && id < kPageCount) {
             g.page = (Page)id;
             if (g.page == kSaves) g.saves_read = false; // read the disk again when the page is opened
@@ -2647,7 +2762,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
     std::wstring lang = ini_get(L"lang");
     if (lang.empty()) g_lang = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE ? Lang::Zh : Lang::En;
     else g_lang = lang == L"en" ? Lang::En : Lang::Zh;
-    g.game = ini_get(L"game", (default_game_folder() + L"\\default.xbe").c_str());
+    g.module = ini_get(L"module") == L"ng04" ? 1 : 0;
+    saves::set_title(ng04() ? L"54430003" : L"5443000d");
+    g.game = ini_get(game_key(), (default_game_folder() + L"\\default.xbe").c_str());
     set_dest(folder_of(g.game)); // installs go to the game folder
     if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g.d2d)) ||
         FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown **)&g.dw)) ||
@@ -2700,6 +2817,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
             g.game = std::wstring(argv[i + 1]) + L"\\default.xbe";
             set_dest(argv[i + 1]);
         }
+        if (!wcscmp(argv[i], L"--module") && i + 1 < argc) switch_module(!wcscmp(argv[i + 1], L"ng04") ? 1 : 0); // with --snap
         if (!wcscmp(argv[i], L"--lang") && i + 1 < argc) g_lang = !wcscmp(argv[i + 1], L"en") ? Lang::En : Lang::Zh;
         if (!wcscmp(argv[i], L"--mdl2")) g_icon_font = L"Segoe MDL2 Assets";
         if (!wcscmp(argv[i], L"--monitor") && i + 1 < argc) { // with --snap: as if the monitor were WxH (the shape list)

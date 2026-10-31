@@ -26,12 +26,27 @@ void extract(const std::wstring &iso, const std::wstring &dest, Progress &p);
 uint64_t image_size(const std::wstring &iso, std::wstring *error);
 
 // The supported builds (loader/src/build_profile.h): the user's Hurricane edition x2.1 in Chinese / English and in
-// Japanese / English, the basic edition x2 (Chinese / English) and the original US release they are all made from.
-enum class Edition { None, X21, X21Jp, BasicX2, Us };
+// Japanese / English, the basic edition x2 (Chinese / English) and the original US release they are all made from;
+// and Ninja Gaiden (2004)'s disc (Ng04), a game of its own in the launcher.
+enum class Edition { None, X21, X21Jp, BasicX2, Us, Ng04 };
 
 // Whether dir holds a supported build: default.xbe and the programs it launches, with their known SHA-256 (the
 // Hurricane editions: four; the basic edition and the US release: the two NES trilogies). *detail: what was found (or
 // what is missing / different); *edition: which.
 bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition = nullptr);
+
+// Ninja Gaiden (2004)'s downloadable content on the Xbox hard disk (<hdd>\Partition1\TDATA\54430003): the title update
+// 1.06.04 ($u\default.xbe, the program the game program runs when it is there) and Hurricane Packs 1 and 2
+// ($c\5443000300030002 and ...0003).
+struct DlcStatus {
+    bool update = false;          // the title update, the known build
+    bool pack1 = false, pack2 = false;
+};
+DlcStatus dlc_status(const std::wstring &hdd);
+
+// Copies the Hurricane Packs' installer content (its folder "Ninja Gaiden DLC Installer", its "content" folder, or a
+// folder holding $u and $c) into <hdd>\Partition1\TDATA\54430003. The game program signs the packs for the console at
+// start (loader kernel/k_content.cpp). *error: why not.
+bool install_dlc(const std::wstring &src, const std::wstring &hdd, std::wstring *error);
 
 } // namespace install

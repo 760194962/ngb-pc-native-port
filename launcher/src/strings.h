@@ -305,6 +305,27 @@ enum class Str {
     FsResNote,
     HelpFsRes,
     WindowFsRes,        // the window size list's note with fullscreen_res = window
+    // the Ninja Gaiden 2004 module
+    ModuleBlack,
+    ModuleNg04,
+    TitleNg04,
+    SubtitleNg04,
+    GameCheckedNg04,
+    GameIsNg04,
+    GameIsBlack,
+    DlcCard,
+    DlcFolder,
+    DlcInstall,
+    DlcNone,
+    DlcHave,
+    DlcUpdate,
+    DlcPack1,
+    DlcPack2,
+    DlcDone,
+    DlcFailed,
+    HelpDlc,
+    HelpFromImageNg04,
+    NoXreviveNg04,
     Count
 };
 
