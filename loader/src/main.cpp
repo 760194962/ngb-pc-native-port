@@ -673,6 +673,9 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && !install_fiber_switch(*profile)) return 1;
     if (profile && !g_cfg.no_rdtsc && !install_rdtsc_emulation(*profile)) return 1;
     bool black = profile && profile->black; // BLACK's own game patches and front-end work; nothing of it applies elsewhere
+    // The 1/8-pixel vertex snap (d3d/nv2a_vsh.cpp) came with BLACK's port for its destructible walls (163c55e); in
+    // Ninja Gaiden it moved only the vertex-program path, and the shadow pass over fixed-function ground flickered
+    g_cfg.vs_snap = black;
     if (black) install_timing_patches();
     if (black) install_mouselook_patches();
     if (black) install_autoaim_patch();

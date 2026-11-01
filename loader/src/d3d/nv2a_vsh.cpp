@@ -374,7 +374,11 @@ std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_
     // on the same point. The host's finer precision at a higher render size left hairline cracks that
     // flickered along such seams: snap to a sub-pixel grid of the Xbox screen space. 1/16 (the NV2A's own)
     // still left some at 3-4x the render size; 1/8 closes gaps twice as wide (0.4 host pixels a step at 3.45x).
-    s += "  oPos.xy = floor(oPos.xy * 8.0 + 0.5) * 0.125;\n";
+    // BLACK only since 2.0.3 (main.cpp; cfg:vsnap:0/1 at run time): only this path moved its vertices, the fixed-function
+    // one (the host's) did not, so a surface drawn first by one and again by the other no longer met itself in depth
+    // on sloped ground: Ryu's shadow pass flickered (chapter 1, outside the gate), which the pull below had to cover
+    // and at 4 steps it laid a second shadow behind Murai (the user, 2026-11-01: snap off "much better").
+    s += "  if (vmScale.z > 0.5) oPos.xy = floor(oPos.xy * 8.0 + 0.5) * 0.125;\n"; // c200.z: cfg:vsnap
     // The NV2A expects screen-space positions; undo the viewport transform to get D3D clip space.
     // The NV2A does not divide by w (x/y/z are already screen coordinates; w only feeds perspective-
     // correct interpolation), so 2D shaders often leave w = 0: treat 0 / non-finite w as 1.

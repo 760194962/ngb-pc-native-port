@@ -291,6 +291,9 @@ void apply_render_states(IDirect3DDevice9 *d)
         // The game's own offset there is -3 / -0.75 (ps 0x3ad6bf0). Each step adds 2 depth units and half a console
         // pixel's worth of slope: 1 (ngbrecomp's) stopped it where the ground is flat, uneven ground needed 4 (8 too);
         // shadow quality, render scale and point filtering made no difference. cfg:shadowpull:N, 0 off.
+        // 2 since 2.0.3: most of that flicker was the vertex-program path's 1/8-pixel snap (nv2a_vsh.cpp, now off);
+        // 4 also passed surfaces that lie behind the floor, a second, displaced shadow in Murai's dojo (Black and
+        // 2004; run/r790, r791; the user chose 2 with the snap off, 2026-11-01).
         if (g_cfg.shadow_pull && rs[XRS_ZENABLE] && !rs[XRS_ZWRITEENABLE] && samples_shadow_map()) {
             bias -= 2.0f * g_cfg.shadow_pull / 16777216.0f;
             slope -= 0.5f * g_cfg.shadow_pull * std::max(target_scale_x(), target_scale_y());
@@ -995,7 +998,8 @@ void upload_vs_constants(IDirect3DDevice9 *d)
     default: k[31] = 1.0f; break;
     }
     k[32] = k[33] = fov_viewmodel_scale(); // c200: the first-person gun keeps the game's FOV
-    k[34] = k[35] = 1.0f;
+    k[34] = g_cfg.vs_snap ? 1.0f : 0.0f; // c200.z: the 1/8-pixel snap (cfg:vsnap)
+    k[35] = 1.0f;
     d->SetVertexShaderConstantF(192, k, 9);
 }
 
