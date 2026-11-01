@@ -95,6 +95,7 @@ Each item's verdict and evidence are in `project/docs/06_功能验证矩阵.md` 
 - **Performance**: in a chapter 1 battle, an average frame time of 10.45 ms on Intel Iris Xe integrated graphics
   (the 60 fps budget is 16.68 ms; r178, `project/docs/05_音频输入存档.md`).
 - **Input**: Xbox and other XInput controllers, plus PS3 / PS4 / PS5 controllers, the Switch Pro Controller, Joy-Cons and DirectInput pads (through SDL3); all with rumble.
+- **System language**: the launcher's Display page (Console) offers the original Xbox's nine system languages (English by default); games pick their default text from it. It applies to Black and 2004, every image. Keep English for the Chinese editions.
 
 ### Original-game defects fixed
 

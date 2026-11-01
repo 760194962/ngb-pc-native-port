@@ -83,6 +83,7 @@ Redump 的「Ninja Gaiden (USA, Asia) (En,Ja)」也支持：同一个 1.02.04，
 - **性能**：第 1 章战斗场景在 Intel Iris Xe 核显上平均帧时间 10.45 ms（60 fps 的预算是 16.68 ms；r178，
   `project/docs/05_音频输入存档.md`）。
 - **输入**：Xbox 与其他 XInput 手柄，以及 PS3 / PS4 / PS5 手柄、Switch Pro 手柄、Joy-Con、DirectInput 手柄（经 SDL3）；震动都有。
+- **系统语言**：启动器「显示」页的「主机设置」里可以选初代 Xbox 的 9 种系统语言（默认 English），游戏按它决定默认的菜单文字等；对黑之章和 2004 的所有镜像都生效。汉化版请保持 English。
 
 ### 修过的原版缺陷
 
