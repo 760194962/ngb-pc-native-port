@@ -96,6 +96,7 @@ Each item's verdict and evidence are in `project/docs/06_功能验证矩阵.md` 
   (the 60 fps budget is 16.68 ms; r178, `project/docs/05_音频输入存档.md`).
 - **Input**: Xbox and other XInput controllers, plus PS3 / PS4 / PS5 controllers, the Switch Pro Controller, Joy-Cons and DirectInput pads (through SDL3); all with rumble.
 - **System language**: the launcher's Display page (Console) offers the original Xbox's nine system languages (English by default); games pick their default text from it. It applies to Black and 2004, every image. Keep English for the Chinese editions.
+- **Audio settings**: the same Console card has all of the original Xbox dashboard's audio options: mono / stereo (default) / Dolby Surround (the rear matrixed into the two channels, for a Pro Logic receiver), and the digital output's Dolby Digital and DTS (5.1 out: front left / right, centre, LFE, back left / right; Windows folds it for fewer speakers). Black's original plays its music and movie sound almost silent on 5.1 (its volumes multiplied by ten); the port fixes that.
 
 ### Original-game defects fixed
 
