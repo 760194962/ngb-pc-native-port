@@ -604,9 +604,10 @@ int run(void *reserve, unsigned reserve_size)
     // disc's own program does (the user, 2026-10-31). The disc stays D: either way. The same for the disc's
     // downloader.xbe (Xbox Live "NEW NOTICE!"): the update carries a newer one (1.06.04), and Xbox Live (Insignia) turns
     // the disc's away with "update required" (r755).
-    const BuildProfile *disc_prog = hash == kProfileNg04Disc.sha256         ? &kProfileNg04Tu
-                                    : hash == kProfileNg04Downloader.sha256 ? &kProfileNg04DownloaderTu
-                                                                            : nullptr;
+    const BuildProfile *as = build_profile_for(hash.c_str()); // the disc's file or the Redump one (kProfileAliases)
+    const BuildProfile *disc_prog = as == &kProfileNg04Disc         ? &kProfileNg04Tu
+                                    : as == &kProfileNg04Downloader ? &kProfileNg04DownloaderTu
+                                                                    : nullptr;
     if (disc_prog) {
         std::wstring file = g_cfg.xbe_path.substr(g_cfg.xbe_path.find_last_of(L"\\/") + 1);
         std::wstring tu = host_full_path(g_cfg.hdd_dir) + L"\\Partition1\\TDATA\\54430003\\$u\\" + file;

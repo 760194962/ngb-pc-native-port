@@ -234,11 +234,15 @@ bool updater_signed_sources(const std::wstring &game_dir, const std::wstring &ca
         const wchar_t *name;
         const char *sha256; // the disc's file
         uint32_t offset;    // file offset of the byte
+        const char *signed_sha256; // the same file as signed (Redump's "Ninja Gaiden (USA, Asia)": build_profile.h kProfileAliases)
     };
     const Fix fixes[] = {
-        {L"default.xbe", "bea2a85eea7e6e0ba6c3e201966a46b24b27e25b3307a29bc3de5b4254791308", 0x2F9D10},
-        {L"downloader.xbe", "fcce4a17781b5a84483b821e0e8e39f4b4ea97e6b386cbb206f2b6df887f04ce", 0xD895},
+        {L"default.xbe", "bea2a85eea7e6e0ba6c3e201966a46b24b27e25b3307a29bc3de5b4254791308", 0x2F9D10,
+         "86c23d787ecf9f6400b9378544a49b62cfdd478dc04d6ef01ceed2a6429e84c0"},
+        {L"downloader.xbe", "fcce4a17781b5a84483b821e0e8e39f4b4ea97e6b386cbb206f2b6df887f04ce", 0xD895,
+         "3bc7c979bc0f4b641f25a376afbc98e6ec614b2e5080b64feae022d9cce9e573"},
     };
+    int as_signed = 0;
     CreateDirectoryW(cache.c_str(), nullptr);
     int made = 0;
     for (const Fix &f : fixes) {
@@ -251,7 +255,12 @@ bool updater_signed_sources(const std::wstring &game_dir, const std::wstring &ca
         DWORD got = 0;
         bool ok = ReadFile(h, b.data(), (DWORD)b.size(), &got, nullptr) && got == b.size();
         CloseHandle(h);
-        if (!ok || sha256_of(b) != f.sha256 || f.offset >= b.size() || b[f.offset] != 0xEB) {
+        std::string sha = ok ? sha256_of(b) : std::string();
+        if (sha == f.signed_sha256) {
+            as_signed++;
+            continue;
+        }
+        if (!ok || sha != f.sha256 || f.offset >= b.size() || b[f.offset] != 0xEB) {
             logf("updater: %s is not the disc's known file; the update is made from it as it is", narrow(f.name).c_str());
             continue;
         }
@@ -261,6 +270,7 @@ bool updater_signed_sources(const std::wstring &game_dir, const std::wstring &ca
         if (o != INVALID_HANDLE_VALUE && WriteFile(o, b.data(), (DWORD)b.size(), &put, nullptr) && put == b.size()) made++;
         if (o != INVALID_HANDLE_VALUE) CloseHandle(o);
     }
+    if (as_signed) logf("updater: %d of the disc's programs already as signed; read from the game folder", as_signed);
     if (made && g_cfg.game_override.empty()) g_cfg.game_override = cache;
     logf("updater: %d of the disc's programs as signed (one byte each put back) in %s, read by the updater instead", made,
          narrow(cache).c_str());

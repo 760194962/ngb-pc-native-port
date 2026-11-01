@@ -297,13 +297,32 @@ inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurr
                                                 &kProfileNg04Downloader, &kProfileNg04DownloaderTu,
                                                 &kProfileNg04Updater};
 
-// The profile whose SHA-256 matches, or nullptr for an unknown build.
+// Ninja Gaiden 2004's disc as Redump has it ("Ninja Gaiden (USA, Asia) (En,Ja)", the user's, 2026-11-01): the same
+// build 1.02.04 as the files above (same time stamp and sections) but each program without the one byte those carry in
+// XapiInitProcess (file 0x2F9D10 / 0xD895 / 0x320EE0 / 0x1BB7A0 / 0x947A: 0x7D jge as signed, theirs 0xEB jmp, which
+// skips the start-up check's failure: a common patch for running from a hard disk). Not a byte the port touches, so
+// these run on the same profiles (and the title update's downloader already has the 0x7D: kProfileNg04DownloaderTu).
+inline const struct {
+    const char *sha256;
+    const BuildProfile *same;
+} kProfileAliases[] = {
+    {"86c23d787ecf9f6400b9378544a49b62cfdd478dc04d6ef01ceed2a6429e84c0", &kProfileNg04Disc},
+    {"3bc7c979bc0f4b641f25a376afbc98e6ec614b2e5080b64feae022d9cce9e573", &kProfileNg04Downloader},
+    {"a8f6a2e484024a9ac6b3a156d3b1b7b5b67ddd3d8407648c9e1f81e5f2d30391", &kProfileNg04Tomoe},
+    {"e4fcb8ace1f73172633991c8ddacb924700abe7639a3efd6f3195e2d320343ee", &kProfileNg04Trilogy},
+    {"1023bafc5362928eee2a6429c86dcb5bb91c3aa03e58392e81f3def6ad4d56c8", &kProfileNg04Updater},
+};
+
+// The profile whose SHA-256 matches (or an alias's), or nullptr for an unknown build.
 inline const BuildProfile *build_profile_for(const char *sha256_hex)
 {
-    for (const BuildProfile *p : kProfiles) {
-        const char *a = p->sha256, *b = sha256_hex;
+    auto same = [](const char *a, const char *b) {
         while (*a && *b && *a == *b) a++, b++;
-        if (!*a && !*b) return p;
-    }
+        return !*a && !*b;
+    };
+    for (const BuildProfile *p : kProfiles)
+        if (same(p->sha256, sha256_hex)) return p;
+    for (const auto &a : kProfileAliases)
+        if (same(a.sha256, sha256_hex)) return a.same;
     return nullptr;
 }

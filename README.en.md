@@ -53,6 +53,8 @@ launcher to "2004" at the top left; the game installs into a folder of its own, 
 | `downloader.xbe`, disc / update | the Xbox Live downloader behind "NEW NOTICE!" in the Master Ninja Tournament | `fcce4a17…` (disc) / `a99574a8…` (update) |
 | `NinjaTomoe.xbe` / `NinjaTrilogy.xbe` | the bundled SNES trilogy | `d2aeab80…` / `18eaadc5…` |
 
+Redump's "Ninja Gaiden (USA, Asia) (En,Ja)" runs too: the same 1.02.04 with one byte of the XDK start-up check in each program as signed (the files above have it changed to skip the check). Its `default.xbe` is `86c23d787ecf9f6400b9378544a49b62cfdd478dc04d6ef01ceed2a6429e84c0`, and its downloader, trilogy and updater have their own; updating to 1.06 online works the same.
+
 - **Hurricane Packs**: on the launcher's Install page, the Hurricane Packs card takes the installer's folder ("Ninja
   Gaiden DLC Installer") and installs it onto the game's hard disk; the game then starts with update 1.06. The same
   card's Uninstall list shows what is installed (update 1.06, packs 1 and 2, notices downloaded in the game) and

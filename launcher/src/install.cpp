@@ -155,14 +155,19 @@ const struct {
     // the same with the retail certificate (Redump / extract-xiso dumps; build_profile.h kProfileNgbUsRetail)
     {"5fa3997b0d518a9db3867ca6ae2942c99e5349fd138f536ff56772e1a0202200", Edition::Us, false, L"US"},
     {"bea2a85eea7e6e0ba6c3e201966a46b24b27e25b3307a29bc3de5b4254791308", Edition::Ng04, false, L"NG2004"},
+    // the same as Redump's "Ninja Gaiden (USA, Asia)" has it: one byte of XapiInitProcess as signed (build_profile.h
+    // kProfileAliases); so are its other programs (kNg04Files' second hashes)
+    {"86c23d787ecf9f6400b9378544a49b62cfdd478dc04d6ef01ceed2a6429e84c0", Edition::Ng04, false, L"NG2004"},
 };
 // Ninja Gaiden (2004)'s own two programs (the SNES trilogy, Japanese and US): x2.1's NinjaFCJ / NinjaFCU before its patch
 const struct {
     const wchar_t *file;
-    const char *sha256;
+    const char *sha256, *sha256_signed; // the disc's file; the same as signed (Redump's)
 } kNg04Files[] = {
-    {L"NinjaTomoe.xbe", "d2aeab806769813bdf8a57449beb5725c02269b83e0a50f72768794f62986b1e"},
-    {L"NinjaTrilogy.xbe", "18eaadc569f31dd239545444ba27fc7b9956177f344e9b421d440a1bc6786ca4"},
+    {L"NinjaTomoe.xbe", "d2aeab806769813bdf8a57449beb5725c02269b83e0a50f72768794f62986b1e",
+     "a8f6a2e484024a9ac6b3a156d3b1b7b5b67ddd3d8407648c9e1f81e5f2d30391"},
+    {L"NinjaTrilogy.xbe", "18eaadc569f31dd239545444ba27fc7b9956177f344e9b421d440a1bc6786ca4",
+     "e4fcb8ace1f73172633991c8ddacb924700abe7639a3efd6f3195e2d320343ee"},
 };
 const char kNg04Update[] = "86475ba502c0e7f147334b167041c3fd310f8fb34f9e77b0ee6e6866e0764ee3"; // 1.06.04
 const struct {
@@ -208,7 +213,8 @@ bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition)
     if (build->edition == Edition::Ng04) {
         for (const auto &f : kNg04Files) {
             std::wstring p = dir + L"\\" + f.file;
-            if (GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES || sha256_file(p) != f.sha256) {
+            std::string h = GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES ? std::string() : sha256_file(p);
+            if (h != f.sha256 && h != f.sha256_signed) {
                 *detail = std::wstring(f.file) + L": missing or another build";
                 return false;
             }
