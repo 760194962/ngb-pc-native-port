@@ -129,7 +129,7 @@ enum {
     kHitSave, kHitDiscard, kHitAskAlt,
     kHitHelpSet = 400, // + the setting's index in kSettingHelp: its "?"
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
-    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340,
+    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
@@ -182,6 +182,7 @@ const struct {
     {Str::EffectsNative, Str::HelpEffectsNative},
     {Str::PerfHud, Str::HelpPerfHud},
     {Str::GpuCard, Str::HelpGpuCard},
+    {Str::ConsoleCard, Str::HelpConsole},
     {Str::SavesCard, Str::HelpSavesCard},
     {Str::BackupCard, Str::HelpBackupCard},
     {Str::XreviveCard, Str::HelpXreviveCard},
@@ -1666,6 +1667,25 @@ struct Painter {
         label(Str::Gamma);
         slider(kHitGamma, cx, y, slider_value(kHitGamma));
         text(S(Str::GainNote), {cx, y + 34, right, y + 56}, 12, kAsh, 0.75f);
+
+        // the console's settings the game reads at start (loader kernel/k_misc.cpp ExQueryNonVolatileSetting)
+        D2D1_RECT_F c2 = {c.left, c.bottom + 14, c.right, c.bottom + 14 + 92};
+        float y2 = card(c2, S(Str::ConsoleCard), help_id(Str::ConsoleCard));
+        setting_label(Str::SysLang, lx, y2, cx);
+        sys_lang_list(cx, y2 - 2);
+    }
+
+    // The console's language (black.ini language: the Xbox's XC_LANGUAGE numbers 1-9), each in its own words
+    void sys_lang_list(float x, float y)
+    {
+        static const wchar_t *const names[9] = {L"English", L"\u65E5\u672C\u8A9E", L"Deutsch", L"Fran\u00E7ais", L"Espa\u00F1ol",
+                                                L"Italiano", L"\uD55C\uAD6D\uC5B4", L"\u4E2D\u6587", L"Portugu\u00EAs"};
+        std::string v = black_ini("language");
+        int sel = v.empty() ? 0 : atoi(v.c_str()) - 1;
+        if (sel < 0 || sel > 8) sel = 0;
+        std::vector<ListRow> rows;
+        for (int i = 0; i < 9; i++) rows.push_back({names[i], L"", i == 0 ? S(Str::ShadowDefault) : L""});
+        drop_list(kHitSysLang, x, y, {200, 340, 0, 0}, {rows[sel].a, L"", L""}, rows, sel, S(Str::SysLangNote));
     }
 
     // A value slider over the loader's range (kSliderMin - kSliderMax), with a mark at 1.00 (no change) and the
@@ -2466,6 +2486,7 @@ void reset_page(Page p)
         black_ini_set("fullscreen_res", "screen");
         black_ini_set("gain", "1.00");
         black_ini_set("gamma", "1.00");
+        black_ini_set("language", "1");
     } else if (p == kGraphics) {
         black_ini_set("render", "scale");
         black_ini_set("render_factor", "1.00");
@@ -2635,6 +2656,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (g.list_open >= kHitPadMap && g.list_open < kHitPadMap + keys::kButtons * 16 && row >= 0 && row < keys::kButtons)
                 black_ini_set((std::string("padmap_") + keys::input_ini((g.list_open - kHitPadMap) / 16)).c_str(), keys::input_ini(row));
             if (g.list_open == kHitAniso && row >= 0 && row < 5) black_ini_set("aniso", std::to_string(kAnisoLevels[row]));
+            if (g.list_open == kHitSysLang && row >= 0 && row < 9) black_ini_set("language", std::to_string(row + 1));
             if (g.list_open == kHitShadow && row >= 0 && row < 4) black_ini_set("shadow", std::to_string(kShadowScales[row]));
             if (g.list_open == kHitResList && row == 0) {
                 black_ini_set("render", "native");
@@ -2766,7 +2788,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
         else if (id == kHitNetCheck) net_check();
         else if (id == kHitInsignia) ShellExecuteW(h, L"open", L"https://insignia.live/", nullptr, nullptr, SW_SHOWNORMAL);
-        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso || id == kHitUninstall) {
+        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso || id == kHitSysLang || id == kHitUninstall) {
             g.list_open = id;
             g.list_scroll = g.list_scroll_max = 0;
         }
@@ -2903,6 +2925,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
                             : !wcscmp(v, L"window") ? kHitWin
                             : !wcscmp(v, L"shadow") ? kHitShadow
                             : !wcscmp(v, L"aniso")  ? kHitAniso
+                            : !wcscmp(v, L"language") ? kHitSysLang
                             : !wcscmp(v, L"padmap") ? kHitPadMap
                             : !wcscmp(v, L"uninstall") ? kHitUninstall
                                                     : kHitResList;

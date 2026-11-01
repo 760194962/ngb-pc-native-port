@@ -90,6 +90,8 @@ struct Config {
     bool seam_fill = true;     // fill hairline cracks between geometry pieces (PC SETTINGS, --no-seamfill)
     bool autoaim = false;      // the game's view pull toward targets, off by default (input/autoaim.cpp; --autoaim, PC SETTINGS)
     float fov = 70.0f;         // horizontal field of view in play, degrees (fov.cpp; --fov, PC SETTINGS; the game's is 70)
+    int language = 1;          // the console's language (EEPROM XC_LANGUAGE, kernel/k_misc.cpp): 1 English, 2 Japanese,
+                               // 3 German, 4 French, 5 Spanish, 6 Italian, 7 Korean, 8 Chinese, 9 Portuguese (--language)
     bool skip_movies = true;   // A / START skip any movie, also unseen ones (input/movies.cpp; --no-movie-skip, PC SETTINGS)
     // Online play through Insignia (net/online.cpp, project/docs/09): off unless black.ini online = 1 (or --online-eeprom
     // and --online-hdd) names the player's registered xemu EEPROM and hard disk image; both are only read.

@@ -344,6 +344,11 @@ enum class Str {
     DlcExport,
     DlcExported,
     DlcExportFailed,
+    // the Display page: the console's settings the game reads (black.ini language)
+    ConsoleCard,
+    SysLang,
+    SysLangNote,
+    HelpConsole,
     Count
 };
 

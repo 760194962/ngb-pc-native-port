@@ -537,6 +537,17 @@ const Pair kText[(int)Str::Count] = {
     {L"导出", L"Export"},
     {L"已导出到 %s，别的玩家在「安装包」选这个文件夹即可安装", L"Exported to %s: another player chooses that folder as the installer and installs"},
     {L"导出失败：%s", L"Could not export: %s"},
+    {L"主机设置", L"Console"},
+    {L"系统语言", L"System language"},
+    {L"游戏按主机的系统语言选默认语言；游戏没有的语言会用英语", L"Games pick their language from the console's; one a game lacks falls back to English"},
+    {L"初代 Xbox 的系统语言（主机设置里的 Language）。游戏启动时读它，按它决定默认的菜单文字、字幕或语音；"
+     L"游戏里没有的语言一般会用英语。对所有游戏和镜像都生效（黑之章、忍者龙剑传 2004）。\n\n"
+     L"汉化版（飓风版、基本版）是在英文文字上改成中文的，请保持「English」，换成别的语言可能显示回原来的外文。"
+     L"\n\n下次开始游戏时生效。",
+     L"The original Xbox's system language (Language in the console's settings). Games read it at start and pick their "
+     L"menus, subtitles or voices from it; a language a game lacks usually means English. It applies to every game and "
+     L"image (Black, Ninja Gaiden 2004).\n\nThe Chinese editions (Hurricane, basic) are translated over the English text: "
+     L"keep \"English\"; another language may bring the original text back.\n\nTakes effect the next time the game starts."},
 };
 
 } // namespace

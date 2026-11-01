@@ -101,6 +101,8 @@ void usage()
            "  --mouse-invert    mouse forward looks down\n"
            "  --autoaim         the game's auto-aim (the view pulling toward enemies), off by default; --no-autoaim\n"
            "  --fov D           horizontal field of view in play, 50-120 degrees (default 70, the game's; PC SETTINGS > VIDEO)\n"
+           "  --language N      the console's language: 1 English (default), 2 Japanese, 3 German, 4 French, 5 Spanish,\n"
+           "                    6 Italian, 7 Korean, 8 Chinese, 9 Portuguese (black.ini language)\n"
            "  --no-movie-skip   movies skip only as in the original (default: A / START skip every movie)\n"
            "  --no-sdl-pads     XInput controllers only (default: also DualShock, DualSense, Switch and DirectInput pads)\n"
            "  --online-eeprom F --online-hdd F  online play through Insignia with this registered EEPROM and xemu disk\n"
@@ -282,7 +284,12 @@ bool parse_args()
         } else if (a == L"--mouse-invert") { g_cfg.mouse_invert = true; settings_mark_cli("mouse_invert"); }
         else if (a == L"--no-autoaim") { g_cfg.autoaim = false; settings_mark_cli("autoaim"); }
         else if (a == L"--autoaim") { g_cfg.autoaim = true; settings_mark_cli("autoaim"); }
-        else if (a == L"--fov") {
+        else if (a == L"--language") { // the console's language, 1-9 (black.ini language)
+            settings_mark_cli("language");
+            std::wstring v;
+            if (!next(v)) return false;
+            g_cfg.language = std::clamp(_wtoi(v.c_str()), 1, 9);
+        } else if (a == L"--fov") {
             settings_mark_cli("fov");
             std::wstring v;
             if (!next(v)) return false;
