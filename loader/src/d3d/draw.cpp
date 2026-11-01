@@ -293,7 +293,7 @@ void apply_render_states(IDirect3DDevice9 *d)
         // shadow quality, render scale and point filtering made no difference. cfg:shadowpull:N, 0 off.
         // 2 since 2.0.3: most of that flicker was the vertex-program path's 1/8-pixel snap (nv2a_vsh.cpp, now off);
         // 4 also passed surfaces that lie behind the floor, a second, displaced shadow in Murai's dojo (Black and
-        // 2004; run/r790, r791; the user chose 2 with the snap off, 2026-11-01).
+        // 2004; run/r790, r791; the user chose 2 with the snap off, 2026-11-01). 1 since 2.1.0 (the user, 2026-11-01).
         if (g_cfg.shadow_pull && rs[XRS_ZENABLE] && !rs[XRS_ZWRITEENABLE] && samples_shadow_map()) {
             bias -= 2.0f * g_cfg.shadow_pull / 16777216.0f;
             slope -= 0.5f * g_cfg.shadow_pull * std::max(target_scale_x(), target_scale_y());
