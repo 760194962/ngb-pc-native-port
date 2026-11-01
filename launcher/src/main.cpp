@@ -1591,11 +1591,18 @@ struct Painter {
     }
 
     // A row of options; returns nothing, registers base + i for each
-    void segmented(int base, float x, float y, const std::vector<std::wstring> &opts, int sel, float w = 104)
+    // enabled false: dimmed and not clickable, the choice still shown faintly (the console's analog sound with digital on)
+    void segmented(int base, float x, float y, const std::vector<std::wstring> &opts, int sel, float w = 104, bool enabled = true)
     {
         for (size_t i = 0; i < opts.size(); i++) {
             D2D1_RECT_F r = {x + i * (w + 6), y, x + i * (w + 6) + w, y + 30};
-            bool on = (int)i == sel, hov = g.hover == base + (int)i;
+            bool on = (int)i == sel, hov = enabled && g.hover == base + (int)i;
+            if (!enabled) {
+                fill(r, on ? kBlood : kInk, on ? 0.08f : 0.45f, 3);
+                stroke(r, on ? kBlood : kInk3, on ? 0.35f : 0.6f, 3);
+                text(opts[i], r, 13, kAsh, 0.45f, DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_CENTER);
+                continue;
+            }
             g_hits.push_back({base + (int)i, r});
             if (on) {
                 fill(r, kBlood, 0.22f, 3);
@@ -1674,14 +1681,17 @@ struct Painter {
         setting_label(Str::SysLang, lx, y2, cx);
         sys_lang_list(cx, y2 - 2);
         // the dashboard's Audio: analog mono / stereo / Dolby Surround, digital Dolby Digital and DTS (black.ini audio_*)
+        // with the digital output on, the port's one output is 5.1 and the analog choice has no effect (the loader's
+        // audio/dsound.cpp): shown dimmed with a note
+        bool ac3 = black_ini("audio_ac3") == "1", dts = black_ini("audio_dts") == "1";
         y2 += 40;
         setting_label(Str::AudioRow, lx, y2, cx);
         std::string am = black_ini("audio_mode");
         segmented(kHitAudioMode, cx, y2, {S(Str::AudioMono), S(Str::AudioStereo), S(Str::AudioSurround)},
-                  am == "mono" ? 0 : am == "surround" ? 2 : 1);
+                  am == "mono" ? 0 : am == "surround" ? 2 : 1, 104, !ac3 && !dts);
+        if (ac3 || dts) text(S(Str::AudioDigitalNote), {cx + 3 * 110 + 6, y2, c2.right - 20, y2 + 30}, 12, kAsh, 0.7f);
         y2 += 40;
         setting_label(Str::DigitalRow, lx, y2, cx);
-        bool ac3 = black_ini("audio_ac3") == "1", dts = black_ini("audio_dts") == "1";
         segmented(kHitDigital, cx, y2, {S(Str::Off), L"Dolby Digital", L"DTS", S(Str::DigitalBoth)},
                   ac3 && dts ? 3 : dts ? 2 : ac3 ? 1 : 0);
     }

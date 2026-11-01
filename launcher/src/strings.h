@@ -355,6 +355,7 @@ enum class Str {
     AudioSurround,
     DigitalRow,
     DigitalBoth,
+    AudioDigitalNote,
     Count
 };
 

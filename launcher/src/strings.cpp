@@ -545,19 +545,20 @@ const Pair kText[(int)Str::Count] = {
      L"汉化版（飓风版、基本版）是在英文文字上改成中文的，请保持「English」，换成别的语言可能显示回原来的外文。"
      L"\n\n声音：主机的模拟音频输出。单声道把所有声音混成一路；立体声为默认；杜比环绕（Dolby Surround）把后方声道编码进两路立体声，"
      L"接支持 Pro Logic 的功放可以解出后置。\n\n数字输出：Dolby Digital / DTS 打开后，游戏按 5.1 声道混音，移植版以 5.1 输出"
-     L"（前左、前右、中置、低音、后左、后右）；音箱不足 6 声道时由 Windows 自动往下混。黑之章开 5.1 时原版会把背景音乐和过场声音"
+     L"（前左、前右、中置、低音、后左、后右）；音箱不足 6 声道时由 Windows 自动往下混。电脑只有一路输出，所以数字输出开启时「声音」一项不起作用（原机上它管的是 AV 线的模拟输出）。黑之章开 5.1 时原版会把背景音乐和过场声音"
      L"压到几乎听不见，移植版已修正。"
      L"\n\n下次开始游戏时生效。",
      L"The original Xbox's system language (Language in the console's settings). Games read it at start and pick their "
      L"menus, subtitles or voices from it; a language a game lacks usually means English. It applies to every game and "
      L"image (Black, Ninja Gaiden 2004).\n\nThe Chinese editions (Hurricane, basic) are translated over the English text: "
-     L"keep \"English\"; another language may bring the original text back.\n\nSound: the console's analog output. Mono mixes everything into one channel; stereo is the default; Dolby Surround matrixes the rear channels into the two (a Pro Logic receiver takes them back out).\n\nDigital output: with Dolby Digital or DTS on, games mix for 5.1 and the port sends 5.1 out (front left / right, centre, LFE, back left / right); Windows folds it for fewer speakers. Black's original turns its music and movie sound almost silent on 5.1; the port fixes that.\n\nTakes effect the next time the game starts."},
+     L"keep \"English\"; another language may bring the original text back.\n\nSound: the console's analog output. Mono mixes everything into one channel; stereo is the default; Dolby Surround matrixes the rear channels into the two (a Pro Logic receiver takes them back out).\n\nDigital output: with Dolby Digital or DTS on, games mix for 5.1 and the port sends 5.1 out (front left / right, centre, LFE, back left / right); Windows folds it for fewer speakers. The PC has one output, so with the digital output on, Sound has no effect (on the console it is the AV cable's analog output). Black's original turns its music and movie sound almost silent on 5.1; the port fixes that.\n\nTakes effect the next time the game starts."},
     {L"声音", L"Sound"},
     {L"单声道", L"Mono"},
     {L"立体声", L"Stereo"},
     {L"杜比环绕", L"Dolby Surround"},
     {L"数字输出", L"Digital output"},
     {L"两者", L"Both"},
+    {L"数字输出开启时以 5.1 输出，此项不起作用", L"Digital output on: 5.1 out, this has no effect"},
 };
 
 } // namespace
