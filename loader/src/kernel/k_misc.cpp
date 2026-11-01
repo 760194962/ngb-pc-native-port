@@ -125,7 +125,8 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
     case 0x003: case 0x006: dword = 0; break;      // XC_TZ_STD_BIAS / XC_TZ_DLT_BIAS
     case 0x007: dword = (uint32_t)g_cfg.language; break; // XC_LANGUAGE: black.ini language (1 English by default)
     case 0x008: dword = g_cfg.widescreen ? 0x00010000 : 0; break; // XC_VIDEO: bit 16 = widescreen TV, no HD modes
-    case 0x009: dword = 0; break;                  // XC_AUDIO: stereo
+    case 0x009: dword = ((uint32_t)g_cfg.audio_mode | (g_cfg.audio_ac3 ? 0x10000u : 0u) | (g_cfg.audio_dts ? 0x20000u : 0u)); break; // XC_AUDIO: 0 stereo, 1 mono,
+                                                   // 2 surround; 0x10000 Dolby Digital, 0x20000 DTS (black.ini audio_*)
     case 0x00A: dword = 0; break;                  // XC_P_CONTROL_GAMES: no limit
     case 0x00B: dword = 0; break;                  // XC_P_CONTROL_PASSWORD
     case 0x00C: dword = 0; break;                  // XC_P_CONTROL_MOVIES

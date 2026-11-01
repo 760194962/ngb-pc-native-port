@@ -129,7 +129,7 @@ enum {
     kHitSave, kHitDiscard, kHitAskAlt,
     kHitHelpSet = 400, // + the setting's index in kSettingHelp: its "?"
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
-    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350,
+    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
@@ -1669,10 +1669,21 @@ struct Painter {
         text(S(Str::GainNote), {cx, y + 34, right, y + 56}, 12, kAsh, 0.75f);
 
         // the console's settings the game reads at start (loader kernel/k_misc.cpp ExQueryNonVolatileSetting)
-        D2D1_RECT_F c2 = {c.left, c.bottom + 14, c.right, c.bottom + 14 + 92};
+        D2D1_RECT_F c2 = {c.left, c.bottom + 14, c.right, c.bottom + 14 + 172};
         float y2 = card(c2, S(Str::ConsoleCard), help_id(Str::ConsoleCard));
         setting_label(Str::SysLang, lx, y2, cx);
         sys_lang_list(cx, y2 - 2);
+        // the dashboard's Audio: analog mono / stereo / Dolby Surround, digital Dolby Digital and DTS (black.ini audio_*)
+        y2 += 40;
+        setting_label(Str::AudioRow, lx, y2, cx);
+        std::string am = black_ini("audio_mode");
+        segmented(kHitAudioMode, cx, y2, {S(Str::AudioMono), S(Str::AudioStereo), S(Str::AudioSurround)},
+                  am == "mono" ? 0 : am == "surround" ? 2 : 1);
+        y2 += 40;
+        setting_label(Str::DigitalRow, lx, y2, cx);
+        bool ac3 = black_ini("audio_ac3") == "1", dts = black_ini("audio_dts") == "1";
+        segmented(kHitDigital, cx, y2, {S(Str::Off), L"Dolby Digital", L"DTS", S(Str::DigitalBoth)},
+                  ac3 && dts ? 3 : dts ? 2 : ac3 ? 1 : 0);
     }
 
     // The console's language (black.ini language: the Xbox's XC_LANGUAGE numbers 1-9), each in its own words
@@ -2487,6 +2498,9 @@ void reset_page(Page p)
         black_ini_set("gain", "1.00");
         black_ini_set("gamma", "1.00");
         black_ini_set("language", "1");
+        black_ini_set("audio_mode", "stereo");
+        black_ini_set("audio_ac3", "0");
+        black_ini_set("audio_dts", "0");
     } else if (p == kGraphics) {
         black_ini_set("render", "scale");
         black_ini_set("render_factor", "1.00");
@@ -2768,6 +2782,13 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id >= kHitFx && id < kHitFx + 2) black_ini_set("effectsnative", id == kHitFx ? "1" : "0");
         else if (id >= kHitVsync && id < kHitVsync + 2) black_ini_set("vsync", id == kHitVsync ? "1" : "0");
         else if (id >= kHitFsRes && id < kHitFsRes + 2) black_ini_set("fullscreen_res", id == kHitFsRes ? "screen" : "window");
+        else if (id >= kHitAudioMode && id < kHitAudioMode + 3)
+            black_ini_set("audio_mode", id == kHitAudioMode ? "mono" : id == kHitAudioMode + 1 ? "stereo" : "surround");
+        else if (id >= kHitDigital && id < kHitDigital + 4) {
+            int k = id - kHitDigital; // off, Dolby Digital, DTS, both
+            black_ini_set("audio_ac3", k == 1 || k == 3 ? "1" : "0");
+            black_ini_set("audio_dts", k >= 2 ? "1" : "0");
+        }
         else if (id >= kHitHud && id < kHitHud + 2) black_ini_set("perfhud", id == kHitHud ? "1" : "0");
         else if (id >= kHitOnline && id < kHitOnline + 2) black_ini_set("online", id == kHitOnline ? "1" : "0");
         else if (id >= kHitDnsMode && id < kHitDnsMode + 2) {

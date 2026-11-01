@@ -92,6 +92,10 @@ struct Config {
     float fov = 70.0f;         // horizontal field of view in play, degrees (fov.cpp; --fov, PC SETTINGS; the game's is 70)
     int language = 1;          // the console's language (EEPROM XC_LANGUAGE, kernel/k_misc.cpp): 1 English, 2 Japanese,
                                // 3 German, 4 French, 5 Spanish, 6 Italian, 7 Korean, 8 Chinese, 9 Portuguese (--language)
+    int audio_mode = 0;        // the console's analog audio (EEPROM XC_AUDIO, kernel/k_misc.cpp): 0 stereo, 1 mono,
+                               // 2 Dolby Surround (black.ini audio_mode; --audio)
+    bool audio_ac3 = false;    // digital output: Dolby Digital / DTS on (audio_ac3 / audio_dts): the mix goes out as 5.1
+    bool audio_dts = false;
     bool skip_movies = true;   // A / START skip any movie, also unseen ones (input/movies.cpp; --no-movie-skip, PC SETTINGS)
     // Online play through Insignia (net/online.cpp, project/docs/09): off unless black.ini online = 1 (or --online-eeprom
     // and --online-hdd) names the player's registered xemu EEPROM and hard disk image; both are only read.

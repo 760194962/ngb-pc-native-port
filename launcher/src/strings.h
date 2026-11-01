@@ -349,6 +349,12 @@ enum class Str {
     SysLang,
     SysLangNote,
     HelpConsole,
+    AudioRow, // the console's audio (black.ini audio_mode, audio_ac3, audio_dts)
+    AudioMono,
+    AudioStereo,
+    AudioSurround,
+    DigitalRow,
+    DigitalBoth,
     Count
 };
 

@@ -373,6 +373,77 @@ void voice_gains(const Voice &v, float m[2][2], float send[2])
     }
 }
 
+// 5.1 (Dolby Surround, Dolby Digital, DTS): m[source channel][FL FR C LFE BL BR]. The Xbox mix bins go to their own
+// speakers (0-5 the speaker bins, 6-9 the 3D front and back pairs, 19-24 the DSP image's FXSEND_8-13 outputs), the LFE
+// too. A 3D voice (folded to mono, as in voice_gains) is attenuated by distance and panned left / right as there; its
+// 3D pairs split front / back by the listener's front (power-preserving), the centre takes the front share and the
+// LFE its level as set (route A's dsound_hle.cpp Locate / BinScale does the same); each bin at its own volume.
+enum { FL, FR, FC, LFE, BL, BR };
+void voice_gains6(const Voice &v, float m[2][6], float send[2])
+{
+    float m2[2][2];
+    voice_gains(v, m2, send); // the reverb send
+    for (int s = 0; s < 2; s++)
+        for (int c = 0; c < 6; c++) m[s][c] = 0.0f;
+    if (v.is3d && v.ds3d.dwMode != DS3DMODE_DISABLE) {
+        const Ds3dBuffer &p = v.ds3d;
+        Vec3 rel = p.dwMode == DS3DMODE_HEADRELATIVE ? p.vPosition : sub(p.vPosition, g_listener.pos);
+        float d = sqrtf(dot(rel, rel));
+        Vec3 right = cross(g_listener.top, g_listener.front);
+        float rl = sqrtf(dot(right, right)), fl = sqrtf(dot(g_listener.front, g_listener.front));
+        float x = (d > 1e-4f && rl > 1e-6f) ? std::clamp(dot(rel, right) / (d * rl), -1.0f, 1.0f) : 0.0f;
+        float y = (d > 1e-4f && fl > 1e-6f) ? std::clamp(dot(rel, g_listener.front) / (d * fl), -1.0f, 1.0f) : 1.0f;
+        float mn = p.flMinDistance > 0 ? p.flMinDistance : 1.0f;
+        float mx = p.flMaxDistance > mn ? p.flMaxDistance : 1e9f;
+        float roll = g_listener.rolloff * (p.flRolloffFactor > 0 ? p.flRolloffFactor : 1.0f);
+        float att = mn / (mn + roll * (std::clamp(d, mn, mx) - mn));
+        float l = sqrtf(0.5f * (1 - x)) * 1.41421356f, r = sqrtf(0.5f * (1 + x)) * 1.41421356f;
+        float back = 0.5f * (1 - y), fw = sqrtf(1 - back), bw = sqrtf(back);
+        float base = db_to_amp(v.volume) * att * (channels(v.fmt) == 1 ? 1.0f : 0.5f); // a stereo source folded to mono
+        static const MixBinVolumePair k3d[4] = {{6, 0}, {7, 0}, {8, 0}, {9, 0}};
+        const MixBinVolumePair *bins = v.nbins ? v.bins : k3d;
+        uint32_t n = v.nbins ? v.nbins : 4;
+        float g[6] = {};
+        for (uint32_t k = 0; k < n; k++) {
+            float a = base * db_to_amp(bins[k].lVolume);
+            switch (bins[k].dwMixBin) {
+            case 6: g[FL] += a * l * fw; break;
+            case 7: g[FR] += a * r * fw; break;
+            case 8: g[BL] += a * l * bw; break;
+            case 9: g[BR] += a * r * bw; break;
+            case 2: g[FC] += a * fw; break;
+            case 3: g[LFE] += a; break;
+            case 0: g[FL] += a; break;
+            case 1: g[FR] += a; break;
+            case 4: g[BL] += a; break;
+            case 5: g[BR] += a; break;
+            default: break; // the reverb's and the other effect sends
+            }
+        }
+        for (int s = 0; s < 2; s++)
+            for (int c = 0; c < 6; c++) m[s][c] = g[c];
+        return;
+    }
+    float amp = db_to_amp(v.volume);
+    uint32_t ch = channels(v.fmt) > 1 ? 2 : 1;
+    MixBinVolumePair defaults[2] = {{0, 0}, {1, 0}};
+    const MixBinVolumePair *bins = v.nbins ? v.bins : defaults;
+    uint32_t n = v.nbins ? v.nbins : 2;
+    for (uint32_t k = 0; k < n; k++) {
+        float a = amp * db_to_amp(bins[k].lVolume);
+        int src = ch == 2 ? (int)(k & 1) : 0;
+        switch (bins[k].dwMixBin) {
+        case 0: case 6: case 19: m[src][FL] += a; break;
+        case 1: case 7: case 20: m[src][FR] += a; break;
+        case 2: case 21: m[src][FC] += a; break;
+        case 3: case 22: m[src][LFE] += a; break;
+        case 4: case 8: case 23: m[src][BL] += a; break;
+        case 5: case 9: case 24: m[src][BR] += a; break;
+        default: break; // the other effect sends (the reverb's: voice_gains)
+        }
+    }
+}
+
 float g_send[audio_out::BLOCK]; // reverb input of the block being mixed
 
 template <typename Fetch> bool mix_voice(Voice &v, float *out, Fetch fetch)
@@ -407,6 +478,38 @@ template <typename Fetch> bool mix_voice(Voice &v, float *out, Fetch fetch)
     return true;
 }
 
+// The same for 5.1: out holds FL FR C LFE BL BR frames
+template <typename Fetch> bool mix_voice6(Voice &v, float *out, Fetch fetch)
+{
+    float m[2][6], send[2];
+    voice_gains6(v, m, send);
+    bool wet = g_cfg.reverb && (send[0] > 0 || send[1] > 0);
+    uint32_t rate = v.frequency ? v.frequency : v.fmt.nSamplesPerSec;
+    double step = (rate ? rate : audio_out::RATE) / (double)audio_out::RATE;
+    if (!v.primed) {
+        if (!fetch(v.s0)) return false;
+        if (!fetch(v.s1)) memcpy(v.s1, v.s0, sizeof v.s1);
+        v.phase = 0;
+        v.primed = true;
+    }
+    for (uint32_t i = 0; i < audio_out::BLOCK; i++) {
+        float t = (float)v.phase;
+        float a0 = v.s0[0] + (v.s1[0] - v.s0[0]) * t, a1 = v.s0[1] + (v.s1[1] - v.s0[1]) * t;
+        for (int c = 0; c < 6; c++) out[6 * i + c] += a0 * m[0][c] + a1 * m[1][c];
+        if (wet) g_send[i] += a0 * send[0] + a1 * send[1];
+        v.phase += step;
+        while (v.phase >= 1.0) {
+            v.phase -= 1.0;
+            memcpy(v.s0, v.s1, sizeof v.s0);
+            if (!fetch(v.s1)) {
+                v.primed = false;
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 std::string voice_str(const Voice &v)
 {
     std::string s = "vol " + std::to_string(v.volume) + " freq " + std::to_string(v.frequency) + (v.is3d ? " 3d" : "") + " bins";
@@ -419,11 +522,11 @@ std::string voice_str(const Voice &v)
 float g_pre_peak;
 uint64_t g_pre_samples, g_pre_over_knee, g_pre_over_full;
 
-void mix_report(const float *out)
+void mix_report(const float *out, uint32_t samples)
 {
     static uint64_t blocks;
     static float peak, send_peak;
-    for (uint32_t i = 0; i < audio_out::BLOCK * 2; i++) peak = std::max(peak, fabsf(out[i]));
+    for (uint32_t i = 0; i < samples; i++) peak = std::max(peak, fabsf(out[i]));
     for (uint32_t i = 0; i < audio_out::BLOCK; i++) send_peak = std::max(send_peak, fabsf(g_send[i])); // reverb input
     uint64_t n = ++blocks;
     uint64_t every = n < 6000 ? 200 : 3000;
@@ -446,15 +549,25 @@ void mix_report(const float *out)
     g_pre_samples = g_pre_over_knee = g_pre_over_full = 0;
 }
 
+// The console's audio settings (black.ini audio_mode, audio_ac3, audio_dts; read once, at the mixer's start):
+// stereo and mono mix two channels as before; Dolby Surround and Dolby Digital / DTS mix 5.1 (voice_gains6), which goes
+// out as it is for the digital ones (audio_out: 5.1, Windows folding it for fewer speakers) and matrixed into two for
+// Dolby Surround: the rear pair as one surround channel, out of phase between left and right, as a Pro Logic decoder
+// takes it back out (Lt = L + 0.707 C - 0.707 S, Rt = R + 0.707 C + 0.707 S, S = 0.707 (BL + BR); the LFE is left out
+// as in stereo).
+bool g_mix6;     // 5.1 mix
+uint32_t g_out_ch = 2; // what goes out: 6 for Dolby Digital / DTS
+
 void mix_block(float *out, std::vector<Completion> &done)
 {
-    memset(out, 0, sizeof(float) * audio_out::BLOCK * 2);
+    memset(out, 0, sizeof(float) * audio_out::BLOCK * (g_mix6 ? 6 : 2));
     memset(g_send, 0, sizeof g_send);
     std::lock_guard<std::recursive_mutex> g(g_mutex);
     for (Buffer *b : g_buffers) {
         if (!b->playing || !b->data || !b->bytes || !b->fmt.nBlockAlign) continue;
         uint32_t from = frames_to_bytes(b->fmt, b->cur);
-        if (!mix_voice(*b, out, [&](float *f) { return buffer_fetch(*b, f); })) b->playing = false;
+        auto fetch = [&](float *f) { return buffer_fetch(*b, f); };
+        if (!(g_mix6 ? mix_voice6(*b, out, fetch) : mix_voice(*b, out, fetch))) b->playing = false;
         if (!b->notes.empty()) {
             notify_passed(*b, from, frames_to_bytes(b->fmt, b->cur));
             if (!b->playing) notify_stop(*b);
@@ -462,25 +575,47 @@ void mix_block(float *out, std::vector<Completion> &done)
     }
     for (Stream *s : g_streams) {
         if (s->paused || s->queue.empty() || !s->fmt.nBlockAlign) continue;
-        mix_voice(*s, out, [&](float *f) { return stream_fetch(*s, f, done); });
+        auto fetch = [&](float *f) { return stream_fetch(*s, f, done); };
+        if (g_mix6) mix_voice6(*s, out, fetch);
+        else mix_voice(*s, out, fetch);
     }
     if (g_cfg.reverb) {
         static float applied = -1.0f; // the menu can change the level while running
         if (applied != g_cfg.reverb_gain) reverb::set_gain(applied = g_cfg.reverb_gain);
-        reverb::process(g_send, out, audio_out::BLOCK);
+        if (!g_mix6) reverb::process(g_send, out, audio_out::BLOCK);
+        else { // the room's reverb: on the front pair, and for 5.1 on the back pair too
+            static float rv[audio_out::BLOCK * 2];
+            memset(rv, 0, sizeof rv);
+            reverb::process(g_send, rv, audio_out::BLOCK);
+            float k = g_out_ch == 6 ? 0.70710678f : 1.0f;
+            for (uint32_t i = 0; i < audio_out::BLOCK; i++) {
+                out[6 * i + FL] += k * rv[2 * i], out[6 * i + FR] += k * rv[2 * i + 1];
+                if (g_out_ch == 6) out[6 * i + BL] += k * rv[2 * i], out[6 * i + BR] += k * rv[2 * i + 1];
+            }
+        }
     }
+    if (g_mix6 && g_out_ch == 2) // Dolby Surround: 5.1 matrixed into two, in place (frame i is read before 2i, 2i+1 are written)
+        for (uint32_t i = 0; i < audio_out::BLOCK; i++) {
+            const float *f = out + 6 * i;
+            float s = 0.70710678f * (f[BL] + f[BR]), c = 0.70710678f * f[FC];
+            float l = f[FL] + c - 0.70710678f * s, r = f[FR] + c + 0.70710678f * s;
+            out[2 * i] = l, out[2 * i + 1] = r;
+        }
+    else if (g_cfg.audio_mode == 1) // mono: both speakers the same
+        for (uint32_t i = 0; i < audio_out::BLOCK; i++) out[2 * i] = out[2 * i + 1] = 0.5f * (out[2 * i] + out[2 * i + 1]);
+    const uint32_t samples = audio_out::BLOCK * g_out_ch;
     // Saturate at full scale, as the APU's DSP output does (its fixed-point moves limit); levels below pass unchanged.
     // This was a soft knee above 0.8, which also bent levels the Xbox plays as they are; in chapter 1 0.002% of the
     // samples pass 0.8 and none pass 1 (r237, docs/07 #13). The mixer log keeps the counts.
-    for (uint32_t i = 0; i < audio_out::BLOCK * 2; i++) {
+    for (uint32_t i = 0; i < samples; i++) {
         float x = out[i], a = fabsf(x);
         g_pre_peak = std::max(g_pre_peak, a);
         g_pre_over_knee += a > 0.8f;
         g_pre_over_full += a > 1.0f;
         out[i] = a > 1.0f ? copysignf(1.0f, x) : x;
     }
-    g_pre_samples += audio_out::BLOCK * 2;
-    mix_report(out);
+    g_pre_samples += samples;
+    mix_report(out, samples);
 }
 
 void __stdcall worker(void *)
@@ -492,9 +627,14 @@ void __stdcall worker(void *)
         GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys);
         if (g_game_cpu && (proc & ~g_game_cpu)) SetThreadAffinityMask(GetCurrentThread(), proc & ~g_game_cpu);
     }
-    audio_out::open(); // without a device the output asks for blocks by the clock
+    g_out_ch = g_cfg.audio_ac3 || g_cfg.audio_dts ? 6 : 2;
+    g_mix6 = g_out_ch == 6 || g_cfg.audio_mode == 2;
+    logf("[dsound] audio: %s (XC_AUDIO 0x%x)", g_out_ch == 6 ? (g_cfg.audio_dts ? "DTS, 5.1 out" : "Dolby Digital, 5.1 out")
+                                     : g_mix6 ? "Dolby Surround (5.1 matrixed into two)" : g_cfg.audio_mode == 1 ? "mono" : "stereo",
+         ((uint32_t)g_cfg.audio_mode | (g_cfg.audio_ac3 ? 0x10000u : 0u) | (g_cfg.audio_dts ? 0x20000u : 0u)));
+    audio_out::open(g_out_ch); // without a device the output asks for blocks by the clock
     std::vector<Completion> done;
-    static float block[audio_out::BLOCK * 2];
+    static float block[audio_out::BLOCK * 6];
     for (;;) {
         Sleep(2);
         uint32_t want = audio_out::blocks_wanted();
@@ -757,7 +897,12 @@ HRESULT __stdcall IXACTSoundBank_PlayEx(void *pThis, const void *pPrepareData, v
 HRESULT __stdcall IDirectSound_GetSpeakerConfig(Object *pThis, uint32_t *pdw)
 {
     STRACE("%p", pThis);
-    *pdw = 2; // stereo
+    // DSSPEAKER_STEREO 0 / MONO 1 / SURROUND 2, ENABLE_AC3 0x10000, ENABLE_DTS 0x20000: the console's settings (XC_AUDIO).
+    // This said 2 (surround) as "stereo" before 2.0.4. Dolby Digital / DTS on means 5.1 out of the digital port: the
+    // speakers are surround then whatever the analog setting (route A: 0x10002); "stereo + AC3" made Ninja Gaiden
+    // split its music into three pairs muted at -96 dB.
+    bool digital = g_cfg.audio_ac3 || g_cfg.audio_dts;
+    *pdw = (digital ? 2u : (uint32_t)g_cfg.audio_mode) | (g_cfg.audio_ac3 ? 0x10000u : 0u) | (g_cfg.audio_dts ? 0x20000u : 0u);
     return S_OK;
 }
 

@@ -41,6 +41,34 @@ HANDLE g_exit_event;
 std::atomic<int> g_exit_code{-1};
 Xbe g_xbe;
 
+// Ninja Gaiden Black's music and movie player on surround speakers (Dolby Digital / DTS / Dolby Surround): it splits the
+// sound into six channels in three buffers and gives each channel the music volume from its table (0x44D926 in x2.1,
+// hundredths of a dB: -962 is -9.62 dB), but the function that sets one channel's (FUN_00331940) multiplies it by ten
+// first (lea ecx,[ecx+ecx*4]; shl ecx,1): -96.2 dB, the opening movie and the title music silent with 5.1 on. The stereo
+// path sets the buffer's volume and never comes here. The ten goes (five NOPs); found by its bytes, the same at 0x331958
+// in every Black build; Ninja Gaiden 2004 has no such code.
+static void install_music51_fix()
+{
+    static const uint8_t pat[] = {0x8D, 0x0C, 0x89, 0xD1, 0xE1, 0x85, 0xC9, 0x7E, 0x04, 0x33, 0xC9,
+                                  0xEB, 0x0D, 0x81, 0xF9, 0xF0, 0xD8, 0xFF, 0xFF};
+    const XbeSection *t = g_xbe.section_named(".text");
+    if (!t) return;
+    uint8_t *p = (uint8_t *)(uintptr_t)t->vaddr, *hit = nullptr;
+    int hits = 0;
+    for (uint32_t i = 0; i + sizeof pat <= t->vsize; i++)
+        if (p[i] == pat[0] && !memcmp(p + i, pat, sizeof pat)) hit = p + i, hits++;
+    if (hits != 1) {
+        if (hits) logf("music 5.1: the x10 found %d times, left as it is", hits);
+        return;
+    }
+    DWORD old;
+    VirtualProtect(hit, 5, PAGE_EXECUTE_READWRITE, &old);
+    memset(hit, 0x90, 5);
+    VirtualProtect(hit, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), hit, 5);
+    logf("music 5.1: the channel volumes' x10 at 0x%08x removed", (uint32_t)(uintptr_t)hit);
+}
+
 // black.exe is a Windows-subsystem program, so a double-click shows only the game window. Started from a command
 // prompt it attaches to that console for the short summary (logc lines, --help, --info); output redirected to a file
 // or pipe by the parent stays there. False when there is nowhere to print.
@@ -103,6 +131,8 @@ void usage()
            "  --fov D           horizontal field of view in play, 50-120 degrees (default 70, the game's; PC SETTINGS > VIDEO)\n"
            "  --language N      the console's language: 1 English (default), 2 Japanese, 3 German, 4 French, 5 Spanish,\n"
            "                    6 Italian, 7 Korean, 8 Chinese, 9 Portuguese (black.ini language)\n"
+           "  --audio M         the console's audio: stereo (default), mono, surround (Dolby Surround: rear matrixed\n"
+           "                    into the two channels), ac3 or dts (Dolby Digital / DTS: 5.1 out) (black.ini audio_mode...)\n"
            "  --no-movie-skip   movies skip only as in the original (default: A / START skip every movie)\n"
            "  --no-sdl-pads     XInput controllers only (default: also DualShock, DualSense, Switch and DirectInput pads)\n"
            "  --online-eeprom F --online-hdd F  online play through Insignia with this registered EEPROM and xemu disk\n"
@@ -284,7 +314,16 @@ bool parse_args()
         } else if (a == L"--mouse-invert") { g_cfg.mouse_invert = true; settings_mark_cli("mouse_invert"); }
         else if (a == L"--no-autoaim") { g_cfg.autoaim = false; settings_mark_cli("autoaim"); }
         else if (a == L"--autoaim") { g_cfg.autoaim = true; settings_mark_cli("autoaim"); }
-        else if (a == L"--language") { // the console's language, 1-9 (black.ini language)
+        else if (a == L"--audio") { // stereo | mono | surround | ac3 | dts (black.ini audio_mode, audio_ac3, audio_dts)
+            settings_mark_cli("audio_mode");
+            settings_mark_cli("audio_ac3");
+            settings_mark_cli("audio_dts");
+            std::wstring v;
+            if (!next(v)) return false;
+            g_cfg.audio_mode = v == L"mono" ? 1 : v == L"surround" ? 2 : 0;
+            g_cfg.audio_ac3 = v == L"ac3";
+            g_cfg.audio_dts = v == L"dts";
+        } else if (a == L"--language") { // the console's language, 1-9 (black.ini language)
             settings_mark_cli("language");
             std::wstring v;
             if (!next(v)) return false;
@@ -692,6 +731,7 @@ int run(void *reserve, unsigned reserve_size)
     else g_cfg.aspect_w = 16, g_cfg.aspect_h = 9;
     if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
     install_ng04_exitmenu(); // Ninja Gaiden (2004)'s title menu: the same, its own way
+    if (profile && !black && !profile->aux) install_music51_fix(); // the music player's six channels at -96 dB
     if (profile && !black && !profile->aux) install_ngb_livedash(); // Ⓐ in Ranking's Live boxes: cancel, not the dashboard
     install_ng04_livedash(); // and in Ninja Gaiden (2004)'s Master Ninja Tournament
     nvnet_install_trap(); // online play: the NIC's registers (net/nvnet.cpp), after every other exception handler

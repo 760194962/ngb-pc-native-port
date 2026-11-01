@@ -93,6 +93,9 @@ void load_file()
         else if (k == "fov") g_cfg.fov = std::clamp(v, 50.0f, 120.0f);
         else if (k == "skipanymovie") g_cfg.skip_movies = v != 0;
         else if (k == "language") g_cfg.language = std::clamp(atoi(val), 1, 9);
+        else if (k == "audio_mode") g_cfg.audio_mode = !strcmp(val, "mono") ? 1 : !strcmp(val, "surround") ? 2 : 0;
+        else if (k == "audio_ac3") g_cfg.audio_ac3 = v != 0;
+        else if (k == "audio_dts") g_cfg.audio_dts = v != 0;
         else if (k == "online") g_cfg.online = v != 0;
         else if (k == "online_dns_mode") {
             g_cfg.online_dns_console = !strcmp(val, "console");
@@ -187,6 +190,9 @@ void write_all(FILE *f)
     fprintf(f, "fov = %.1f\n", g_cfg.fov);
     fprintf(f, "skipanymovie = %d\n", g_cfg.skip_movies ? 1 : 0);
     fprintf(f, "language = %d\n", g_cfg.language);
+    fprintf(f, "audio_mode = %s\naudio_ac3 = %d\naudio_dts = %d\n",
+            g_cfg.audio_mode == 1 ? "mono" : g_cfg.audio_mode == 2 ? "surround" : "stereo", g_cfg.audio_ac3 ? 1 : 0,
+            g_cfg.audio_dts ? 1 : 0);
     fprintf(f, "online = %d\n", g_cfg.online ? 1 : 0); // Insignia (project/docs/09); the paths only once given
     if (!g_cfg.online_eeprom.empty()) fprintf(f, "online_eeprom = %s\n", narrow(g_cfg.online_eeprom).c_str());
     if (!g_cfg.online_hdd.empty()) fprintf(f, "online_hdd = %s\n", narrow(g_cfg.online_hdd).c_str());

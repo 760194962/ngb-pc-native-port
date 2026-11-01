@@ -28,7 +28,8 @@ PFN_Create g_create;
 IXAudio2 *g_xa;
 IXAudio2MasteringVoice *g_master;
 IXAudio2SourceVoice *g_src;
-float g_ring[RING][BLOCK * 2];
+float g_ring[RING][BLOCK * 6];
+uint32_t g_channels = 2; // open()'s: 2, or 6 for 5.1
 uint32_t g_next;
 FILE *g_wav;
 uint32_t g_wav_frames;
@@ -45,12 +46,13 @@ struct EngineCallback : IXAudio2EngineCallback {
 
 void wav_header()
 {
-    uint32_t data = g_wav_frames * 4;
+    uint32_t data = g_wav_frames * 2 * g_channels;
     struct {
         char riff[4]; uint32_t size; char wave[4], fmt[4]; uint32_t fmt_size;
         uint16_t tag, ch; uint32_t rate, bytes_per_s; uint16_t align, bits;
         char data[4]; uint32_t data_size;
-    } h = {{'R', 'I', 'F', 'F'}, 36 + data, {'W', 'A', 'V', 'E'}, {'f', 'm', 't', ' '}, 16, 1, 2, RATE, RATE * 4, 4, 16,
+    } h = {{'R', 'I', 'F', 'F'}, 36 + data, {'W', 'A', 'V', 'E'}, {'f', 'm', 't', ' '}, 16, 1, (uint16_t)g_channels, RATE,
+           RATE * 2 * g_channels, (uint16_t)(2 * g_channels), 16,
            {'d', 'a', 't', 'a'}, data};
     fseek(g_wav, 0, SEEK_SET);
     fwrite(&h, sizeof h, 1, g_wav);
@@ -76,15 +78,26 @@ HRESULT start_engine()
     g_error = S_OK;
     HRESULT hr = g_create(&g_xa, 0, XAUDIO2_DEFAULT_PROCESSOR);
     if (SUCCEEDED(hr)) hr = g_xa->RegisterForCallbacks(&g_callback);
-    if (SUCCEEDED(hr)) hr = g_xa->CreateMasteringVoice(&g_master, 2, RATE);
+    // stereo: two channels as before; 5.1: the device's own channels, XAudio2 folding 5.1 into fewer
+    if (SUCCEEDED(hr)) hr = g_xa->CreateMasteringVoice(&g_master, g_channels == 6 ? XAUDIO2_DEFAULT_CHANNELS : 2, RATE);
     if (SUCCEEDED(hr) && g_cfg.background) g_master->SetVolume(0.0f); // tests: keep the timing, not the sound
-    WAVEFORMATEX wf = {};
+    WAVEFORMATEXTENSIBLE wx = {};
+    WAVEFORMATEX &wf = wx.Format;
     wf.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
-    wf.nChannels = 2;
+    wf.nChannels = (WORD)g_channels;
     wf.nSamplesPerSec = RATE;
     wf.wBitsPerSample = 32;
-    wf.nBlockAlign = 8;
-    wf.nAvgBytesPerSec = RATE * 8;
+    wf.nBlockAlign = (WORD)(4 * g_channels);
+    wf.nAvgBytesPerSec = RATE * 4 * g_channels;
+    if (g_channels == 6) { // 5.1 by its speaker positions, so XAudio2 maps it onto whatever the device has
+        static const GUID kFloat = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+        wf.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+        wf.cbSize = sizeof wx - sizeof wf;
+        wx.Samples.wValidBitsPerSample = 32;
+        wx.dwChannelMask = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER | SPEAKER_LOW_FREQUENCY |
+                           SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT;
+        wx.SubFormat = kFloat;
+    }
     if (SUCCEEDED(hr)) hr = g_xa->CreateSourceVoice(&g_src, &wf, XAUDIO2_VOICE_NOPITCH);
     if (SUCCEEDED(hr)) hr = g_src->Start();
     if (FAILED(hr)) close_engine();
@@ -112,8 +125,9 @@ uint32_t clock_blocks()
 
 } // namespace
 
-bool open()
+bool open(uint32_t channels)
 {
+    g_channels = channels == 6 ? 6 : 2;
     if (!g_cfg.wav_path.empty() && !_wfopen_s(&g_wav, g_cfg.wav_path.c_str(), L"wb")) {
         wav_header();
         logf("[audio] recording the mix to a WAV file"); // its log time = the WAV's start, to line up captures
@@ -132,7 +146,10 @@ bool open()
         g_create = nullptr;
         return false;
     }
-    logf("[audio] XAudio2 output: %u Hz stereo, %u ms blocks, %u queued", RATE, BLOCK * 1000 / RATE, QUEUED);
+    XAUDIO2_VOICE_DETAILS md = {};
+    if (g_master) g_master->GetVoiceDetails(&md);
+    logf("[audio] XAudio2 output: %u Hz %s, %u ms blocks, %u queued (the device mixes %u channels)", RATE,
+         g_channels == 6 ? "5.1" : "stereo", BLOCK * 1000 / RATE, QUEUED, md.InputChannels);
     return true;
 }
 
@@ -177,18 +194,18 @@ void simulate_lost()
 void submit(const float *lr)
 {
     if (g_wav) {
-        int16_t pcm[BLOCK * 2];
-        for (uint32_t i = 0; i < BLOCK * 2; i++) pcm[i] = (int16_t)(std::max(-1.0f, std::min(1.0f, lr[i])) * 32767.0f);
-        fwrite(pcm, sizeof pcm, 1, g_wav);
+        int16_t pcm[BLOCK * 6];
+        for (uint32_t i = 0; i < BLOCK * g_channels; i++) pcm[i] = (int16_t)(std::max(-1.0f, std::min(1.0f, lr[i])) * 32767.0f);
+        fwrite(pcm, sizeof(int16_t) * BLOCK * g_channels, 1, g_wav);
         g_wav_frames += BLOCK;
         if (g_wav_frames % (RATE / 2) == 0) wav_header(); // keep the header valid if the process is killed
     }
     if (!g_src) return;
     float *b = g_ring[g_next];
     g_next = (g_next + 1) % RING;
-    memcpy(b, lr, sizeof g_ring[0]);
+    memcpy(b, lr, sizeof(float) * BLOCK * g_channels);
     XAUDIO2_BUFFER xb = {};
-    xb.AudioBytes = sizeof g_ring[0];
+    xb.AudioBytes = sizeof(float) * BLOCK * g_channels;
     xb.pAudioData = (const BYTE *)b;
     g_src->SubmitSourceBuffer(&xb);
 }
