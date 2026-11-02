@@ -363,8 +363,25 @@ int __stdcall XNetStartup(const void *pParams)
     return 10050; // WSAENETDOWN
 }
 
+// XNET's WSAStartup brings up the same stack (XnInit, the NIC's registers): Ninja Gaiden 2004's XOnlineStartup calls it
+// straight (FUN_00381477 in the title update, when a save is loaded), past XNetStartup, and offline that wrote
+// 0xFEF00110 and the game died (the user, chapter 3, 2026-11-02; run/r820). Not in Black's programs (found by name in
+// 2004's: 0x3979EB in the update, 0x383E2B on the disc). Offline: the network subsystem is not ready, which
+// XOnlineStartup takes as a console without a connection; online play keeps the game's own (d3d/dispatch.cpp).
+int __stdcall XnetWsaStartup(uint16_t wVersionRequested, void *lpWSAData)
+{
+    DTRACE("0x%x, %p", wVersionRequested, lpWSAData);
+    static bool noted;
+    if (!noted) {
+        noted = true;
+        logf("[net] WSAStartup: no network (WSASYSNOTREADY); the game's online features stay unavailable");
+    }
+    return 10091; // WSASYSNOTREADY
+}
+
 #undef RS_SETTER
 #define H(addr, fn, params, ret) {addr, #fn, (void *)&fn, params, ret}
+#define HN(addr, name, fn, params, ret) {addr, name, (void *)&fn, params, ret}
 
 static const Hle kTable[] = {
     H(0x003c5260, SetRenderState_EdgeAntiAlias, "s", false),
@@ -418,6 +435,7 @@ static const Hle kTable[] = {
     H(0x003cafc0, RunPushBuffer, "s s", false),
     H(0x003c7c50, EndVisibilityTest, "eax", true),
     H(0x003afb34, XNetStartup, "s", true),
+    HN(0x00000000, "WSAStartup", XnetWsaStartup, "s s", true), // Ninja Gaiden 2004 only, by name
 };
 
 #include "auxtab/ngbextra_tables.inc"

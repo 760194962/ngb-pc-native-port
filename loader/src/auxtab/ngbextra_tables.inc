@@ -211,6 +211,7 @@ static const Hle kAuxNgbextraNG04TU[] = {
     {0x003b1c40u, "RunPushBuffer", (void *)&RunPushBuffer, "s s", false}, // x2.1 0x003cafc0
     {0x003aeae0u, "EndVisibilityTest", (void *)&EndVisibilityTest, "eax", true}, // x2.1 0x003c7c50
     {0x003979d4u, "XNetStartup", (void *)&XNetStartup, "s", true}, // by name; x2.1 0x003afb34
+    {0x003979ebu, "WSAStartup", (void *)&XnetWsaStartup, "s s", true}, // by name; x2.1 0x00000000
     {0, nullptr, nullptr, "", false},
 };
 static const Hle kAuxNgbextraNG04DISC[] = {
@@ -264,6 +265,7 @@ static const Hle kAuxNgbextraNG04DISC[] = {
     {0x0039e080u, "RunPushBuffer", (void *)&RunPushBuffer, "s s", false}, // x2.1 0x003cafc0
     {0x0039af20u, "EndVisibilityTest", (void *)&EndVisibilityTest, "eax", true}, // x2.1 0x003c7c50
     {0x00383e14u, "XNetStartup", (void *)&XNetStartup, "s", true}, // by name; x2.1 0x003afb34
+    {0x00383e2bu, "WSAStartup", (void *)&XnetWsaStartup, "s s", true}, // by name; x2.1 0x00000000
     {0, nullptr, nullptr, "", false},
 };
 static const Hle kAuxNgbextraNG04DL[] = {
@@ -304,6 +306,7 @@ static const Hle kAuxNgbextraNG04DL[] = {
     {0x000423c0u, "D3DDevice_SetShaderConstantMode", (void *)&SetShaderConstantMode, "s", false},
     {0x00040580u, "D3DDevice_SetGammaRamp", (void *)&SetGammaRamp, "s s", false},
     {0x00040740u, "D3DDevice_BlockUntilVerticalBlank", (void *)&BlockUntilVerticalBlank, "", false},
+    {0x0006d750u, "WSAStartup", (void *)&XnetWsaStartup, "s s", true},
     {0x00040500u, "D3D_BlockOnResource", (void *)&BlockOnResource, "s", false}, // jmp thunk to 0x00041ec0
     {0, nullptr, nullptr, "", false},
 };
@@ -346,6 +349,7 @@ static const Hle kAuxNgbextraNG04UP[] = {
     {0x0003e490u, "D3DDevice_BlockUntilVerticalBlank", (void *)&BlockUntilVerticalBlank, "", false},
     {0x0003f840u, "D3DDevice_PersistDisplay", (void *)&PersistDisplay, "", false},
     {0x0007b550u, "XNetStartup", (void *)&XNetStartup, "s", true},
+    {0x0007b567u, "WSAStartup", (void *)&XnetWsaStartup, "s s", true},
     {0x000422c0u, "D3D_BlockOnResource", (void *)&BlockOnResource, "s", false}, // jmp thunk to 0x00043c00
     {0, nullptr, nullptr, "", false},
 };

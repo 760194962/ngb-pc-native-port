@@ -404,8 +404,8 @@ bool install_d3d_hooks(const BuildProfile &profile)
     for (const Hle &r : all) {
         bool found = false;
         for (const LibFunc &f : g_funcs) found |= f.addr == r.addr;
-        if (!found && r.impl && online_enabled() && !strcmp(r.name, "XNetStartup")) { // online play: the game's own
-            logf("hooks: online play: XNetStartup runs as the game has it (net/nvnet.cpp)");
+        if (!found && r.impl && online_enabled() && (!strcmp(r.name, "XNetStartup") || !strcmp(r.name, "WSAStartup"))) {
+            logf("hooks: online play: %s runs as the game has it (net/nvnet.cpp)", r.name); // the game's own
             continue;
         }
         if (!found && r.impl) { // replacement outside the library sections (BLACK: InsertFence-style LTCG strays)
