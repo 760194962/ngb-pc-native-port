@@ -127,7 +127,8 @@ void transmit() // caller holds g_nic
         uint8_t *src = phys(d.buffer, len);
         if (src && g_tx_buf.size() + len <= FRAME_MAX) g_tx_buf.insert(g_tx_buf.end(), src, src + len);
         bool last = (d.flags & TX_LASTPACKET) != 0;
-        if (last) {
+        if (last && g_cfg.online_unplugged) g_tx_buf.clear(); // no cable: the frame goes nowhere
+        else if (last) {
             g_tx_queue.push_back(std::move(g_tx_buf));
             g_tx_buf.clear();
             g_tx_frames++;
@@ -481,7 +482,8 @@ bool nvnet_install()
     }
     g_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     set(TX_RX_CONTROL, TXRX_IDLE);
-    set(ADAPTER_CONTROL, 0x4); // LINKUP
+    set(ADAPTER_CONTROL, g_cfg.online_unplugged ? 0 : 0x4); // LINKUP, unless the cable is out (--online-unplugged)
+    if (g_cfg.online_unplugged) logf("[net] tests: the network cable is out (--online-unplugged): no link, nothing sent");
     return true;
 }
 
@@ -501,7 +503,8 @@ bool nvnet_connect_interrupt(void *kinterrupt)
     return true;
 }
 
-uint32_t nvnet_link_state() { return online_enabled() ? 0x1 | 0x2 | 0x8 : 0; } // active, 100 Mbit/s, full duplex
+// active, 100 Mbit/s, full duplex; none with the cable out (--online-unplugged)
+uint32_t nvnet_link_state() { return online_enabled() && !g_cfg.online_unplugged ? 0x1 | 0x2 | 0x8 : 0; }
 
 void nvnet_to_guest(const uint8_t *frame, size_t len)
 {

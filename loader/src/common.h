@@ -100,6 +100,8 @@ struct Config {
     // Online play through Insignia (net/online.cpp, project/docs/09): off unless black.ini online = 1 (or --online-eeprom
     // and --online-hdd) names the player's registered xemu EEPROM and hard disk image; both are only read.
     bool online = false;
+    bool online_unplugged = false; // --online-unplugged (tests): the console and its accounts as online, the cable out
+                                   // (the NIC reports no link and drops what it is given: net/nvnet.cpp)
     std::wstring online_eeprom, online_hdd, online_dns; // online_dns: Insignia's DNS server (default 46.101.64.175)
     // black.ini online_dns_mode: insignia (default) relays every DNS query to online_dns; console sends them where the
     // console's network settings say (manual DNS such as a PC running InsigniaDNS), as the Xbox / xemu would
