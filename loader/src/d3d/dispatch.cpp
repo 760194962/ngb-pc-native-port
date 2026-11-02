@@ -347,6 +347,10 @@ bool install_d3d_hooks(const BuildProfile &profile)
         }
         logf("hooks: %s: %zu HLE entries; every other function in the hooked sections stops on first call", profile.name, all.size());
     }
+    // An entry at address 0 is not in this build: it is there for the others to find by name (gen_aux_tables.py),
+    // e.g. WSAStartup for Ninja Gaiden 2004; Ninja Gaiden Black takes its extra table as it is, and installing that
+    // entry wrote a jump at 0 (r830).
+    all.erase(std::remove_if(all.begin(), all.end(), [](const Hle &r) { return r.addr == 0; }), all.end());
     // C++ static initializers of the libraries (run by _cinit before main) only set up globals: keep them.
     // The initializer table ranges come from the build profile (read from XAPI's _rtinit / _cinit).
     std::vector<uint32_t> initializers;
