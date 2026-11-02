@@ -1339,6 +1339,10 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
             const uint32_t *ts = texture_state(s);
             logf("[draw]   stage %d: color op %u args 0x%x 0x%x | alpha op %u args 0x%x 0x%x | tfactor 0x%08x | xform flags %u addr %u/%u tci 0x%x", s, ts[12], ts[14], ts[15],
                  ts[16], ts[18], ts[19], rs[XRS_TEXTUREFACTOR], ts[21], ts[0], ts[1], ts[28]);
+            if (ts[21]) { // the stage's texture matrix (applied to XYZRHW coordinates by rhw_tex_scales)
+                const D3DMATRIX &M = g_st.transforms[2 + s];
+                logf("[draw]     stage %d texture matrix: %g %g | %g %g | %g %g", s, M._11, M._12, M._21, M._22, M._31, M._32);
+            }
             if (ts[6] || ts[9] || ts[10] || ts[11] || ts[22] || ts[23] || ts[24] || ts[25] || ts[26] || ts[27])
                 logf("[draw]     stage %d: lodbias 0x%08x colorkeyop %u colorsign 0x%08x alphakill %u | bumpenv %g %g %g %g scale %g offset %g", s,
                      ts[6], ts[9], ts[10], ts[11], as_float(ts[22]), as_float(ts[23]), as_float(ts[24]), as_float(ts[25]),
@@ -1739,8 +1743,14 @@ const uint8_t *stream_data(uint32_t stream)
 } // namespace
 
 // Texture coordinates of pre-transformed (XYZRHW) vertices: D3D9 applies no texture transform to them (they skip
-// the vertex pipeline), so the texel -> 0..1 scale of a linear texture, composed with the game's own texture
-// matrix when one is enabled, is applied to the vertex data here. Ninja Gaiden Black copies the back buffer
+// the vertex pipeline), so the texel -> 0..1 scale of a linear texture is applied to the vertex data here. The game's
+// own texture matrix is not, as on the console: the D3D library gives an XYZRHW format the passthrough program (its
+// FVF builder: (fvf & 0xE) == 4 -> flags |= 2, 0x3C85FE in x2.1; SetVertexShader then sets the transform execution
+// mode to program, 0x1E94 = 6), and its texture-matrix writer skips everything for such a shader (flags & 0x12,
+// 0x3D10C0); the same code in Ninja Gaiden 2004's update and disc. So no matrix and no generated coordinates reach
+// screen-space vertices. Applying a matrix left by an environment-mapped draw (0.5 / -0.5, reflection) squeezed
+// Ninja Gaiden 2004's HUD emblem onto its texture's transparent top row near the chapter-3 airship (the user,
+// 2026-11-02; run/r827). cfg:rhwtexmat:1 applies the game's matrix as before (comparison). Ninja Gaiden Black copies the back buffer
 // (720x480 linear) into its 512x512 snapshot and the depth buffer into its 256x256 glow source with XYZRHW quads
 // addressed 0..720 x 0..480; through the stage transform both came out as one flat colour (docs/04 §3.8).
 struct RhwTexScale {
@@ -1759,8 +1769,13 @@ int rhw_tex_scales(uint32_t fvf, RhwTexScale *out)
         float sx, sy;
         linear_texture_scale(s, &sx, &sy);
         const D3DMATRIX &M = g_st.transforms[2 + s];
-        bool matrix = texture_state(s)[21] != 0 &&
-                      !(M._11 == 1 && M._12 == 0 && M._21 == 0 && M._22 == 1 && M._31 == 0 && M._32 == 0);
+        bool game_matrix = texture_state(s)[21] != 0 &&
+                           !(M._11 == 1 && M._12 == 0 && M._21 == 0 && M._22 == 1 && M._31 == 0 && M._32 == 0);
+        bool matrix = g_cfg.rhw_tex_matrix && game_matrix;
+        static int noted;
+        if (game_matrix && !matrix && noted < 20 && ++noted)
+            logf("[draw] XYZRHW draw, stage %d texture matrix %g %g | %g %g | %g %g left out (as the console), tci 0x%x", s,
+                 M._11, M._12, M._21, M._22, M._31, M._32, texture_state(s)[28]);
         if (sx == 1.0f && sy == 1.0f && !matrix) continue;
         uint32_t set = texture_state(s)[28] & 0xFFFF; // TEXCOORDINDEX, as sent to the host
         if (set >= tc || ((fvf >> (16 + 2 * set)) & 3) != 0) continue; // only 2-float sets

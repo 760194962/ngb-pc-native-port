@@ -261,6 +261,7 @@ void read_press_file(uint32_t now_ms)
                     else if (k == "rhwoffset") g_cfg.rhw_offset = v;
                     else if (k == "rhwedge") g_cfg.rhw_edge_fix = v;
                     else if (k == "quadsnap") g_cfg.quad_snap = v;
+                    else if (k == "rhwtexmat") g_cfg.rhw_tex_matrix = v;
                     else if (k == "vsnap") g_cfg.vs_snap = v;
                     else if (k == "shadowpull") g_cfg.shadow_pull = atoi(line.c_str() + c + 1); // N times the pull (0 off)
                     else if (k == "edgemirror") g_cfg.edge_mirror = v;

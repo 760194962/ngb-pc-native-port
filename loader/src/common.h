@@ -142,6 +142,8 @@ struct Config {
     int shadow_pull = 1;       // press-file "cfg:shadowpull:N": Ryu's shadow pass pulled toward the camera, N steps (d3d/draw.cpp)
     bool vs_snap = false;      // vertex-program positions snapped to 1/8 Xbox pixel (d3d/nv2a_vsh.cpp): BLACK only
                                // (main.cpp, its destructible walls); press-file "cfg:vsnap:0/1"
+    bool rhw_tex_matrix = false; // press-file "cfg:rhwtexmat:1": XYZRHW coordinates through the game's texture matrix
+                                 // (before 2.1.1; the console never applies it: d3d/draw.cpp rhw_tex_scales)
     bool quad_snap = true;     // press-file "cfg:quadsnap:0": 2D quads above 1x drawn as before (d3d/draw.cpp quad_snap)
     bool rhw_offset = true;    // press-file "cfg:rhwoffset:0": XYZRHW positions ignore the screen-space offset (comparison)
     bool zview8 = false;       // press-file "cfg:zview8:1": depth views back to A8R8G8B8 (8-bit depth) for comparison
