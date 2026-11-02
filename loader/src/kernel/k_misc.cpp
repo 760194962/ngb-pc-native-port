@@ -8,6 +8,7 @@
 #include "sha1.h"
 
 #include <intrin.h>
+#include "build_profile.h"
 #include "xbe.h"
 #include "xthread.h"
 
@@ -298,6 +299,13 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
         if (!xbe.empty() && system_program(xbe)) {
             logf("    %s is the Xbox's own (the dashboard's network settings): the game afresh instead", narrow(xbe).c_str());
             xbe.clear(); // the dashboard: handled below
+        }
+        // Ninja Gaiden 2004's title updater installs in a few hundred frames at several hundred a second and reboots at
+        // once: the bar seemed never to move or finish (the user, 2026-11-01). Its last frame (the bar full) stays on
+        // the screen a moment before the game comes back.
+        if (g_cfg.profile == &kProfileNg04Updater && !g_cfg.background) {
+            logf("    the title updater is done: its last frame stays 1.5 s");
+            Sleep(1500);
         }
         if (!xbe.empty() && GetFileAttributesW(xbe.c_str()) != INVALID_FILE_ATTRIBUTES && relaunch(xbe)) {
             request_exit(0, "XLaunchNewImage");
