@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <set>
 #include <unordered_map>
 #include <vector>
 
@@ -276,7 +277,8 @@ void apply_render_states(IDirect3DDevice9 *d)
     {
         const uint32_t *rs = render_state();
         float bias = 0.0f, slope = 0.0f;
-        if (rs[XRS_SOLIDOFFSETENABLE]) {
+        const bool in_shader = exact_depth_offset(); // done per pixel in the pixel shader (pshader.cpp), the NV2A's way
+        if (rs[XRS_SOLIDOFFSETENABLE] && !in_shader) {
             float off;
             memcpy(&off, &rs[XRS_POLYGONOFFSETZOFFSET], 4);
             memcpy(&slope, &rs[XRS_POLYGONOFFSETZSLOPESCALE], 4);
@@ -294,9 +296,14 @@ void apply_render_states(IDirect3DDevice9 *d)
         // 2 since 2.0.3: most of that flicker was the vertex-program path's 1/8-pixel snap (nv2a_vsh.cpp, now off);
         // 4 also passed surfaces that lie behind the floor, a second, displaced shadow in Murai's dojo (Black and
         // 2004; run/r790, r791; the user chose 2 with the snap off, 2026-11-01). 1 since 2.1.0 (the user, 2026-11-01).
-        if (g_cfg.shadow_pull && rs[XRS_ZENABLE] && !rs[XRS_ZWRITEENABLE] && samples_shadow_map()) {
-            bias -= 2.0f * g_cfg.shadow_pull / 16777216.0f;
-            slope -= 0.5f * g_cfg.shadow_pull * std::max(target_scale_x(), target_scale_y());
+        // Since 2.1.2 the vertex-program shadow passes take the NV2A offset per pixel (exact_depth_offset) and no pull:
+        // the pull's slope part let a second, lower ground layer's shadow through, a darker band that moved with the
+        // camera (run/r835-r842: depth paths agree within 2-4 units; the gap was the host's one-factor slope bias).
+        if (g_cfg.shadow_pull && !in_shader && rs[XRS_ZENABLE] && !rs[XRS_ZWRITEENABLE] && samples_shadow_map()) {
+            int pb = g_cfg.shadow_pull_bias >= 0 ? g_cfg.shadow_pull_bias : g_cfg.shadow_pull;
+            int ps = g_cfg.shadow_pull_slope >= 0 ? g_cfg.shadow_pull_slope : g_cfg.shadow_pull;
+            bias -= 2.0f * pb / 16777216.0f;
+            slope -= 0.5f * ps * std::max(target_scale_x(), target_scale_y());
         }
         static float sent_bias, sent_slope;
         if (!g_rs_valid[XRS_ZBIAS] || bias != sent_bias || slope != sent_slope) { // ZBIAS's slot marks "sent"
@@ -1195,7 +1202,13 @@ static void dump_bound_texture(int s, const Resource *r)
 // cfg:pixwatch:X,Y: in a traced frame the back-buffer pixel X,Y (Xbox pixels) is read back before every draw and at
 // the swap; a change is put on the draw before (its callers). Finds the draw behind a band with no obvious owner
 // (2026-10-22). The 1x1 surfaces are made and released each time, so nothing in the default pool outlives a Reset.
-void pixwatch_check(const char *next)
+bool probe_bound_depth(LONG x, LONG y, double d[4]); // device.cpp
+// cfg:zprobe: a shadow pass is being drawn over the watched pixel, which was cleared to depth 0 first; the depth
+// there before (restored after the read)
+bool g_zprobe_pending;
+double g_zprobe_before, g_zlast = -1;
+
+void pixwatch_check(const char *next, bool depth_read)
 {
     static uint32_t last = 0;
     static bool have = false;
@@ -1208,6 +1221,19 @@ void pixwatch_check(const char *next)
     D3DSURFACE_DESC desc;
     rt->GetDesc(&desc);
     LONG x = lroundf(g_cfg.pix_watch_x * target_scale_x()), y = lroundf(g_cfg.pix_watch_y * target_scale_y());
+    // cfg:zprobe: the depth there right after the probed shadow pass (what it wrote; 0: it did not cover the pixel, cleared
+    // before it), or at the end of the frame with zprobe:-1 (the ground's: shadow passes do not write depth). Reading
+    // draws (device.cpp depth_view), which spoils the draws after it, so never before the probed pass.
+    if ((g_zprobe_pending || (g_cfg.z_probe < 0 && !strcmp(next, "swap")))) {
+        double z[4];
+        if (probe_bound_depth(x, y, z))
+            logf("[zpix] %d,%d: depth %.1f (slope x %.1f y %.1f) %s %s", g_cfg.pix_watch_x, g_cfg.pix_watch_y, z[0], z[1] - z[0],
+                 z[2] - z[0], g_zprobe_pending ? (z[0] == 0 ? "probed pass did not cover it:" : "written by the probed pass") : "at the end of the frame",
+                 g_zprobe_pending ? last_draw.c_str() : "");
+        else
+            logf("[zpix] %d,%d: depth not readable", g_cfg.pix_watch_x, g_cfg.pix_watch_y);
+        g_zprobe_pending = false;
+    }
     RECT src = {x, y, x + 1, y + 1};
     if (x >= 0 && y >= 0 && (UINT)x < desc.Width && (UINT)y < desc.Height &&
         SUCCEEDED(d->CreateRenderTarget(1, 1, desc.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &one, nullptr)) &&
@@ -1238,7 +1264,67 @@ void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t co
     if (this_frame && g_cfg.pix_watch_x >= 0) {
         char b[96];
         snprintf(b, sizeof b, "draw %u (%s, tex0 %p)", g_draw_serial, what, (void *)g_st.textures[0]);
-        pixwatch_check((std::string(b) + " from " + game_callers((const uint32_t *)_AddressOfReturnAddress())).c_str());
+        const uint32_t *zrs = render_state();
+        static uint32_t zframe;
+        static int zn;
+        if (g_frame_count != zframe) zframe = g_frame_count, zn = 0;
+        bool probed = g_cfg.z_probe > 0 && zrs[XRS_ZENABLE] && !zrs[XRS_ZWRITEENABLE] && samples_shadow_map() && ++zn == g_cfg.z_probe;
+        pixwatch_check((std::string(b) + " from " + game_callers((const uint32_t *)_AddressOfReturnAddress())).c_str(), !probed);
+        if (probed) {
+            // cfg:zprobe: a shadow pass writes its own depth, untested and unbiased, so the next check reads it
+            IDirect3DDevice9 *d = host3d::dev();
+            float zero = 0.0f;
+            DWORD z0;
+            memcpy(&z0, &zero, 4);
+            d->SetRenderState(D3DRS_ZFUNC, D3DCMP_ALWAYS);
+            d->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+            d->SetRenderState(D3DRS_DEPTHBIAS, z0);
+            d->SetRenderState(D3DRS_SLOPESCALEDEPTHBIAS, z0);
+            g_rs_valid[XRS_ZFUNC] = g_rs_valid[XRS_ZWRITEENABLE] = g_rs_valid[XRS_ZBIAS] = false;
+            LONG x = lroundf(g_cfg.pix_watch_x * target_scale_x()), y = lroundf(g_cfg.pix_watch_y * target_scale_y());
+            g_zprobe_before = g_zlast; // read at an earlier draw; nothing between wrote depth there (the log shows)
+            g_zprobe_pending = true;
+            D3DRECT r = {x, y, x + 1, y + 1};
+            d->Clear(1, &r, D3DCLEAR_ZBUFFER, 0, 0.0f, 0);
+        }
+    }
+    if (this_frame && g_cfg.z_probe) {
+        // cfg:zprobe: full-precision inputs of both depth paths, to replay them on the CPU: fixed-function draws (world0,
+        // view, projection, the first vertices) and shadow passes (the program's constants, its first vertices)
+        auto mat = [](const D3DMATRIX &m) {
+            std::string s;
+            char b[24];
+            for (int i = 0; i < 16; i++) snprintf(b, sizeof b, " %.9g", (&m._11)[i]), s += b;
+            return s;
+        };
+        auto vtx = [&](int n) {
+            std::string s;
+            char b[24];
+            for (int i = 0; verts && i < 3 && (uint32_t)i < count; i++) {
+                s += " |";
+                for (int j = 0; j < n; j++) snprintf(b, sizeof b, " %.9g", verts[i * stride_floats + j]), s += b;
+            }
+            return s;
+        };
+        if (ctx.path == Path::Fvf && verts && (ctx.fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZ)
+            logf("[zm] ff draw %u: world%s | view%s | proj%s | verts%s", g_draw_serial, mat(g_st.transforms[6]).c_str(),
+                 mat(g_st.transforms[0]).c_str(), mat(g_st.transforms[1]).c_str(), vtx(3).c_str());
+        else if (ctx.path == Path::Prog && ctx.vs && ctx.vs->program && samples_shadow_map()) {
+            std::string c;
+            char b[24];
+            for (int k : {96, 97, 98, 99, 58, 59})
+                for (int j = 0; j < 4; j++) snprintf(b, sizeof b, " %.9g", g_st.vs_constants[k][j]), c += b;
+            logf("[zm] prog draw %u (vs %p): c0-c3 c-38 c-37%s | verts%s", g_draw_serial, (void *)ctx.vs, c.c_str(), vtx(4).c_str());
+            static std::set<const void *> shown;
+            if (shown.insert(ctx.vs).second) {
+                std::string dis = vsh_disasm(ctx.vs->program, ctx.vs->program_insts);
+                for (size_t pos = 0, nl; pos < dis.size(); pos = nl + 1) {
+                    nl = dis.find('\n', pos);
+                    if (nl == std::string::npos) nl = dis.size();
+                    logf("[zm]   %s", dis.substr(pos, nl - pos).c_str());
+                }
+            }
+        }
     }
     if (g_debug_draws <= 0 && !this_frame) return;
     if (!this_frame) g_debug_draws--;

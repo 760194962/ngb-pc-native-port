@@ -36,7 +36,11 @@ static_assert(sizeof(PixelShaderDef) == 0xF0, "");
 // shadow_func: D3DRS_SHADOWFUNC as 0..7 (NEVER .. ALWAYS).
 // tex_kill: stages with D3DTSS_ALPHAKILL: a fetched texel with alpha 0 discards the pixel.
 std::string psh_to_hlsl(const PixelShaderDef &def, uint32_t tex_cube, uint32_t tex_depth = 0, uint32_t shadow_func = 0,
-                        uint32_t tex_kill = 0, uint32_t bump_divide = 0);
+                        uint32_t tex_kill = 0, uint32_t bump_divide = 0, uint32_t shadow_pcf = 0, bool depth_offset = false);
+// depth_offset: the pixel writes its own depth with the NV2A polygon offset (c27: units, factor, host pixels per Xbox
+// pixel x / y), as xemu does; its vertex program hands on clip z / w in TEXCOORD5 (nv2a_vsh.cpp).
+// shadow_pcf: bits 0-3 the shadow-map stages read with linear filtering, bits 4-5 the mode (common.h Config::shadow_pcf):
+// 2x2 percentage-closer filtering over the Xbox map's texels (2) or the host map's (1).
 // bump_divide: BUMPENVMAP stages whose coordinates come undivided (x, y, z, w): divided per pixel (vshader.cpp).
 
 } // namespace xd3d

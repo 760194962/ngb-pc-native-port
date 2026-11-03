@@ -75,6 +75,15 @@ void log_def(const PixelShaderDef &d)
 
 const PixelShaderDef *ps_def(uint32_t handle); // d3d/device.cpp
 
+// cfg:zoffset (common.h): a vertex-program draw with a polygon offset gets it per pixel in its pixel shader (nv2a_psh.cpp);
+// the host's depth bias is left at 0 for it (draw.cpp apply_render_states)
+bool exact_depth_offset()
+{
+    const uint32_t *rs = render_state();
+    if (!g_cfg.exact_zoffset || !rs[XRS_SOLIDOFFSETENABLE] || !g_st.pixel_shader || vs_is_fvf(g_st.vertex_shader)) return false;
+    return rs[XRS_POLYGONOFFSETZOFFSET] != 0 || rs[XRS_POLYGONOFFSETZSLOPESCALE] != 0; // +0.0f is 0
+}
+
 IDirect3DPixelShader9 *ps_host_shader()
 {
     const uint32_t *rs = render_state();
@@ -111,6 +120,12 @@ IDirect3DPixelShader9 *ps_host_shader()
         }
     }
     uint32_t shadow = depth ? (uint32_t)shadow_func_code() : 0;
+    // shadow maps read with linear filtering (MAGFILTER 3 / MINFILTER 4: 2 and up): percentage-closer filtering
+    uint32_t pcf = 0;
+    if (g_cfg.shadow_pcf)
+        for (int s = 0; s < 4; s++)
+            if ((depth >> s & 1) && (texture_state(s)[3] >= 2 || texture_state(s)[4] >= 2)) pcf |= 1u << s;
+    if (pcf) pcf |= (uint32_t)g_cfg.shadow_pcf << 4;
     uint32_t kill = 0; // D3DTSS_ALPHAKILL per stage (texture_state 11)
     for (int s = 0; s < 4; s++)
         if (texture_state(s)[11]) kill |= 1u << s;
@@ -122,7 +137,8 @@ IDirect3DPixelShader9 *ps_host_shader()
     key[n++] = def.PSTextureModes;
     uint32_t bump_div = bump_divide_stages();
     key[n++] = cube | depth << 8 | shadow << 16 | kill << 24;
-    key[n++] = bump_div;
+    bool zoff = exact_depth_offset();
+    key[n++] = bump_div | pcf << 16 | (uint32_t)zoff << 31;
     if (n == g_last_n && !memcmp(key, g_last_key, n * 4)) return g_last_ps; // most draws keep the previous shader
     std::string k((const char *)key, n * 4);
     auto it = g_cache.find(k);
@@ -153,7 +169,7 @@ IDirect3DPixelShader9 *ps_host_shader()
                  fmt(s), *(const float *)&texture_state(s)[22], *(const float *)&texture_state(s)[23],
                  *(const float *)&texture_state(s)[24], *(const float *)&texture_state(s)[25]);
     }
-    std::string hlsl = psh_to_hlsl(def, cube, depth, shadow, kill, bump_div);
+    std::string hlsl = psh_to_hlsl(def, cube, depth, shadow, kill, bump_div, pcf, zoff);
     perf::Scope perf_scope(perf::kCompile);
     perf::add_compile();
     ID3DBlob *code = nullptr, *errors = nullptr;
@@ -244,7 +260,7 @@ void upload_ps_constants(IDirect3DDevice9 *d, bool vertex_fog)
 {
     const uint32_t *rs = render_state();
     note_alternating_constants(rs);
-    float c[27][4];
+    float c[28][4];
     for (int i = 0; i < 8; i++) {
         unpack_color(rs[XRS_PSCONSTANT0_0 + i], c[i]);
         unpack_color(rs[XRS_PSCONSTANT1_0 + i], c[8 + i]);
@@ -281,8 +297,21 @@ void upload_ps_constants(IDirect3DDevice9 *d, bool vertex_fog)
     for (int s = 0; s < 4; s++) { // c23-26: 1 / size of a linear texture (nv2a_psh.cpp rectScale)
         linear_texture_scale(s, &c[23 + s][0], &c[23 + s][1]);
         c[23 + s][2] = c[23 + s][3] = 1.0f;
+        // a shadow map's host size (its shadow-quality scale): zw for percentage-closer filtering (nv2a_psh.cpp)
+        IDirect3DBaseTexture9 *bt = nullptr;
+        if ((depth_mask() >> s & 1) && SUCCEEDED(d->GetTexture(s, &bt)) && bt) {
+            D3DSURFACE_DESC desc = {};
+            if (bt->GetType() == D3DRTYPE_TEXTURE && SUCCEEDED(((IDirect3DTexture9 *)bt)->GetLevelDesc(0, &desc)) && desc.Width)
+                c[23 + s][2] = 1.0f / desc.Width, c[23 + s][3] = 1.0f / desc.Height;
+            bt->Release();
+        }
     }
-    d->SetPixelShaderConstantF(0, &c[0][0], 27);
+    // c27: the polygon offset done in the pixel shader (nv2a_psh.cpp): units, factor, host pixels per Xbox pixel x / y
+    memcpy(&c[27][0], &rs[XRS_POLYGONOFFSETZOFFSET], 4);
+    memcpy(&c[27][1], &rs[XRS_POLYGONOFFSETZSLOPESCALE], 4);
+    c[27][2] = target_scale_x();
+    c[27][3] = target_scale_y();
+    d->SetPixelShaderConstantF(0, &c[0][0], 28);
     ffp_forget_constants(); // c0 was the fixed-function pixels' texture factor
 }
 

@@ -83,7 +83,7 @@ std::string final_input(uint32_t b, bool rgb)
 } // namespace
 
 std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex_depth, uint32_t shadow_func, uint32_t tex_kill,
-                        uint32_t bump_divide)
+                        uint32_t bump_divide, uint32_t shadow_pcf, bool depth_offset)
 {
     std::string s;
     char b[512];
@@ -96,9 +96,21 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
          "float4 rectScale[4] : register(c23);\n"
          "sampler2D s2d0 : register(s0); sampler2D s2d1 : register(s1); sampler2D s2d2 : register(s2); sampler2D s2d3 : register(s3);\n"
          "samplerCUBE scu0 : register(s0); samplerCUBE scu1 : register(s1); samplerCUBE scu2 : register(s2); samplerCUBE scu3 : register(s3);\n"
+         "float4 zoff : register(c27);\n"
          "struct PSIn { float4 v0 : COLOR0; float4 v1 : COLOR1; float4 tc0 : TEXCOORD0; float4 tc1 : TEXCOORD1;\n"
-         "              float4 tc2 : TEXCOORD2; float4 tc3 : TEXCOORD3; float4 tc4 : TEXCOORD4; };\n"
-         "float4 main(PSIn I) : COLOR0 {\n"
+         "              float4 tc2 : TEXCOORD2; float4 tc3 : TEXCOORD3; float4 tc4 : TEXCOORD4;";
+    s += depth_offset ? " float4 tc5 : TEXCOORD5; };\nfloat4 main(PSIn I, out float oDepth : DEPTH) : COLOR0 {\n"
+                      : " };\nfloat4 main(PSIn I) : COLOR0 {\n";
+    // The NV2A polygon offset (xemu psh.c: zvalue += depthOffset + depthFactor * triMZ, triMZ the depth's largest
+    // change per Xbox pixel): in 24-bit units, the slope per host pixel times the host pixels per Xbox pixel on each
+    // axis. The host's SLOPESCALEDEPTHBIAS takes one factor for both axes, and at a render size scaled 4 x 3 the
+    // offset came out a third too large where the depth changes along y (the shadow pass let a surface 1272 units
+    // behind the floor through: the console's offset there is 788, ours was 1050, 1750 with the pull; run/r840).
+    if (depth_offset)
+        s += "  { float z = I.tc5.x / I.tc5.y * 16777215.0;\n"
+             "    float m = max(abs(ddx(z)) * zoff.z, abs(ddy(z)) * zoff.w);\n"
+             "    oDepth = saturate((z + zoff.x + zoff.y * m) / 16777215.0); }\n";
+    s += 
          "  float4 v0 = I.v0, v1 = I.v1;\n"
          "  float4 tc[4] = { I.tc0, I.tc1, I.tc2, I.tc3 };\n"
          "  float4 t0 = 0, t1 = 0, t2 = 0, t3 = 0;\n"
@@ -130,6 +142,39 @@ std::string psh_to_hlsl(const PixelShaderDef &d, uint32_t tex_cube, uint32_t tex
                 // (device.cpp kDepthViewRaw), 24-bit fixed point scaled to 0..1 here, r/q in 0..2^24-1.
                 mode = 2;
                 static const char *const cmp[8] = {"0", "dz < ref", "dz == ref", "dz <= ref", "dz > ref", "dz != ref", "dz >= ref", "1"};
+                if ((shadow_pcf >> i) & 1) {
+                    // Linear filtering on a shadow map: GeForce3-generation hardware compares the four texels around the
+                    // sample and blends the results (percentage-closer filtering; NVIDIA's NV20 documents; not verified
+                    // on the NV2A itself, and xemu samples once and compares, psh_append_shadowmap), a soft edge. One
+                    // compare of a depth the host had already blended gave a hard, stepped edge, and wrong depths along
+                    // the silhouette (a player: "the shadow is thicker and lacks smoothing"). The four taps are on the
+                    // Xbox map's texel grid (mode 2: as soft as the console) or the host map's (mode 1), each read at
+                    // the centre of a host texel so the host's own filtering blends nothing. rectScale: xy 1 / the
+                    // Xbox size, zw 1 / the host size (pshader.cpp).
+                    std::string c = cmp[shadow_func & 7];
+                    auto cmp_of = [&](const char *v) {
+                        std::string e = c;
+                        for (size_t at; (at = e.find("dz")) != std::string::npos;) e.replace(at, 2, v);
+                        return e;
+                    };
+                    std::string n = std::to_string(i);
+                    s += "  { float w" + n + " = tc[" + n + "].w == 0 ? 1 : tc[" + n + "].w;\n"
+                         "    float2 uv = tc[" + n + "].xy / w" + n + ";\n"
+                         "    float ref = clamp(tc[" + n + "].z / w" + n + ", 0, 16777215.0);\n"
+                         "    float2 hs = 1 / rectScale[" + n + "].zw, g = " +
+                         (((shadow_pcf >> 4) & 3) == 1 ? std::string("hs") : "1 / rectScale[" + n + "].xy") + ";\n"
+                         "    float2 f = uv * g - 0.5, fl = floor(f), fr = f - fl;\n"
+                         "    float2 c0 = (fl + 0.5) / g, dx = float2(1 / g.x, 0), dy = float2(0, 1 / g.y);\n"
+                         "    float a = tex2D(s2d" + n + ", (floor(c0 * hs) + 0.5) / hs).r * 16777215.0;\n"
+                         "    float b = tex2D(s2d" + n + ", (floor((c0 + dx) * hs) + 0.5) / hs).r * 16777215.0;\n"
+                         "    float e = tex2D(s2d" + n + ", (floor((c0 + dy) * hs) + 0.5) / hs).r * 16777215.0;\n"
+                         "    float h = tex2D(s2d" + n + ", (floor((c0 + dx + dy) * hs) + 0.5) / hs).r * 16777215.0;\n"
+                         "    float r00 = (" + cmp_of("a") + ") ? 1 : 0, r10 = (" + cmp_of("b") + ") ? 1 : 0;\n"
+                         "    float r01 = (" + cmp_of("e") + ") ? 1 : 0, r11 = (" + cmp_of("h") + ") ? 1 : 0;\n"
+                         "    float r = lerp(lerp(r00, r10, fr.x), lerp(r01, r11, fr.x), fr.y);\n"
+                         "    t" + n + " = float4(r, r, r, r); }\n";
+                    break;
+                }
                 char bb[768];
                 snprintf(bb, sizeof bb,
                          "  { float w%d = tc[%d].w == 0 ? 1 : tc[%d].w;\n"

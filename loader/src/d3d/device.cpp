@@ -474,6 +474,41 @@ IDirect3DTexture9 *depth_view(uint64_t key, const HostZ &z, uint32_t w, uint32_t
     return view;
 }
 
+} // namespace
+
+// cfg:zprobe (draw.cpp pixwatch_check, traced frames): the bound depth buffer's 2x2 host pixels at (x, y) in 24-bit
+// depth units (d[0] x,y  d[1] x+1,y  d[2] x,y+1  d[3] x+1,y+1); false when it cannot be read (no INTZ / R32F view).
+bool probe_bound_depth(LONG x, LONG y, double d[4])
+{
+    auto it = g_zs.find(g_cur_zkey);
+    if (!g_cur_zkey || it == g_zs.end() || !it->second.tex || host3d::depth_view_format() != D3DFMT_R32F) return false;
+    uint32_t xw = (uint32_t)(g_cur_zkey >> 12) & 0xFFF, xh = (uint32_t)g_cur_zkey & 0xFFF;
+    IDirect3DTexture9 *view = depth_view(g_cur_zkey, it->second, xw, xh, -1);
+    if (!view) return false;
+    IDirect3DDevice9 *dev = host3d::dev();
+    IDirect3DSurface9 *vs = nullptr, *two = nullptr, *sys = nullptr;
+    bool ok = false;
+    view->GetSurfaceLevel(0, &vs);
+    RECT src = {x, y, x + 2, y + 2};
+    if (vs && SUCCEEDED(dev->CreateRenderTarget(2, 2, D3DFMT_R32F, D3DMULTISAMPLE_NONE, 0, FALSE, &two, nullptr)) &&
+        SUCCEEDED(dev->CreateOffscreenPlainSurface(2, 2, D3DFMT_R32F, D3DPOOL_SYSTEMMEM, &sys, nullptr)) &&
+        SUCCEEDED(dev->StretchRect(vs, &src, two, nullptr, D3DTEXF_POINT)) && SUCCEEDED(dev->GetRenderTargetData(two, sys))) {
+        D3DLOCKED_RECT lr;
+        if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+            for (int j = 0; j < 2; j++)
+                for (int i = 0; i < 2; i++) d[j * 2 + i] = ((const float *)((const uint8_t *)lr.pBits + j * lr.Pitch))[i] * 16777215.0;
+            sys->UnlockRect();
+            ok = true;
+        }
+    }
+    if (sys) sys->Release();
+    if (two) two->Release();
+    if (vs) vs->Release();
+    return ok;
+}
+
+namespace {
+
 
 // Copy the game's back buffer to the window through the game's gamma ramp, which the Xbox applied in the
 // video DAC: BLACK's ramp builder (FUN_001762B0) computes ramp[i] = (i/255)^1.2 * (brightness + 1) * 2.2 *

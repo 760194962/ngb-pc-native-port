@@ -261,6 +261,9 @@ void read_press_file(uint32_t now_ms)
                     else if (k == "rhwoffset") g_cfg.rhw_offset = v;
                     else if (k == "rhwedge") g_cfg.rhw_edge_fix = v;
                     else if (k == "quadsnap") g_cfg.quad_snap = v;
+                    else if (k == "shadowpullc") g_cfg.shadow_pull_bias = atoi(line.c_str() + c + 1);
+                    else if (k == "shadowpulls") g_cfg.shadow_pull_slope = atoi(line.c_str() + c + 1);
+                    else if (k == "shadowpcf") g_cfg.shadow_pcf = std::clamp(atoi(line.c_str() + c + 1), 0, 2);
                     else if (k == "rhwtexmat") g_cfg.rhw_tex_matrix = v;
                     else if (k == "vsnap") g_cfg.vs_snap = v;
                     else if (k == "shadowpull") g_cfg.shadow_pull = atoi(line.c_str() + c + 1); // N times the pull (0 off)
@@ -276,6 +279,8 @@ void read_press_file(uint32_t now_ms)
                         int lv = atoi(line.c_str() + c + 1);
                         g_cfg.force_localviewer = lv >= 0 && lv <= 2 ? lv : -1; // other values: the NV2A rule
                     }
+                    else if (k == "zoffset") g_cfg.exact_zoffset = v;
+                    else if (k == "zprobe") g_cfg.z_probe = atoi(line.c_str() + c + 1);
                     else if (k == "pixwatchrt") g_cfg.pix_watch_rt = (uint32_t)strtoul(line.c_str() + c + 1, nullptr, 16);
                     else if (k == "skiptexmodes") g_cfg.skip_texmodes = (uint32_t)strtoul(line.c_str() + c + 1, nullptr, 16);
                     else if (k == "visall") g_cfg.vis_all = v;

@@ -135,15 +135,24 @@ struct Config {
     int force_localviewer = -1; // press-file "cfg:localviewer:N": 0 / 1 force D3DRS_LOCALVIEWER, 2 the game's value,
                                 // -1 (default, any other N) TRUE for draws with a reflection stage (d3d/draw.cpp)
     uint32_t pix_watch_rt = 0; // press-file "cfg:pixwatchrt:HEX": watch that render target (its data address) instead
+    int z_probe = 0; // press-file "cfg:zprobe:N" (with pixwatch): also log the depth there, and the N-th shadow-map pass
+                     // of the frame is drawn ALWAYS / depth-writing / unbiased to read its own depth (diagnosis)
     bool edge_mirror = true;  // press-file "cfg:edgemirror:0": projected reads past a render target clamp as on the Xbox
                               // (on: alpha 0 past the edge, d3d/draw.cpp apply_texture_stages)
     bool sdl_pads = true;     // --no-sdl-pads: XInput pads only (input/sdlpad.cpp)
     bool rhw_edge_fix = true; // press-file "cfg:rhwedge:0": keep XYZRHW quads that stop a pixel short of their target (d3d/draw.cpp)
+    int shadow_pull_bias = -1; // press-file "cfg:shadowpullc:N" / "cfg:shadowpulls:N": the pull's constant and slope
+    int shadow_pull_slope = -1; // parts in steps on their own (-1: shadow_pull's); tests
+    bool exact_zoffset = true; // the polygon offset of vertex-program draws computed per pixel as the NV2A does (in Xbox
+                               // pixels, d3d/nv2a_psh.cpp) instead of the host's depth bias; press-file "cfg:zoffset:0"
     int shadow_pull = 1;       // press-file "cfg:shadowpull:N": Ryu's shadow pass pulled toward the camera, N steps (d3d/draw.cpp)
     bool vs_snap = false;      // vertex-program positions snapped to 1/8 Xbox pixel (d3d/nv2a_vsh.cpp): BLACK only
                                // (main.cpp, its destructible walls); press-file "cfg:vsnap:0/1"
     bool rhw_tex_matrix = false; // press-file "cfg:rhwtexmat:1": XYZRHW coordinates through the game's texture matrix
                                  // (before 2.1.1; the console never applies it: d3d/draw.cpp rhw_tex_scales)
+    int shadow_pcf = 2;        // shadow maps read with linear filtering: 2x2 percentage-closer filtering, as the NV2A
+                               // does (d3d/nv2a_psh.cpp); 2 over the Xbox map's texels, 1 over the host map's, 0 one
+                               // sample as before; black.ini shadowsoft = 1 / 0 (2 / 0); press-file "cfg:shadowpcf:N"
     bool quad_snap = true;     // press-file "cfg:quadsnap:0": 2D quads above 1x drawn as before (d3d/draw.cpp quad_snap)
     bool rhw_offset = true;    // press-file "cfg:rhwoffset:0": XYZRHW positions ignore the screen-space offset (comparison)
     bool zview8 = false;       // press-file "cfg:zview8:1": depth views back to A8R8G8B8 (8-bit depth) for comparison

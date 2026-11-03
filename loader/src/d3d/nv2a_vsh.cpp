@@ -266,6 +266,7 @@ std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_
          "  float4 pos : POSITION; float4 d0 : COLOR0; float4 d1 : COLOR1;\n"
          "  float4 t0 : TEXCOORD0; float4 t1 : TEXCOORD1; float4 t2 : TEXCOORD2; float4 t3 : TEXCOORD3;\n"
          "  float4 t4 : TEXCOORD4; // interpolated NV2A fog factor (x), for a pixel shader that reads FOG\n"
+         "  float4 t5 : TEXCOORD5; // clip z, w: the pixel's depth for a polygon offset done in the pixel shader (nv2a_psh.cpp)\n"
          "  float fog : FOG; float pts : PSIZE;\n"
          "};\n"
          "VSOut main(VSIn I) {\n";
@@ -387,6 +388,7 @@ std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_
          "  o.pos.w = w;\n"
          "  o.pos.xyz = (oPos.xyz - vpOffset.xyz) / vpScale.xyz * w;\n"
          "  o.pos.xy *= vmScale.xy;\n"
+         "  o.t5 = float4(o.pos.z, o.pos.w, 0, 1);\n"
          "  o.d0 = oD0; o.d1 = oD1;\n"
          "  o.t0 = oT0 * float4(texScale[0].xy, 1, 1); o.t1 = oT1 * float4(texScale[1].xy, 1, 1);\n"
          "  o.t2 = oT2 * float4(texScale[2].xy, 1, 1); o.t3 = oT3 * float4(texScale[3].xy, 1, 1);\n"

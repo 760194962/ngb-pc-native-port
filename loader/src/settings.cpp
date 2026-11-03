@@ -67,6 +67,7 @@ void load_file()
         else if (k == "seamfill") g_cfg.seam_fill = v != 0;
         else if (k == "effectsnative") g_cfg.effects_native = v != 0;
         else if (k == "shadow") g_cfg.shadow_scale = std::clamp(atoi(val), 1, 16);
+        else if (k == "shadowsoft") g_cfg.shadow_pcf = v != 0 ? 2 : 0; // soft shadow edges (d3d/nv2a_psh.cpp)
         else if (k == "vsync") g_cfg.vsync = v != 0;
         else if (k == "perfhud") g_cfg.perfhud = v != 0;
         else if (k == "aniso") g_cfg.aniso = std::clamp(atoi(val), 1, 16);
@@ -201,6 +202,7 @@ void write_all(FILE *f)
     if (!g_cfg.online_insigniadns.empty()) fprintf(f, "online_insigniadns = %s\n", narrow(g_cfg.online_insigniadns).c_str());
     fprintf(f, "seamfill = %d\n", g_cfg.seam_fill ? 1 : 0);
     fprintf(f, "effectsnative = %d\n", g_cfg.effects_native ? 1 : 0);
+    fprintf(f, "shadowsoft = %d\n", g_cfg.shadow_pcf ? 1 : 0);
     fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\naniso = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0,
             g_cfg.perfhud ? 1 : 0, g_cfg.aniso);
     padkeys::save_ini(f);
