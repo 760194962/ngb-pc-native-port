@@ -129,7 +129,7 @@ enum {
     kHitSave, kHitDiscard, kHitAskAlt,
     kHitHelpSet = 400, // + the setting's index in kSettingHelp: its "?"
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
-    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364,
+    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
@@ -175,6 +175,7 @@ const struct {
     {Str::Gamma, Str::HelpGamma},
     {Str::Resolution, Str::HelpResolution},
     {Str::ShadowQuality, Str::HelpShadowQuality},
+    {Str::ShadowSoft, Str::HelpShadowSoft},
     {Str::TexFilter, Str::HelpTexFilter},
     {Str::AntiAlias, Str::HelpAntiAlias},
     {Str::VSync, Str::HelpVSync},
@@ -1813,7 +1814,7 @@ struct Painter {
     void graphics_page()
     {
         D2D1_RECT_F c;
-        float y = settings_page(Str::NavGraphics, Str::Rendering, 8, &c);
+        float y = settings_page(Str::NavGraphics, Str::Rendering, 9, &c);
         const float lx = c.left + 26, cx = c.left + 210;
         auto label = [&](Str s) { setting_label(s, lx, y, cx); };
         label(Str::Resolution);
@@ -1821,6 +1822,9 @@ struct Painter {
         y += 40;
         label(Str::ShadowQuality);
         shadow_list(cx, y - 2);
+        y += 40;
+        label(Str::ShadowSoft); // black.ini shadowsoft: the shadow map's percentage-closer filtering (loader d3d/nv2a_psh.cpp)
+        segmented(kHitShadowSoft, cx, y, {S(Str::On), S(Str::Off)}, black_ini("shadowsoft") == "0" ? 1 : 0, 72);
         y += 40;
         label(Str::TexFilter);
         aniso_list(cx, y - 2);
@@ -2516,6 +2520,7 @@ void reset_page(Page p)
         black_ini_set("render_factor", "1.00");
         black_ini_set("scale", "3");
         black_ini_set("shadow", "4");
+        black_ini_set("shadowsoft", "1");
         black_ini_set("aniso", "1");
         black_ini_set("aa", "1");
         black_ini_set("vsync", "0");
@@ -2792,6 +2797,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id >= kHitFx && id < kHitFx + 2) black_ini_set("effectsnative", id == kHitFx ? "1" : "0");
         else if (id >= kHitVsync && id < kHitVsync + 2) black_ini_set("vsync", id == kHitVsync ? "1" : "0");
         else if (id >= kHitFsRes && id < kHitFsRes + 2) black_ini_set("fullscreen_res", id == kHitFsRes ? "screen" : "window");
+        else if (id >= kHitShadowSoft && id < kHitShadowSoft + 2) black_ini_set("shadowsoft", id == kHitShadowSoft ? "1" : "0");
         else if (id >= kHitAudioMode && id < kHitAudioMode + 3)
             black_ini_set("audio_mode", id == kHitAudioMode ? "mono" : id == kHitAudioMode + 1 ? "stereo" : "surround");
         else if (id >= kHitDigital && id < kHitDigital + 4) {

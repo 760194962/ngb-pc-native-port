@@ -356,6 +356,8 @@ enum class Str {
     DigitalRow,
     DigitalBoth,
     AudioDigitalNote,
+    ShadowSoft, // the Graphics page: soft shadow edges (black.ini shadowsoft)
+    HelpShadowSoft,
     Count
 };
 

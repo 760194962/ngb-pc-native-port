@@ -208,12 +208,13 @@ const Pair kText[(int)Str::Count] = {
      L"The game writes its saves to the emulated Xbox hard disk: Partition1\\UDATA\\5443000d under the location (one folder "
      L"per slot) and TDATA\\5443000d (the system save). The location is launcher.ini\u2019s hdd, by default the savedata "
      L"folder beside the launcher.\n\nThe saves are in the standard Xbox format; a copy of the whole savedata folder is a full backup."},
-    {L"忍者龙剑传 黑之章 · PC 原生移植", L"Ninja Gaiden Black \u00B7 native PC port"},
-    {L"《忍者龙剑传 黑之章》（初代 Xbox）的非官方 Windows 原生移植。支持的光盘镜像：美版原版（英文）；基本版 va\u2011zh\u2011x2（中英）；"
-     L"飓风版 vb\u2011zh\u2011x2.1（中英）、vb\u2011jp\u2011x2.1（日英）；另可切换到《忍者龙剑传》（2004）光盘版，可选装飓风包。需要你自己合法取得的游戏镜像。",
-     L"An unofficial native Windows port of Ninja Gaiden Black (the original Xbox). Supported disc images: the original US "
-     L"release (English); the basic edition va\u2011zh\u2011x2 (Chinese / English); the Hurricane editions vb\u2011zh\u2011x2.1 (Chinese / "
-     L"English) and vb\u2011jp\u2011x2.1 (Japanese / English); switched at the top left, Ninja Gaiden (2004)'s disc with the optional Hurricane Packs. Your own legally obtained game image is required."},
+    {L"忍者龙剑传 黑之章 / 忍者龙剑传（2004）· PC 原生移植", L"Ninja Gaiden Black / Ninja Gaiden (2004) \u00B7 native PC port"},
+    {L"《忍者龙剑传 黑之章》与《忍者龙剑传》（2004）（均为初代 Xbox）的非官方 Windows 原生移植，在左上角切换。"
+     L"黑之章支持的光盘镜像：美版原版（英文）；基本版 va\u2011zh\u2011x2（中英）；飓风版 vb\u2011zh\u2011x2.1（中英）、vb\u2011jp\u2011x2.1（日英）。"
+     L"2004 支持光盘版（也可用 Redump 完整镜像），可选装飓风包。需要你自己合法取得的游戏镜像。",
+     L"An unofficial native Windows port of Ninja Gaiden Black and Ninja Gaiden (2004) for the original Xbox; switch at the top "
+     L"left. Black: the US release (English), va\u2011zh\u2011x2 (Chinese / English), Hurricane vb\u2011zh\u2011x2.1 (Chinese / English), "
+     L"vb\u2011jp\u2011x2.1 (Japanese / English). 2004: the disc (Redump too), optional Hurricane Packs. Your own legally obtained game image is required."},
     {L"版本", L"Version"},
     {L"启动器 %ls · 游戏程序 %ls", L"Launcher %ls \u00B7 game program %ls"},
     {L"网站", L"Website"},
@@ -479,10 +480,10 @@ const Pair kText[(int)Str::Count] = {
      L"Back up both files first. For the details in xemu, Insignia’s site and Discord have the last word."},
     {L"请作者喝杯奶茶",
      L"Buy the author a milk tea"},
-    {L"《黑之章》的中文汉化、飓风补丁，还有这个 PC 原生移植版，都是我做的。移植版从拆解原版程序做起，画面、声音、存档、联网，到最近修好的手柄震动，一点点接到了 PC 上。它们都免费，以后也一直免费，赞不赞助都不影响你玩到的任何内容。\n\n"
+    {L"《黑之章》的中文汉化、飓风补丁，还有这个 PC 原生移植版（黑之章和《忍者龙剑传》2004），都是我做的。移植版从拆解原版程序做起，画面、声音、存档、联网，到最近修好的手柄震动，一点点接到了 PC 上。它们都免费，以后也一直免费，赞不赞助都不影响你玩到的任何内容。\n\n"
      L"如果它让你又一次握起了龙剑，觉得值一杯奶茶，扫下面任意一个码就好（微信、支付宝）。转账时请备注姓名或昵称，好让我知道这份心意来自谁。\n\n"
      L"不方便也完全没关系：玩得开心，遇到问题告诉我，一样是在帮它变得更好。",
-     L"The Chinese translation of Ninja Gaiden Black, the Hurricane patch and this native PC port are all my work. The port was built up from the original program piece by piece: graphics, sound, saves, online play, and lately the controller’s rumble. All of it is free and will stay free; nothing in it depends on a donation.\n\n"
+     L"The Chinese translation of Ninja Gaiden Black, the Hurricane patch and this native PC port (Ninja Gaiden Black and Ninja Gaiden 2004) are all my work. The port was built up from the original program piece by piece: graphics, sound, saves, online play, and lately the controller’s rumble. All of it is free and will stay free; nothing in it depends on a donation.\n\n"
      L"If it put the Dragon Sword back in your hands and feels worth a milk tea, either code below works (WeChat Pay, Alipay). Please put your name or nickname in the note, so I know who it came from.\n\n"
      L"If not, that is perfectly fine: enjoy the game, and tell me about anything that goes wrong. That helps just as much."},
     {L"跟随显示器（3D 画面铺满这台显示器）", L"Match the monitor (the 3D picture fills it)"},
@@ -559,6 +560,14 @@ const Pair kText[(int)Str::Count] = {
     {L"数字输出", L"Digital output"},
     {L"两者", L"Both"},
     {L"数字输出开启时以 5.1 输出，此项不起作用", L"Digital output on: 5.1 out, this has no effect"},
+    {L"影子柔化", L"Soft shadows"},
+    {L"角色影子的边缘按原机显卡的方式柔化：对阴影贴图周围 2×2 个点分别比较深度再混合（PCF，原机这一代显卡在阴影贴图开线性过滤时由硬件完成），"
+     L"边缘是柔和的渐变，而不是硬边和锯齿。关闭后为以前的做法：只比较一次，边缘硬朗。\n\n"
+     L"性能影响很小（只多读几次阴影贴图，只在画影子的地方）。下次开始游戏时生效。",
+     L"Character shadows get the soft edge of the console's GPU: four texels of the shadow map around each pixel are "
+     L"compared and blended (percentage-closer filtering, done in hardware by that generation of GPUs when the shadow "
+     L"map is filtered linearly), instead of a hard, stepped edge. Off: the earlier way, one compare, a hard edge.\n\n"
+     L"Little cost (a few more shadow-map reads, only where shadows are drawn). Takes effect the next time the game starts."},
 };
 
 } // namespace
