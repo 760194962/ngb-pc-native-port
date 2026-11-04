@@ -143,8 +143,10 @@ struct Config {
     bool rhw_edge_fix = true; // press-file "cfg:rhwedge:0": keep XYZRHW quads that stop a pixel short of their target (d3d/draw.cpp)
     int shadow_pull_bias = -1; // press-file "cfg:shadowpullc:N" / "cfg:shadowpulls:N": the pull's constant and slope
     int shadow_pull_slope = -1; // parts in steps on their own (-1: shadow_pull's); tests
-    bool exact_zoffset = true; // the polygon offset of vertex-program draws computed per pixel as the NV2A does (in Xbox
-                               // pixels, d3d/nv2a_psh.cpp) instead of the host's depth bias; press-file "cfg:zoffset:0"
+    int zoffset_mode = 2; // the polygon offset of vertex-program draws (the shadow passes; d3d/draw.cpp apply_render_states):
+                          // 2 the host's depth bias, slope per Xbox pixel taken on the smaller render-scale axis, no pull;
+                          // 1 per pixel in the pixel shader as the NV2A does (2.1.2: about 2 ms more on the iGPU at 4K,
+                          // it loses early depth rejection); 0 as before 2.1.2 (larger axis + the pull). cfg:zoffset:N
     int shadow_pull = 1;       // press-file "cfg:shadowpull:N": Ryu's shadow pass pulled toward the camera, N steps (d3d/draw.cpp)
     bool vs_snap = false;      // vertex-program positions snapped to 1/8 Xbox pixel (d3d/nv2a_vsh.cpp): BLACK only
                                // (main.cpp, its destructible walls); press-file "cfg:vsnap:0/1"

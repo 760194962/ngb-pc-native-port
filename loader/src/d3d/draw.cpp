@@ -277,13 +277,19 @@ void apply_render_states(IDirect3DDevice9 *d)
     {
         const uint32_t *rs = render_state();
         float bias = 0.0f, slope = 0.0f;
-        const bool in_shader = exact_depth_offset(); // done per pixel in the pixel shader (pshader.cpp), the NV2A's way
+        // The vertex-program draws with an offset (the shadow passes): the NV2A takes the slope per Xbox pixel on each axis
+        // (xemu psh.c), the host one factor for both. Taken on the smaller render-scale axis the offset is the console's
+        // where the depth changes along that axis (y at 4 x 3: the ground seen from behind Ryu) and less elsewhere, never
+        // more: more let a lower ground layer's shadow through (the band, run/r835-r842). Exact per pixel (zoffset 1)
+        // cost about 2 ms on the iGPU at 4K (r880-r885: the pixel shader writing depth loses early depth rejection).
+        const bool prog = prog_depth_offset(), in_shader = prog && g_cfg.zoffset_mode == 1;
         if (rs[XRS_SOLIDOFFSETENABLE] && !in_shader) {
             float off;
             memcpy(&off, &rs[XRS_POLYGONOFFSETZOFFSET], 4);
             memcpy(&slope, &rs[XRS_POLYGONOFFSETZSLOPESCALE], 4);
             bias = off / 16777216.0f;
-            slope *= std::max(target_scale_x(), target_scale_y());
+            slope *= prog && g_cfg.zoffset_mode == 2 ? std::min(target_scale_x(), target_scale_y())
+                                                     : std::max(target_scale_x(), target_scale_y());
         }
         // Ryu's shadow pass -- the surfaces drawn again over themselves (multiplied into the picture), sampling the
         // shadow map, depth tested and not written -- pulled toward the camera, as ngbrecomp #106 does: drawn by another
@@ -299,7 +305,7 @@ void apply_render_states(IDirect3DDevice9 *d)
         // Since 2.1.2 the vertex-program shadow passes take the NV2A offset per pixel (exact_depth_offset) and no pull:
         // the pull's slope part let a second, lower ground layer's shadow through, a darker band that moved with the
         // camera (run/r835-r842: depth paths agree within 2-4 units; the gap was the host's one-factor slope bias).
-        if (g_cfg.shadow_pull && !in_shader && rs[XRS_ZENABLE] && !rs[XRS_ZWRITEENABLE] && samples_shadow_map()) {
+        if (g_cfg.shadow_pull && !(prog && g_cfg.zoffset_mode) && rs[XRS_ZENABLE] && !rs[XRS_ZWRITEENABLE] && samples_shadow_map()) {
             int pb = g_cfg.shadow_pull_bias >= 0 ? g_cfg.shadow_pull_bias : g_cfg.shadow_pull;
             int ps = g_cfg.shadow_pull_slope >= 0 ? g_cfg.shadow_pull_slope : g_cfg.shadow_pull;
             bias -= 2.0f * pb / 16777216.0f;

@@ -279,7 +279,7 @@ void read_press_file(uint32_t now_ms)
                         int lv = atoi(line.c_str() + c + 1);
                         g_cfg.force_localviewer = lv >= 0 && lv <= 2 ? lv : -1; // other values: the NV2A rule
                     }
-                    else if (k == "zoffset") g_cfg.exact_zoffset = v;
+                    else if (k == "zoffset") g_cfg.zoffset_mode = std::clamp(atoi(line.c_str() + c + 1), 0, 2);
                     else if (k == "zprobe") g_cfg.z_probe = atoi(line.c_str() + c + 1);
                     else if (k == "pixwatchrt") g_cfg.pix_watch_rt = (uint32_t)strtoul(line.c_str() + c + 1, nullptr, 16);
                     else if (k == "skiptexmodes") g_cfg.skip_texmodes = (uint32_t)strtoul(line.c_str() + c + 1, nullptr, 16);

@@ -75,14 +75,17 @@ void log_def(const PixelShaderDef &d)
 
 const PixelShaderDef *ps_def(uint32_t handle); // d3d/device.cpp
 
-// cfg:zoffset (common.h): a vertex-program draw with a polygon offset gets it per pixel in its pixel shader (nv2a_psh.cpp);
-// the host's depth bias is left at 0 for it (draw.cpp apply_render_states)
-bool exact_depth_offset()
+// A vertex-program draw with a polygon offset (the character shadow passes)
+bool prog_depth_offset()
 {
     const uint32_t *rs = render_state();
-    if (!g_cfg.exact_zoffset || !rs[XRS_SOLIDOFFSETENABLE] || !g_st.pixel_shader || vs_is_fvf(g_st.vertex_shader)) return false;
+    if (!rs[XRS_SOLIDOFFSETENABLE] || !g_st.pixel_shader || vs_is_fvf(g_st.vertex_shader)) return false;
     return rs[XRS_POLYGONOFFSETZOFFSET] != 0 || rs[XRS_POLYGONOFFSETZSLOPESCALE] != 0; // +0.0f is 0
 }
+
+// cfg:zoffset:1 (common.h): such a draw gets its offset per pixel in its pixel shader (nv2a_psh.cpp); the host's depth
+// bias is left at 0 for it (draw.cpp apply_render_states)
+bool exact_depth_offset() { return g_cfg.zoffset_mode == 1 && prog_depth_offset(); }
 
 IDirect3DPixelShader9 *ps_host_shader()
 {

@@ -12,7 +12,8 @@ struct PixelShaderDef;
 
 // Host translation of the program currently in the render states (cached by content), or null.
 IDirect3DPixelShader9 *ps_host_shader();
-bool exact_depth_offset(); // the current draw's polygon offset is done in its pixel shader (cfg:zoffset)
+bool prog_depth_offset();  // the current draw is a vertex-program draw with a polygon offset
+bool exact_depth_offset(); // ... and its offset is done in its pixel shader (cfg:zoffset:1)
 // c0-c17 combiner constants, c18 fog color, c19-c22 bump-env matrices.
 // vertex_fog: the vertex shader is a translated program, which passes the fog factor in TEXCOORD4 (nv2a_vsh.cpp)
 void upload_ps_constants(IDirect3DDevice9 *d, bool vertex_fog);
