@@ -375,8 +375,11 @@ NTSTATUS __stdcall KeWaitForSingleObject(void *Object, uint32_t WaitReason, uint
     if (Timeout) note_timed_wait(ktimeout_req_ms(Timeout), ms, st == XSTATUS_TIMEOUT, (uint32_t)(uintptr_t)_ReturnAddress());
     if (ms > 0.5) {
         uint32_t site[3] = {};
+        // up to the thread's stack top: the Insignia Setup Assistant's network threads have 4 KB stacks and waited near
+        // their top, where 1 KB more ran past it (an access violation the moment it went online, r969)
         const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress();
-        for (int i = 0, k = 0; i < 256 && k < 3; i++) {
+        const uint32_t *top = (const uint32_t *)((NT_TIB *)NtCurrentTeb())->StackBase;
+        for (int i = 0, k = 0; i < 256 && k < 3 && sp + i < top; i++) {
             uint32_t v = sp[i];
             if (v >= 0x00011000 && v < 0x0037A480) site[k++] = v;
         }
