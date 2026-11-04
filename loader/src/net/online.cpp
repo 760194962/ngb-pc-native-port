@@ -299,5 +299,11 @@ bool online_partition0_write(uint64_t offset, const uint8_t *buf, uint32_t len)
     memcpy(&g_config[(size_t)offset], buf, len);
     logf("online: config sectors %llu-%llu written (kept for this run only; the registered disk is not changed)", offset / 512,
          (offset + len - 1) / 512);
+    if (!g_cfg.online_config_out.empty()) { // tests: what the game wrote (an account made in the dashboard) kept in a file
+        if (FILE *f = _wfopen(g_cfg.online_config_out.c_str(), L"wb")) {
+            fwrite(g_config.data(), 1, g_config.size(), f);
+            fclose(f);
+        }
+    }
     return true;
 }

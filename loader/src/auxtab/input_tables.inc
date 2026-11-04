@@ -97,6 +97,7 @@ static const Hle kAuxInputXOD[] = {
     {0x00145a0du, "XInputClose", (void *)&XInputClose, "s", false},
     {0x00145bf1u, "XInputGetState", (void *)&XInputGetState, "s s", true},
     {0x00145928u, "XGetDevices", (void *)&XGetDevices, "s", true},
+    {0x001458e7u, "XGetDevicesWithMasks", (void *)&XGetDevicesWithMasks, "s s s", true},
     {0x00144d1au, "XGetDeviceEnumerationStatus", (void *)&XGetDeviceEnumerationStatus, "", true},
     {0x00145a19u, "XInputGetCapabilities", (void *)&XInputGetCapabilities, "s s", true},
     {0x00145923u, "XInitDevices", (void *)&XInitDevices, "s s", false}, // jmp thunk to 0x00144040

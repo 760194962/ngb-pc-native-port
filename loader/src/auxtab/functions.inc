@@ -7324,7 +7324,7 @@ static const LibFunc kAuxXOD[] = {
     {0x00145726u, 331u, "FUN_00145726"},
     {0x00145871u, 84u, "FUN_00145871"},
     {0x001458c5u, 34u, "FUN_001458c5"},
-    {0x001458e7u, 60u, "FUN_001458e7"},
+    {0x001458e7u, 60u, "XGetDevicesWithMasks"},
     {0x00145923u, 5u, "FUN_00145923"},
     {0x00145928u, 34u, "XGetDevices"},
     {0x0014594au, 109u, "XGetDeviceChanges"},

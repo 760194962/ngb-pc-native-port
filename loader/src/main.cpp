@@ -224,6 +224,7 @@ bool parse_args()
         }
         else if (a == L"--offline") { g_cfg.online = false; settings_mark_cli("online"); }
         else if (a == L"--online-unplugged") g_cfg.online_unplugged = true; // with the online files: no cable
+        else if (a == L"--online-config-out") { if (!next(g_cfg.online_config_out)) return false; }
         else if (a == L"--online-check") { if (!next(g_cfg.online_check)) return false; }
         else if (a == L"--online-dns-mode") { // insignia / insigniadns / console (black.ini online_dns_mode)
             std::wstring v;
