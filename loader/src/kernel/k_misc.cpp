@@ -154,7 +154,7 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
     // The title screen asks for XC_FACTORY_GAME_REGION four times a frame (240 lines a second, each flushed to disk): log
     // each setting's first 4 queries, then every 10000th
     static std::atomic<uint32_t> asked[0x200];
-    uint32_t n = ValueIndex < 0x200 ? ++asked[ValueIndex] : 1;
+    uint32_t n = ++asked[ValueIndex < 0x1FF ? ValueIndex : 0x1FF]; // 0x1FF: the rest (0xFFFF, whole sections)
     if (n <= 4 || n % 10000 == 0)
         logf("[k] ExQueryNonVolatileSetting(0x%x, len %u) -> %s 0x%x%s", ValueIndex, ValueLength, known ? "" : "UNKNOWN, ", dword,
              n == 4 ? " (later queries of it: every 10000th logged)" : "");
