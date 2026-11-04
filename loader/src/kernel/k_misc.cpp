@@ -139,8 +139,13 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
     case 0x00A: dword = 0; break;                  // XC_P_CONTROL_GAMES: no limit
     case 0x00B: dword = 0; break;                  // XC_P_CONTROL_PASSWORD
     case 0x00C: dword = 0; break;                  // XC_P_CONTROL_MOVIES
-    case 0x011: dword = 0; break;                  // XC_MISC: auto power-off off. XAPI 0x32F752 keeps bit 0,
-                                                   // its 6-hour timer DPC 0x32F740 shuts down only if set
+    case 0x011:                                    // XC_MISC: auto power-off off. XAPI 0x32F752 keeps bit 0,
+                                                   // its 6-hour timer DPC 0x32F740 shuts down only if set.
+        // The Xbox Live dashboard run from the hard disk stays only with bit 3 set (xonlinedash 0x4D2CE; without it it
+        // starts the main dashboard at once, which the port answers by going back to the game): the main dashboard's mark
+        // that it sent it there, which the port gives it in its place (k_misc.cpp dashboard_open)
+        dword = g_cfg.profile == &kProfileXod ? 0x8 : 0;
+        break;
     case 0x012: dword = 1; break;                  // XC_DVD_REGION
     case 0x103: dword = 0x00400100; break;         // XC_FACTORY_AV_REGION: NTSC-M, 60 Hz
     case 0x104: dword = 1; break;                  // XC_FACTORY_GAME_REGION: North America
@@ -312,15 +317,28 @@ static bool relaunch(const std::wstring &xbe, bool with_data = true, const XLAUN
 }
 
 // --- The console's Xbox Live dashboard in the port (xonlinedash.xbe, kProfileXod; dashboard.cpp has it ready) ---
-// A game's way to the dashboard (Ranking's new account, account recovery, network settings: XLaunchNewImage with no
-// title) opens it, with the launch data xboxdash.xbe gives it (0xC at +0x400: its XBOX LIVE menu, which holds NEW
-// ACCOUNT, ACCOUNT MANAGEMENT and NETWORK SETUP), and --return-xbe naming the game. Whatever way the dashboard ends --
-// done (HalReturnToFirmware), a library function not done here, a crash, KeBugCheck -- the game starts again, as the
+// A game's way to the dashboard opens it, with --return-xbe naming the game. The games' Live library (Ranking's new
+// account, account recovery, network settings: XoUpdateLaunchNewImageInternal, x21 0x397400) launches
+// XODash\xonlinedash.xbe itself with its own page: its title and what it asks for at +0x400; that page goes to the
+// dashboard as it is (it opens that screen and, when done, starts the title again). A launch with no title (the main
+// dashboard) gets the page xboxdash.xbe gives it (0xC at +0x400: its XBOX LIVE menu). Whatever way the dashboard ends
+// -- done (HalReturnToFirmware), a library function not done here, a crash, KeBugCheck -- the game starts again, as the
 // console's dashboard goes back to it; closing its window ends the program as for a game. What it wrote to the config
 // area (an account) is already in the port's account store (net/online.cpp).
+static bool system_program(const std::wstring &xbe);
+
 static bool dashboard_open()
 {
     if (g_cfg.profile == &kProfileXod || !dashboard_available()) return false;
+    std::wstring back = host_full_path(g_cfg.game_dir) + L"\\default.xbe";
+    std::string asked = LaunchDataPage ? std::string((const char *)LaunchDataPage->Header + 8, strnlen((const char *)LaunchDataPage->Header + 8, 520)) : "";
+    for (char &c : asked) c = (char)tolower((unsigned char)c);
+    if (asked.find(";xonlinedash.xbe") != std::string::npos) {
+        const uint32_t *ld = (const uint32_t *)LaunchDataPage;
+        logf("[k] the Xbox Live dashboard opens with the game's page (type %u, title %08X, asks %08x %08x %08x; back to %s "
+             "when it is done)", ld[0], ld[1], ld[0x400 / 4], ld[0x404 / 4], ld[0x408 / 4], narrow(back).c_str());
+        return relaunch(dashboard_xbe(), true, nullptr, {L"--return-xbe", back});
+    }
     static XLAUNCH_DATA_PAGE page;
     memset(&page, 0, sizeof page);
     uint32_t *ld = (uint32_t *)&page;
@@ -328,8 +346,7 @@ static bool dashboard_open()
     ld[1] = 0xFFFE0000; // its title
     strcpy((char *)page.Header + 8, "\\Device\\Harddisk0\\Partition2\\XODash;xonlinedash.xbe");
     ld[0x400 / 4] = 0xC; // the XBOX LIVE menu
-    std::wstring back = host_full_path(g_cfg.game_dir) + L"\\default.xbe";
-    logf("[k] the Xbox Live dashboard opens (back to %s when it is done)", narrow(back).c_str());
+    logf("[k] the Xbox Live dashboard opens at its XBOX LIVE menu (back to %s when it is done)", narrow(back).c_str());
     return relaunch(dashboard_xbe(), true, &page, {L"--return-xbe", back});
 }
 
@@ -337,8 +354,14 @@ bool dashboard_back(const char *why) // dashboard.h dashboard_back_to_game
 {
     static std::atomic<bool> once{false};
     if (g_cfg.profile != &kProfileXod || g_cfg.return_xbe.empty() || once.exchange(true)) return false;
-    logf("[k] the Xbox Live dashboard ends (%s): back to %s", why, narrow(g_cfg.return_xbe).c_str());
-    if (GetFileAttributesW(g_cfg.return_xbe.c_str()) == INVALID_FILE_ATTRIBUTES || !relaunch(g_cfg.return_xbe, false)) {
+    // It starting a title (the one that sent it here, done): the game gets that page, as on the console. Anything else
+    // (the main dashboard, a crash): the game afresh.
+    const char *path = LaunchDataPage ? (const char *)LaunchDataPage->Header + 8 : "";
+    std::wstring target = *path ? launch_target(path) : std::wstring();
+    const bool with_page = !target.empty() && !system_program(target);
+    logf("[k] the Xbox Live dashboard ends (%s; launch path '%.64s'): back to %s %s", why, path,
+         narrow(g_cfg.return_xbe).c_str(), with_page ? "with its page" : "afresh");
+    if (GetFileAttributesW(g_cfg.return_xbe.c_str()) == INVALID_FILE_ATTRIBUTES || !relaunch(g_cfg.return_xbe, with_page)) {
         logf("[k]     could not start the game again");
         return false;
     }

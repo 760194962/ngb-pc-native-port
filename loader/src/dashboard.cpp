@@ -42,7 +42,10 @@ bool dashboard_available()
     if (g_cfg.profile == &kProfileXod) return false;
     if (!online_enabled()) return false; // without online play the dashboard has nothing to do (and stops at once)
     std::wstring p2 = host_full_path(g_cfg.hdd_dir) + L"\\Partition2";
-    if (!dash_fonts_ensure(g_cfg.online_hdd, p2) || !dash_dir_ensure(g_cfg.online_hdd, p2, "xodash", L"xonlinedash.xbe")) {
+    // xboxdash.xbe too: run from the hard disk, xonlinedash stays only when C:\xboxdash.xbe is there with its own
+    // certificate version (0x4D1F9; else it starts the main dashboard at once). The port never runs it.
+    if (!dash_fonts_ensure(g_cfg.online_hdd, p2) || !dash_dir_ensure(g_cfg.online_hdd, p2, "xodash", L"xonlinedash.xbe") ||
+        !dash_file_ensure(g_cfg.online_hdd, p2, "xboxdash.xbe")) {
         logf("dash: the Xbox Live dashboard is not available (its files are not in the registered disk image): Live boxes cancel");
         return false;
     }

@@ -286,6 +286,37 @@ bool dash_dir_ensure(const std::wstring &image, const std::wstring &partition2, 
     return false;
 }
 
+bool dash_file_ensure(const std::wstring &image, const std::wstring &partition2, const char *name)
+{
+    std::wstring dest = partition2 + L"\\" + widen(name), part = dest + L".part";
+    if (GetFileAttributesW(dest.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+    if (image.empty()) {
+        logf("dash: no %s and no registered hard disk image (black.ini online_hdd) to take it from", narrow(dest).c_str());
+        return false;
+    }
+    Disk d;
+    std::string why;
+    if (!d.open(image, why)) {
+        logf("dash: %s (%s)", why.c_str(), narrow(image).c_str());
+        return false;
+    }
+    Fatx c(d, 0x8CA80000ull, 0x1F400000ull); // C:, the dashboard's partition
+    if (!c.cluster) {
+        logf("dash: the image has no FATX C: partition (%s)", narrow(image).c_str());
+        return false;
+    }
+    for (const Fatx::Entry &e : c.list(1)) {
+        if (e.dir || _stricmp(e.name.c_str(), name)) continue;
+        CreateDirectoryW(partition2.c_str(), nullptr);
+        bool ok = c.copy(e, part) && MoveFileExW(part.c_str(), dest.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+        if (!ok) DeleteFileW(part.c_str());
+        logf("dash: C:\\%s %s from %s into %s", name, ok ? "copied" : "NOT copied", narrow(image).c_str(), narrow(dest).c_str());
+        return ok;
+    }
+    logf("dash: the image's C: has no %s (%s)", name, narrow(image).c_str());
+    return false;
+}
+
 static std::string sha256_of(const std::vector<uint8_t> &data)
 {
     BCRYPT_ALG_HANDLE alg = nullptr;
