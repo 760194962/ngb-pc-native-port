@@ -119,6 +119,9 @@ struct App {
     // the port's own console: why making one failed; the Insignia Setup Assistant while it runs (it registers it)
     std::wstring local_result;
     HANDLE setup_proc = nullptr;
+    // the page scrolls when it is taller than the window: where it is, where the wheel sends it (it slides there), and
+    // how far it can go (the page's height less the window's, found when it is drawn)
+    float page_scroll = 0, scroll_target = 0, page_max = 0;
     // the InsigniaDNS address being typed in the DNS card's field (digits and dots), and what was found or wrong
     bool dns_edit = false;
     std::wstring dns_text, dns_note;
@@ -258,6 +261,7 @@ void init_monitor_aspect(int test_w = 0, int test_h = 0) // test_w x test_h: --m
 }
 constexpr UINT_PTR kTimerInstall = 1;
 constexpr UINT_PTR kTimerSetup = 2; // the Insignia Setup Assistant running: look again at the console when it ends
+constexpr UINT_PTR kTimerScroll = 3; // the page sliding to where the wheel sent it
 struct Hit {
     int id;
     D2D1_RECT_F r;
@@ -1189,6 +1193,9 @@ struct Painter {
     ID2D1Bitmap *hero = nullptr, *texture = nullptr;
     ID2D1Bitmap *const *pay = nullptr; // [2]: WeChat Pay, Alipay
     std::function<void()> overlay; // an open drop-down list, drawn after the page
+    // while the page is drawn: the lowest thing on it (text as laid out, filled shapes), for how far it scrolls
+    bool measuring = false;
+    float content_bottom = 0;
 
     void text(const std::wstring &s, D2D1_RECT_F r, float size, uint32_t color, float alpha = 1.0f,
               DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL, const wchar_t *family = nullptr,
@@ -1222,6 +1229,9 @@ struct Painter {
                 rt->DrawTextLayout({r.left, r.top}, layout, b, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
                 b->Release();
             }
+            DWRITE_TEXT_METRICS m;
+            if (measuring && !s.empty() && SUCCEEDED(layout->GetMetrics(&m)))
+                content_bottom = std::max(content_bottom, r.top + m.top + m.height);
             layout->Release();
         }
         release(dots);
@@ -1230,6 +1240,7 @@ struct Painter {
 
     void fill(D2D1_RECT_F r, uint32_t color, float alpha = 1.0f, float radius = 0.0f)
     {
+        if (measuring) content_bottom = std::max(content_bottom, r.bottom);
         ID2D1SolidColorBrush *b = nullptr;
         rt->CreateSolidColorBrush(rgb(color, alpha), &b);
         if (!b) return;
@@ -2461,6 +2472,13 @@ struct Painter {
         g_hits.clear();
         background();
         nav();
+        // the page, moved up by how far it is scrolled and kept right of the navigation; its hits moved with it after
+        const size_t first_hit = g_hits.size();
+        const float sc = g.page_scroll;
+        rt->PushAxisAlignedClip({kNavW, 0, kW, kH}, D2D1_ANTIALIAS_MODE_ALIASED);
+        rt->SetTransform(D2D1::Matrix3x2F::Translation(0, -sc));
+        measuring = true;
+        content_bottom = 0;
         if (g.page == kStart) start_page();
         else if (g.page == kInstall) install_page();
         else if (g.page == kDisplay) display_page();
@@ -2472,6 +2490,26 @@ struct Painter {
         else if (g.page == kOnline) online_page();
         else placeholder_page();
         if (overlay) overlay(); // an open drop-down list, over the page
+        measuring = false;
+        rt->SetTransform(D2D1::Matrix3x2F::Identity());
+        rt->PopAxisAlignedClip();
+        for (size_t i = first_hit; i < g_hits.size(); i++) {
+            D2D1_RECT_F &r = g_hits[i].r;
+            if (r.left <= 0 && r.top <= 0 && r.right >= kW && r.bottom >= kH) continue; // a whole-window catch (a list's outside)
+            r.top = std::max(r.top - sc, 0.0f);
+            r.bottom = std::min(r.bottom - sc, kH);
+            if (r.bottom <= r.top) r = {0, 0, 0, 0}; // scrolled out of the window
+        }
+        g.page_max = content_bottom + 20 - kH; // a margin under the last thing; a few pixels more are not worth a scroll
+        if (g.page_max < 12) g.page_max = 0;
+        if (g.scroll_target > g.page_max) g.scroll_target = g.page_max;
+        if (g.page_scroll > g.page_max) g.page_scroll = g.page_max;
+        if (g.page_max > 0) { // a thin bar at the right edge: how much of the page shows, and where
+            const float top = 10, track = kH - 20, thumb = std::max(40.0f, track * kH / (kH + g.page_max));
+            float y = top + (track - thumb) * g.page_scroll / g.page_max;
+            fill({kW - 9, top, kW - 3, top + track}, kInk3, 0.5f, 3);
+            fill({kW - 9, y, kW - 3, y + thumb}, kBone, 0.55f, 3);
+        }
         if (g.help) help_panel();
         if (g.ask) ask_panel();
     }
@@ -2731,6 +2769,12 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
+        if (!g.list_open && !g.help && !g.ask && g.page_max > 0) { // the page: 80 pixels a notch, sliding there
+            g.scroll_target -= GET_WHEEL_DELTA_WPARAM(wp) * 80.0f / WHEEL_DELTA;
+            g.scroll_target = std::min(std::max(g.scroll_target, 0.0f), g.page_max);
+            SetTimer(h, kTimerScroll, 15, nullptr);
+            return 0;
+        }
         break;
     case WM_LBUTTONDOWN: { // a slider: dragged until the button is released
         int id = hit_at(GET_X_LPARAM(lp) * scale, GET_Y_LPARAM(lp) * scale);
@@ -2903,6 +2947,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id == kHitInstallDlc && !g.dlc_dir.empty() && !installing()) install_dlc_now();
         else if (id == kHitExportDlc && !g.content.empty() && !installing()) export_dlc_now();
         else if (id >= 0 && id < kPageCount) {
+            if (g.page != (Page)id) g.page_scroll = g.scroll_target = 0; // another page opens at its top
             g.page = (Page)id;
             if (g.page == kSaves) g.saves_read = false; // read the disk again when the page is opened
         }
@@ -3005,6 +3050,11 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     }
     case WM_TIMER:
         if (wp == kTimerInstall && !installing()) install_finished();
+        if (wp == kTimerScroll) { // a third of the way each tick: quick at first, then settling
+            float d = g.scroll_target - g.page_scroll;
+            g.page_scroll = std::fabs(d) < 0.5f ? g.scroll_target : g.page_scroll + d * 0.33f;
+            if (g.page_scroll == g.scroll_target) KillTimer(h, kTimerScroll);
+        }
         if (wp == kTimerSetup && g.setup_proc && WaitForSingleObject(g.setup_proc, 0) == WAIT_OBJECT_0) {
             CloseHandle(g.setup_proc); // the Setup Assistant ended: what it registered shows now
             g.setup_proc = nullptr;
@@ -3155,6 +3205,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
         }
         if (!wcscmp(argv[i], L"--module") && i + 1 < argc) switch_module(!wcscmp(argv[i + 1], L"ng04") ? 1 : 0); // with --snap
         if (!wcscmp(argv[i], L"--lang") && i + 1 < argc) g_lang = !wcscmp(argv[i + 1], L"en") ? Lang::En : Lang::Zh;
+        if (!wcscmp(argv[i], L"--scroll") && i + 1 < argc) g.page_scroll = g.scroll_target = (float)_wtof(argv[i + 1]); // with --snap: the page scrolled down
         if (!wcscmp(argv[i], L"--mdl2")) g_icon_font = L"Segoe MDL2 Assets";
         if (!wcscmp(argv[i], L"--monitor") && i + 1 < argc) { // with --snap: as if the monitor were WxH (the shape list)
             int w = 0, h = 0;
