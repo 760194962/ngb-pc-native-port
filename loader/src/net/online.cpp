@@ -1,13 +1,15 @@
-// Online play's console identity (project/docs/09). Insignia knows a console by what xemu's registered set holds: the
-// EEPROM (serial number, MAC address, online key, and the HDD key in its RC4-encrypted section) and the hard disk's
-// config area (sector 8 network settings, the machine account in sector 9, the Live accounts after it). Both files
-// are only read, from the paths black.ini names; nothing of them is logged. What the game or the dashboard writes to
-// the config area (an account made in the port's own Xbox Live dashboard) goes to the port's account store in the
-// hard disk folder (online_accounts.bin), laid over the registered disk's on later starts.
+// Online play's console identity (project/docs/09). Insignia knows a console by its EEPROM (serial number, MAC address,
+// online key, and the HDD key in its RC4-encrypted section) and its hard disk's config area (sector 8 network
+// settings, the machine account in sector 9, the Live accounts in 11-19). The game uses the port's own copy of both in
+// the hard disk folder (online_eeprom.bin, online_accounts.bin), imported from the console the player registered in
+// xemu (black.ini online_eeprom / online_hdd, only read): the first time whole, later the accounts the port lacks. What
+// the game or the dashboard writes to the config area (an account made in the port's Xbox Live dashboard) goes to
+// online_accounts.bin. Nothing of these files is logged.
 #include "net/online.h"
 
 #include "common.h"
 #include "kernel/kexports.h"
+#include "net/dashfonts.h"
 #include "net/nvnet.h"
 #include "sha1.h"
 
@@ -148,18 +150,34 @@ bool read_config_area(const std::wstring &path, std::vector<uint8_t> &out, std::
     return true;
 }
 
-// --- the port's account store: <hard disk folder>\online_accounts.bin = "NGBACCT1", the console's serial number (12 bytes,
-// EEPROM 0x34), 4 zero bytes, then sectors 8-1023 of the config area as last written. Used only with the console whose
-// serial it names (another EEPROM chosen later leaves it alone); written whole to a temporary file, then moved over the
-// old one, so a crash or power loss mid-write leaves the previous store ---
+// --- the port's own console, in the hard disk folder: online_eeprom.bin (the console's EEPROM, 256 bytes) and
+// online_accounts.bin = "NGBACCT1", the console's serial number (12 bytes, EEPROM 0x34), 4 zero bytes, then sectors
+// 8-1023 of the config area (network settings, machine account, the Live accounts). The game reads only these; both are
+// made by importing from xemu (import_xemu) and the store is written again whenever the game or the dashboard writes
+// the config area. Written whole to a temporary file, then moved over the old one, so a crash or power loss mid-write
+// leaves the previous one ---
 
 constexpr char STORE_MAGIC[8] = {'N', 'G', 'B', 'A', 'C', 'C', 'T', '1'};
 constexpr size_t STORE_HEAD = 24;
 
 std::wstring store_path() { return host_full_path(g_cfg.hdd_dir) + L"\\online_accounts.bin"; }
+std::wstring local_eeprom_path() { return host_full_path(g_cfg.hdd_dir) + L"\\online_eeprom.bin"; }
 
-// Lays the store over c (the registered disk's config area) when it is this console's. Returns the sectors it changed.
-int store_apply(std::vector<uint8_t> &c, const uint8_t serial[12])
+bool write_atomic(const std::wstring &path, const void *a, size_t na, const void *b = nullptr, size_t nb = 0)
+{
+    std::wstring tmp = path + L".tmp";
+    CreateDirectoryW(host_full_path(g_cfg.hdd_dir).c_str(), nullptr);
+    FILE *f = nullptr;
+    if (_wfopen_s(&f, tmp.c_str(), L"wb") || !f) return false;
+    bool ok = fwrite(a, 1, na, f) == na && (!nb || fwrite(b, 1, nb, f) == nb) && fflush(f) == 0;
+    fclose(f);
+    if (ok) ok = MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    if (!ok) DeleteFileW(tmp.c_str());
+    return ok;
+}
+
+// The store into c (CONFIG_AREA bytes; sectors 0-7 zero) and its console's serial number. 0 none, -1 not a store, 1 ok
+int store_load(std::vector<uint8_t> &c, uint8_t serial[12])
 {
     std::vector<uint8_t> s(STORE_HEAD + CONFIG_AREA - OVERLAY_START);
     FILE *f = nullptr;
@@ -167,35 +185,22 @@ int store_apply(std::vector<uint8_t> &c, const uint8_t serial[12])
     size_t n = fread(s.data(), 1, s.size(), f);
     fclose(f);
     if (n != s.size() || memcmp(s.data(), STORE_MAGIC, 8)) {
-        logf("online: the account store %s is not one (%zu bytes); left unused", narrow(store_path()).c_str(), n);
-        return 0;
+        logf("online: the account store %s is not one (%zu bytes)", narrow(store_path()).c_str(), n);
+        return -1;
     }
-    if (memcmp(s.data() + 8, serial, 12)) {
-        logf("online: the account store belongs to another console (another EEPROM was chosen); left unused");
-        return 0;
-    }
-    int changed = 0;
-    for (uint32_t off = OVERLAY_START; off < CONFIG_AREA; off += 512)
-        if (memcmp(&c[off], &s[STORE_HEAD + off - OVERLAY_START], 512)) changed++;
+    memcpy(serial, s.data() + 8, 12);
+    c.assign(CONFIG_AREA, 0);
     memcpy(&c[OVERLAY_START], s.data() + STORE_HEAD, CONFIG_AREA - OVERLAY_START);
     SecureZeroMemory(s.data(), s.size());
-    return changed;
+    return 1;
 }
 
 bool store_save(const std::vector<uint8_t> &c, const uint8_t serial[12])
 {
-    std::wstring path = store_path(), tmp = path + L".tmp";
-    FILE *f = nullptr;
-    if (_wfopen_s(&f, tmp.c_str(), L"wb") || !f) return false;
     uint8_t head[STORE_HEAD] = {};
     memcpy(head, STORE_MAGIC, 8);
     memcpy(head + 8, serial, 12);
-    bool ok = fwrite(head, 1, sizeof head, f) == sizeof head &&
-              fwrite(&c[OVERLAY_START], 1, CONFIG_AREA - OVERLAY_START, f) == CONFIG_AREA - OVERLAY_START && fflush(f) == 0;
-    fclose(f);
-    if (ok) ok = MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-    if (!ok) DeleteFileW(tmp.c_str());
-    return ok;
+    return write_atomic(store_path(), head, sizeof head, &c[OVERLAY_START], CONFIG_AREA - OVERLAY_START);
 }
 
 bool sector_signed(const std::vector<uint8_t> &c, int sector)
@@ -204,6 +209,34 @@ bool sector_signed(const std::vector<uint8_t> &c, int sector)
     memcpy(&sig, &c[sector * 512], 4);
     return sig == 0x79132568; // XBOX_CONFIG_SECTOR signature
 }
+
+// A config sector's checksum (dword 126, before the end mark 0xAA550000): the complement of the end-around-carry sum
+// of its other dwords (checked on every sector of a registered console's disk)
+void sector_checksum(std::vector<uint8_t> &c, int sector)
+{
+    uint32_t d[128];
+    memcpy(d, &c[sector * 512], 512);
+    uint64_t t = 0;
+    for (int i = 0; i < 128; i++)
+        if (i != 126) t += d[i], t = (t & 0xFFFFFFFF) + (t >> 32);
+    uint32_t sum = ~(uint32_t)t;
+    memcpy(&c[sector * 512 + 504], &sum, 4);
+}
+
+// The Live accounts: sector 11 holds a table of 12-byte entries from offset 12 (a dword, nonzero when the slot holds an
+// account, and 8 bytes the account library keeps with it), entry i for the account in sector 12 + i; an account's
+// sector has its ID (XUID) at 12 and its gamertag at 24. Found with the Xbox Live dashboard (r963): an account sector
+// with its entry moved to another slot is still found, gaps between slots are skipped, and a sector without its entry
+// is not listed. 8 slots: the XDK's XONLINE_MAX_STORED_ONLINE_USERS.
+constexpr int TABLE_SECTOR = 11, FIRST_SLOT = 12, SLOTS = 8;
+uint8_t *slot_entry(std::vector<uint8_t> &c, int i) { return &c[TABLE_SECTOR * 512 + 12 + 12 * i]; }
+bool slot_used(const std::vector<uint8_t> &c, int i)
+{
+    uint32_t used;
+    memcpy(&used, &c[TABLE_SECTOR * 512 + 12 + 12 * i], 4);
+    return used && sector_signed(c, TABLE_SECTOR) && sector_signed(c, FIRST_SLOT + i);
+}
+const uint8_t *slot_xuid(const std::vector<uint8_t> &c, int i) { return &c[(FIRST_SLOT + i) * 512 + 12]; }
 
 bool process_running(const wchar_t *exe)
 {
@@ -240,7 +273,119 @@ std::string account_name(const std::vector<uint8_t> &c, int sector)
     return std::string(p, n);
 }
 
+// The gamertag in account slot i ("" if none)
+std::string slot_name(const std::vector<uint8_t> &c, int i) { return slot_used(c, i) ? account_name(c, FIRST_SLOT + i) : ""; }
+
+// Slot of c whose account has this ID, or -1
+int find_xuid(const std::vector<uint8_t> &c, const uint8_t *xuid)
+{
+    for (int i = 0; i < SLOTS; i++)
+        if (slot_used(c, i) && !memcmp(slot_xuid(c, i), xuid, 8)) return i;
+    return -1;
+}
+
+// Reads and checks the xemu EEPROM (black.ini online_eeprom) into e; "" or why not, for the player
+std::wstring xemu_eeprom(uint8_t e[256])
+{
+    if (g_cfg.online_eeprom.empty()) return L"没有选 xemu 的 EEPROM";
+    if (!read_file(g_cfg.online_eeprom, 0, e, 256)) return L"读不到 xemu 的 EEPROM";
+    uint8_t dec[28];
+    bool ok = kcrypto_selftest() && decrypt_eeprom(e, dec);
+    SecureZeroMemory(dec, sizeof dec);
+    return ok ? L"" : L"xemu 的 EEPROM 无效";
+}
+
+// Imports the console registered in xemu (black.ini online_eeprom and online_hdd, only read) into the port's own: the
+// first time its EEPROM, network settings, machine account and every Live account; later only the Live accounts the
+// port does not have yet (by account ID; one it has stays as it is: the port may have written it since), into free
+// slots. Only the same console (the same EEPROM): an account belongs to its console. The Xbox Live dashboard's files
+// are copied too (dashfonts.cpp; they never ship with the port). Lines for the launcher in r: imported / exists / full =
+// gamertag, error = why. false on an error (nothing changed then).
+bool import_xemu(std::string &r)
+{
+    auto put = [&](const char *k, const std::string &v) { r += std::string(k) + " = " + v + "\n"; };
+    auto err = [&](const std::string &why, const std::wstring &player) {
+        logf("online: import from xemu: %s", why.c_str());
+        put("error", narrow(player));
+        return false;
+    };
+    if (process_running(L"xemu.exe")) return err("xemu is running", L"xemu 正在运行：先关掉它再导入（它可能正在写硬盘镜像）");
+    uint8_t e[256];
+    std::wstring why_ee = xemu_eeprom(e);
+    if (!why_ee.empty()) return err("the xemu EEPROM is missing or not valid", why_ee);
+    if (g_cfg.online_hdd.empty()) return err("no xemu hard disk image chosen", L"没有选 xemu 的硬盘镜像");
+    std::vector<uint8_t> img;
+    std::string why;
+    if (!read_config_area(g_cfg.online_hdd, img, why)) return err("the xemu hard disk image: " + why, L"读不了 xemu 的硬盘镜像");
+    if (!sector_signed(img, 9)) return err("no machine account in the image", L"xemu 硬盘里没有注册过的主机：先在 xemu 里注册 Insignia");
+    uint8_t mine[256];
+    bool have_eeprom = read_file(local_eeprom_path(), 0, mine, sizeof mine);
+    if (have_eeprom && memcmp(mine, e, sizeof e))
+        return err("the port has another console", L"移植版已经是另一台主机，账户不能跨主机导入");
+    std::vector<uint8_t> c;
+    uint8_t serial[12];
+    int st = store_load(c, serial);
+    if (st == 1 && memcmp(serial, e + 0x34, 12)) return err("the account store is another console's", L"本地账户属于另一台主机");
+    bool fresh = st != 1;
+    if (fresh) {
+        c = img; // everything: network settings, machine account, the accounts
+        memset(c.data(), 0, OVERLAY_START);
+        for (int i = 0; i < SLOTS; i++)
+            if (slot_used(c, i)) put("imported", slot_name(c, i));
+    } else {
+        if (!sector_signed(c, 9)) memcpy(&c[9 * 512], &img[9 * 512], 512);
+        bool table = false;
+        for (int i = 0; i < SLOTS; i++) {
+            if (!slot_used(img, i)) continue;
+            std::string name = slot_name(img, i);
+            if (find_xuid(c, slot_xuid(img, i)) >= 0) {
+                put("exists", name);
+                continue;
+            }
+            int to = -1;
+            for (int j = 0; j < SLOTS && to < 0; j++)
+                if (!slot_used(c, j)) to = j;
+            if (to < 0) {
+                put("full", name);
+                continue;
+            }
+            if (!sector_signed(c, TABLE_SECTOR)) { // no table yet: the image's header and end mark, its entries cleared
+                memcpy(&c[TABLE_SECTOR * 512], &img[TABLE_SECTOR * 512], 512);
+                memset(&c[TABLE_SECTOR * 512 + 12], 0, 12 * SLOTS);
+            }
+            memcpy(&c[(FIRST_SLOT + to) * 512], &img[(FIRST_SLOT + i) * 512], 512);
+            memcpy(slot_entry(c, to), slot_entry(img, i), 12);
+            table = true;
+            put("imported", name);
+        }
+        if (table) sector_checksum(c, TABLE_SECTOR);
+    }
+    bool ok = (have_eeprom || write_atomic(local_eeprom_path(), e, sizeof e)) && store_save(c, e + 0x34);
+    SecureZeroMemory(e, sizeof e);
+    SecureZeroMemory(img.data(), img.size());
+    SecureZeroMemory(c.data(), c.size());
+    if (!ok) return err("could not write the port's console files", L"写不了本地的主机文件（存档目录只读？）");
+    std::wstring p2 = host_full_path(g_cfg.hdd_dir) + L"\\Partition2";
+    bool dash = dash_fonts_ensure(g_cfg.online_hdd, p2) && dash_dir_ensure(g_cfg.online_hdd, p2, "xodash", L"xonlinedash.xbe") &&
+                dash_file_ensure(g_cfg.online_hdd, p2, "xboxdash.xbe");
+    put("dashboard", dash ? "ok" : "missing");
+    logf("online: imported from xemu (%s)%s", fresh ? "the console and its accounts" : "accounts the port did not have",
+         dash ? "" : "; the Xbox Live dashboard's files are not in the image");
+    return true;
+}
+
 } // namespace
+
+bool online_import(const std::wstring &out_path)
+{
+    std::string r;
+    bool ok = import_xemu(r);
+    FILE *f = nullptr;
+    if (_wfopen_s(&f, out_path.c_str(), L"wb") || !f) return false;
+    fputs(r.c_str(), f);
+    fclose(f);
+    return ok;
+}
 
 bool online_check(const std::wstring &out_path)
 {
@@ -248,29 +393,55 @@ bool online_check(const std::wstring &out_path)
     std::string r;
     auto put = [&](const char *k, const std::string &v) { r += std::string(k) + " = " + v + "\n"; };
     put("xemu", process_running(L"xemu.exe") ? "1" : "0");
+    // The port's own console (what the game uses): local = ok / none / invalid / other (the store is another console's)
+    uint8_t mine[256], serial[12];
+    std::vector<uint8_t> loc;
+    bool have_mine = read_file(local_eeprom_path(), 0, mine, sizeof mine);
+    int st = store_load(loc, serial);
+    bool local_ok = false;
+    if (!have_mine && st != 1) put("local", "none");
+    else {
+        uint8_t dec[28];
+        bool valid = have_mine && st == 1 && kcrypto_selftest() && decrypt_eeprom(mine, dec);
+        SecureZeroMemory(dec, sizeof dec);
+        local_ok = valid && !memcmp(serial, mine + 0x34, 12);
+        put("local", local_ok ? "ok" : valid ? "other" : "invalid");
+        if (local_ok) {
+            put("local_registered", sector_signed(loc, 9) ? "1" : "0");
+            for (int i = 0; i < SLOTS; i++)
+                if (slot_used(loc, i)) put("local_account", slot_name(loc, i));
+        }
+    }
+    // The console registered in xemu (black.ini online_eeprom / online_hdd): what can be imported from it
     uint8_t e[256];
-    bool have_serial = false; // the console's serial number (EEPROM 0x34): whose account store applies
-    uint8_t serial[12];
+    bool have_xemu_eeprom = false;
     if (g_cfg.online_eeprom.empty()) put("eeprom", "missing");
     else if (!read_file(g_cfg.online_eeprom, 0, e, sizeof e)) put("eeprom", "unreadable");
     else {
-        memcpy(serial, e + 0x34, 12);
-        have_serial = true;
         uint8_t dec[28];
-        put("eeprom", kcrypto_selftest() && decrypt_eeprom(e, dec) ? "ok" : "invalid");
+        have_xemu_eeprom = kcrypto_selftest() && decrypt_eeprom(e, dec);
+        put("eeprom", have_xemu_eeprom ? "ok" : "invalid");
         SecureZeroMemory(dec, sizeof dec);
+        if (have_xemu_eeprom && have_mine) put("same_console", memcmp(e, mine, sizeof e) ? "0" : "1");
     }
     SecureZeroMemory(e, sizeof e);
+    SecureZeroMemory(mine, sizeof mine);
     std::vector<uint8_t> c;
     std::string why;
     if (g_cfg.online_hdd.empty()) put("hdd", "missing");
     else if (!read_config_area(g_cfg.online_hdd, c, why)) put("hdd", why);
     else {
         put("hdd", "ok");
-        if (have_serial) store_apply(c, serial); // accounts made in the port's dashboard too
         put("registered", sector_signed(c, 9) ? "1" : "0");
-        for (int s = 10; s < 32; s++)
-            if (sector_signed(c, s) && !account_name(c, s).empty()) put("account", account_name(c, s));
+        for (int i = 0; i < SLOTS; i++) {
+            if (!slot_used(c, i)) continue;
+            put("account", slot_name(c, i));
+            if (!local_ok || find_xuid(loc, slot_xuid(c, i)) < 0) put("importable", slot_name(c, i));
+        }
+    }
+    if (local_ok) c = loc; // the network settings the game will use
+    SecureZeroMemory(loc.data(), loc.size());
+    if (!c.empty()) {
         if (sector_signed(c, NET_SECTOR)) {
             const uint8_t *n = &c[NET_SECTOR * 512];
             uint32_t flags;
@@ -302,28 +473,42 @@ bool online_init()
         g_off_reason = std::wstring(L"联网未开启：") + player;
         return false;
     };
-    if (g_cfg.online_eeprom.empty() || g_cfg.online_hdd.empty())
-        return fail("black.ini needs online_eeprom and online_hdd", L"没有选主机文件（启动器「联网」页）");
     // One console identity must not be on Xbox Live twice: xemu with the same EEPROM would be logged off by this
     if (process_running(L"xemu.exe"))
         return fail("xemu is running; close it first (the same console must not sign in twice)", L"xemu 正在运行，请先关掉它再启动游戏");
     if (!kcrypto_selftest()) return fail("crypto self-test failed", L"加密自检失败（请回报）");
-    if (!read_file(g_cfg.online_eeprom, 0, g_eeprom, sizeof g_eeprom))
-        return fail("cannot read online_eeprom " + narrow(g_cfg.online_eeprom), L"读不到 EEPROM 文件");
+    // The port's own console (hard disk folder). Not there yet but xemu's files chosen (players from before 2.2, or a
+    // new save folder): imported from them once, as the launcher's import does.
+    uint8_t serial[12];
+    if (GetFileAttributesW(local_eeprom_path().c_str()) == INVALID_FILE_ATTRIBUTES || store_load(g_config, serial) != 1) {
+        if (g_cfg.online_eeprom.empty() || g_cfg.online_hdd.empty())
+            return fail("no console of the port's own and no xemu files to import it from", L"还没有主机：在启动器「联网」页从 xemu 导入");
+        std::string r;
+        if (!import_xemu(r)) {
+            size_t at = r.find("error = ");
+            std::string why = at == std::string::npos ? "" : r.substr(at + 8, r.find('\n', at) - at - 8);
+            return fail("importing the console from xemu failed", (L"从 xemu 导入主机失败：" + widen(why)).c_str());
+        }
+        logc("online: the console registered in xemu imported into %s (first start)", narrow(host_full_path(g_cfg.hdd_dir)).c_str());
+    }
+    if (!read_file(local_eeprom_path(), 0, g_eeprom, sizeof g_eeprom))
+        return fail("cannot read " + narrow(local_eeprom_path()), L"读不到本地的主机 EEPROM");
     uint8_t dec[28];
     const char *ver = decrypt_eeprom(g_eeprom, dec);
-    if (!ver) return fail("online_eeprom: the security section does not verify (not an Xbox EEPROM?)", L"EEPROM 文件无效");
-    std::string why;
-    if (!read_config_area(g_cfg.online_hdd, g_config, why)) return fail("online_hdd: " + why, L"读不了硬盘镜像");
-    if (int n = store_apply(g_config, g_eeprom + 0x34))
-        logf("online: the port's account store (%s) laid over %d config sector(s) of the registered disk", narrow(store_path()).c_str(), n);
+    if (!ver) return fail("online_eeprom.bin: the security section does not verify", L"本地的主机 EEPROM 无效");
+    if (store_load(g_config, serial) != 1 || memcmp(serial, g_eeprom + 0x34, 12)) {
+        SecureZeroMemory(dec, sizeof dec);
+        return fail("online_accounts.bin is missing or another console's", L"本地账户文件缺失或属于另一台主机（在启动器「联网」页重新导入）");
+    }
     int accounts = 0;
-    for (int s = 9; s < 32; s++) accounts += sector_signed(g_config, s);
-    if (!sector_signed(g_config, 9))
-        return fail("online_hdd: no machine account in config sector 9 (console not registered?)", L"硬盘镜像里没有注册过的主机（先在 xemu 里注册 Insignia）");
+    for (int i = 0; i < SLOTS; i++) accounts += slot_used(g_config, i);
+    if (!sector_signed(g_config, 9)) {
+        SecureZeroMemory(dec, sizeof dec);
+        return fail("no machine account in config sector 9 (console not registered?)", L"本地主机没有注册过 Insignia（先在 xemu 里注册再导入）");
+    }
     memcpy(xk::XboxHDKey, dec + 8, 16);
     SecureZeroMemory(dec, sizeof dec);
-    logc("online: on - EEPROM verifies (%s kernel states), %d signed account sectors on the disk", ver, accounts);
+    logc("online: on - the port's console (%s kernel states), %d Live account(s)", ver, accounts);
     g_enabled = nvnet_install();
     return g_enabled;
 }

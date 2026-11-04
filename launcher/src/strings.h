@@ -358,6 +358,25 @@ enum class Str {
     AudioDigitalNote,
     ShadowSoft, // the Graphics page: soft shadow edges (black.ini shadowsoft)
     HelpShadowSoft,
+    // the Online page: the port's own console (the hard disk folder's online_eeprom.bin / online_accounts.bin) and the
+    // import from xemu (the game program's --online-import)
+    OnlineLocal,
+    OnlineLocalOk,
+    OnlineLocalNone,
+    OnlineLocalBad,
+    OnlineLocalOther,
+    OnlineLocalNotReg,
+    OnlineXemuOptional,
+    OnlineOtherConsole,
+    OnlineImportable,
+    OnlineAllHere,
+    OnlineImport,
+    OnlineImported,
+    OnlineExists,
+    OnlineFull,
+    OnlineNothing,
+    OnlineImportFailed,
+    OnlineXemuOk,
     Count
 };
 

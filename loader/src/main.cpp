@@ -141,6 +141,7 @@ void usage()
            "  --online-eeprom F --online-hdd F  online play through Insignia with this registered EEPROM and xemu disk\n"
            "                    image (both only read; black.ini online = 1, online_eeprom, online_hdd); --offline: off\n"
            "  --online-check F  check the online files (black.ini or the flags above), write what was found to F, exit\n"
+           "  --online-import F import the xemu console's accounts the port lacks into the hard disk folder, report to F, exit\n"
            "  --online-dns-mode M  insignia (default): every DNS query to Insignia's; insigniadns: every query to the\n"
            "                    InsigniaDNS at --online-insigniadns IP; console: as the console's settings\n"
            "  --no-pc-menus     no PC SETTINGS pages in the game's Options menu (built at start into cache\\menus\n"
@@ -228,6 +229,7 @@ bool parse_args()
         else if (a == L"--online-config-out") { if (!next(g_cfg.online_config_out)) return false; }
         else if (a == L"--return-xbe") { if (!next(g_cfg.return_xbe)) return false; }
         else if (a == L"--online-check") { if (!next(g_cfg.online_check)) return false; }
+        else if (a == L"--online-import") { if (!next(g_cfg.online_import)) return false; }
         else if (a == L"--online-dns-mode") { // insignia / insigniadns / console (black.ini online_dns_mode)
             std::wstring v;
             if (!next(v)) return false;
@@ -623,6 +625,7 @@ int run(void *reserve, unsigned reserve_size)
         return 0;
     }
     if (!g_cfg.online_check.empty()) return online_check(g_cfg.online_check) ? 0 : 1; // the launcher's 联网 page
+    if (!g_cfg.online_import.empty()) return online_import(g_cfg.online_import) ? 0 : 1; // its import from xemu
 
     log_init(g_cfg.log_path);
     g_exit_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);

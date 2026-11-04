@@ -357,14 +357,14 @@ const Pair kText[(int)Str::Count] = {
      L"Online leaderboards"},
     {L"联网",
      L"Online"},
-    {L"EEPROM",
-     L"EEPROM"},
-    {L"硬盘镜像",
-     L"Hard disk image"},
-    {L"主机",
-     L"Console"},
-    {L"先选择你在 xemu 里注册过 Insignia 的 EEPROM 与硬盘镜像。",
-     L"Choose the EEPROM and hard disk image you registered with Insignia in xemu."},
+    {L"xemu EEPROM",
+     L"xemu EEPROM"},
+    {L"xemu 硬盘镜像",
+     L"xemu hard disk"},
+    {L"xemu 主机",
+     L"xemu console"},
+    {L"选择你在 xemu 里注册过 Insignia 的 EEPROM 与硬盘镜像，再点「从 xemu 导入」。",
+     L"Choose the EEPROM and hard disk image you registered with Insignia in xemu, then press Import."},
     {L"✓ 主机身份有效 · 已注册 Insignia",
      L"✓ Console identity valid · registered with Insignia"},
     {L"  ·  账号：",
@@ -423,8 +423,8 @@ const Pair kText[(int)Str::Count] = {
      L"Insignia website"},
     {L"联网关闭，DNS 查询方式改回「Insignia 公网 DNS」。选好的 EEPROM 与硬盘镜像保留。",
      L"Online off and lookups back to Insignia’s public DNS. The chosen EEPROM and hard disk image stay."},
-    {L"用你自己的 Insignia 账号在游戏「排行榜」里登录、查看真实榜单。移植版没有自己的账号，它借用你在 xemu 里注册好的那台「主机」：EEPROM 里有主机身份，硬盘镜像里有账号。两个文件只读，不会被修改，也不会被复制或上传到别处。\n\n默认关闭；关闭时游戏看不到网络，和以前完全一样。xemu 在运行时不会开联网，因为同一台主机不能同时登录两次。\n\n性能：集成显卡第 1 章实测，开与关都是 97.7% 的游戏速度，网络只在进入排行榜后才启动。",
-     L"Sign in with your own Insignia account in the game’s Ranking menu and see the real leaderboards. The port has no account of its own: it borrows the “console” you registered in xemu (its identity is in the EEPROM, the accounts on the hard disk image). Both files are only read, never changed, copied or sent anywhere.\n\nOff by default; off, the game sees no network, exactly as before. While xemu runs the port stays offline, since one console cannot sign in twice.\n\nPerformance: measured on integrated graphics in chapter 1, 97.7% game speed both on and off; the network only starts once you open Ranking."},
+    {L"用你自己的 Insignia 账号在游戏「排行榜」里登录、查看真实榜单。移植版用的是你在 xemu 里注册好的那台「主机」：点「从 xemu 导入」，它的主机身份（EEPROM）和账号会复制进存档目录（online_eeprom.bin、online_accounts.bin），游戏只读这两个文件。以后在 xemu 里新建了账号，再导入一次就会补进来，本机已有的账号不受影响。xemu 的文件只读，不会被修改，也不会上传到别处。\n\n存档目录里的 online_eeprom.bin 就是你的主机身份：不要把它发给别人。\n\n默认关闭；关闭时游戏看不到网络，和以前完全一样。xemu 在运行时不会开联网，因为同一台主机不能同时登录两次。\n\n性能：集成显卡第 1 章实测，开与关都是 97.7% 的游戏速度，网络只在进入排行榜后才启动。",
+     L"Sign in with your own Insignia account in the game’s Ranking menu and see the real leaderboards. The port uses the “console” you registered in xemu: Import copies its identity (the EEPROM) and its accounts into the save folder (online_eeprom.bin, online_accounts.bin), and the game reads only those. Accounts you make in xemu later come over with another Import; the ones here stay as they are. xemu’s files are only read, never changed or sent anywhere.\n\nonline_eeprom.bin in the save folder is your console’s identity: do not give it to anyone.\n\nOff by default; off, the game sees no network, exactly as before. While xemu runs the port stays offline, since one console cannot sign in twice.\n\nPerformance: measured on integrated graphics in chapter 1, 97.7% game speed both on and off; the network only starts once you open Ranking."},
     {L"游戏登录前要先用 DNS 查到 Insignia 服务器的地址。下面两个名字很像，但不是一回事：\n"
      L"· Insignia 公网 DNS：Insignia 架在网上的 DNS 服务器（46.101.64.175），什么都不用装。\n"
      L"· 本地 InsigniaDNS.exe：从 Insignia 下载、在你电脑上运行的小程序，在这台电脑的局域网地址（如 192.168.x.x）上回答查询，127.0.0.1 不行。\n\n"
@@ -469,14 +469,14 @@ const Pair kText[(int)Str::Count] = {
      L"第 3 步　设 DNS：仪表板「网络设置」里主 DNS 填 46.101.64.175（Insignia 公网 DNS），次 DNS 填 1.1.1.1，做一次连接测试。\n\n"
      L"第 4 步　申请订阅码：在 insignia.live 首页填邮箱，订阅码会发到邮箱。\n\n"
      L"第 5 步　建账号：在仪表板上选国家、取玩家代号、填订阅码。服务免费，信用卡一步按官网说明填测试卡号 4111 1111 1111 1111 和假资料，不要填真卡；账单邮箱要和申请订阅码时一样。最后设一个通行码。\n\n"
-     L"第 6 步　回到这里：关掉 xemu，在上面选 xemu 用的 EEPROM（如 eeprom.bin）和硬盘镜像（如 xbox_hdd.qcow2），位置在 xemu 设置的「系统」页。「主机」一行显示已注册和玩家代号就成了。\n\n"
+     L"第 6 步　回到这里：关掉 xemu，在上面选 xemu 用的 EEPROM（如 eeprom.bin）和硬盘镜像（如 xbox_hdd.qcow2），位置在 xemu 设置的「系统」页，再点「从 xemu 导入」。「本机账号」一行显示已注册和玩家代号就成了。以后在 xemu 里新建了账号，再点一次导入就会补进来，已有的不受影响。\n\n"
      L"建议先备份这两个文件。xemu 里的具体操作以 Insignia 官网和它的 Discord 为准。",
      L"1  Prepare xemu: enable networking (NAT). On the dashboard, Settings → System Info should show 1.00.5960; if not, start a game with Xbox Live and choose Xbox Live to update.\n\n"
      L"2  Register the console: get the Insignia Setup Assistant as Insignia’s connection guide says, run it in xemu and choose Register. If it reports DNS hijacking, run the InsigniaDNS.exe program on a PC and set the console’s primary DNS to that PC’s LAN address; with a proxy’s TUN on, turn TUN off, start InsigniaDNS.exe, then turn TUN back on.\n\n"
      L"3  Set DNS: in the dashboard’s network settings, primary DNS 46.101.64.175 (Insignia’s public DNS), secondary 1.1.1.1; run a connection test.\n\n"
      L"4  Get a subscription code: enter your email on insignia.live; the code is emailed to you.\n\n"
      L"5  Create the account on the dashboard: country, gamertag, the code. The service is free: at the card step use the test number 4111 1111 1111 1111 and made-up details, as the guide says, never a real card; the billing email must be the one you got the code with. Then set a pass code.\n\n"
-     L"6  Back here: close xemu and choose its EEPROM (e.g. eeprom.bin) and hard disk image (e.g. xbox_hdd.qcow2) above; xemu’s System settings show where they are. The Console row then shows registered and your gamertag.\n\n"
+     L"6  Back here: close xemu, choose its EEPROM (e.g. eeprom.bin) and hard disk image (e.g. xbox_hdd.qcow2) above (xemu’s System settings show where they are) and press Import. The Accounts here row then shows registered and your gamertag. Accounts made in xemu later come over with another Import; the ones here stay as they are.\n\n"
      L"Back up both files first. For the details in xemu, Insignia’s site and Discord have the last word."},
     {L"请作者喝杯奶茶",
      L"Buy the author a milk tea"},
@@ -568,6 +568,40 @@ const Pair kText[(int)Str::Count] = {
      L"compared and blended (percentage-closer filtering, done in hardware by that generation of GPUs when the shadow "
      L"map is filtered linearly), instead of a hard, stepped edge. Off: the earlier way, one compare, a hard edge.\n\n"
      L"Little cost (a few more shadow-map reads, only where shadows are drawn). Takes effect the next time the game starts."},
+    {L"本机账号",
+     L"Accounts here"},
+    {L"✓ 已注册 Insignia  ·  账号：",
+     L"✓ Registered with Insignia  ·  Accounts: "},
+    {L"还没有：选好下面 xemu 的文件后点「从 xemu 导入」",
+     L"None yet: choose xemu\u2019s files below, then press Import"},
+    {L"存档目录里的主机文件损坏或不配套：请重新导入",
+     L"The console files in the save folder are damaged or do not match: import again"},
+    {L"存档目录里的账号属于另一台主机：请重新导入",
+     L"The accounts in the save folder are another console\u2019s: import again"},
+    {L"这台主机没有注册过 Insignia：先在 xemu 里注册，再导入",
+     L"This console is not registered with Insignia: register in xemu first, then import"},
+    {L"导入账号时才用到；不选也能用本机账号联网。",
+     L"Only needed to import accounts; the accounts here play online without them."},
+    {L"和本机不是同一台主机：它的账号不能导入",
+     L"Not the same console as the one here: its accounts cannot be imported"},
+    {L"  ·  可导入：",
+     L"  ·  To import: "},
+    {L"  ·  账号都已在本机",
+     L"  ·  All its accounts are here"},
+    {L"从 xemu 导入",
+     L"Import"},
+    {L"导入了：",
+     L"Imported: "},
+    {L"已有：",
+     L"Already here: "},
+    {L"没有空位（最多 8 个账号）：",
+     L"No free slot (8 accounts at most): "},
+    {L"没有要导入的账号",
+     L"Nothing to import"},
+    {L"导入失败：",
+     L"Import failed: "},
+    {L"✓ 已注册 Insignia",
+     L"✓ Registered with Insignia"},
 };
 
 } // namespace

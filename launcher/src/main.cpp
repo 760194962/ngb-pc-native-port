@@ -113,6 +113,9 @@ struct App {
     std::mutex net_lock;
     std::wstring net_result;
     bool net_bad = false, net_busy = false;
+    // the last import from xemu: what came over, was already here or did not fit (or why it failed)
+    std::wstring import_result;
+    bool import_bad = false;
     // the InsigniaDNS address being typed in the DNS card's field (digits and dots), and what was found or wrong
     bool dns_edit = false;
     std::wstring dns_text, dns_note;
@@ -132,7 +135,7 @@ enum {
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
-    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
+    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
     kHitModule = 580, // + 0 Black, 1 Ninja Gaiden 2004
     kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc, kHitExportDlc,
     kHitResign = 590,
@@ -776,35 +779,77 @@ std::string to_utf8(const std::wstring &w)
 // What the game program finds in the chosen files (--online-check: whether the EEPROM verifies, the disk has a
 // registered console and which gamertags, the console's DNS setting, whether xemu runs; nothing secret), asked again
 // only when the files change. One "key = value" a line; a key may repeat (account).
-void online_check()
+// Runs the game program with the xemu files chosen here (black.ini online_eeprom / online_hdd, maybe not saved yet)
+// and one of its online options writing "key = value" lines to cache\<name>; those lines, empty if it did not run
+std::map<std::string, std::vector<std::string>> online_tool(const wchar_t *option, const wchar_t *name, DWORD wait_ms)
 {
+    std::map<std::string, std::vector<std::string>> r;
     std::string ee = black_ini("online_eeprom"), hdd = black_ini("online_hdd");
-    if (ee + "|" + hdd == g.online_for) return;
-    g.online_for = ee + "|" + hdd;
-    g.online.clear();
-    if (ee.empty() || hdd.empty()) return;
     CreateDirectoryW((g.dir + L"\\cache").c_str(), nullptr);
-    std::wstring out = g.dir + L"\\cache\\online_check.txt";
+    std::wstring out = g.dir + L"\\cache\\" + name;
     DeleteFileW(out.c_str());
-    std::wstring cmd = L"\"" + game_exe() + L"\" --background --online-eeprom \"" + from_utf8(ee) + L"\" --online-hdd \"" +
-                       from_utf8(hdd) + L"\" --online-check \"" + out + L"\" \"" + g.game + L"\"";
+    // the save folder the game will be started with (launch_game): the port's own console is there
+    std::wstring cmd = L"\"" + game_exe() + L"\" --background --hdd \"" + ini_get(L"hdd", (g.dir + L"\\savedata").c_str()) + L"\"";
+    if (!ee.empty()) cmd += L" --online-eeprom \"" + from_utf8(ee) + L"\"";
+    if (!hdd.empty()) cmd += L" --online-hdd \"" + from_utf8(hdd) + L"\"";
+    cmd += std::wstring(L" ") + option + L" \"" + out + L"\" \"" + g.game + L"\"";
     STARTUPINFOW si = {sizeof si};
     PROCESS_INFORMATION pi = {};
-    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, g.dir.c_str(), &si, &pi)) return;
-    WaitForSingleObject(pi.hProcess, 10000);
+    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, g.dir.c_str(), &si, &pi)) return r;
+    WaitForSingleObject(pi.hProcess, wait_ms);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     FILE *f = _wfopen(out.c_str(), L"r");
-    if (!f) return;
+    if (!f) return r;
     char line[512];
     while (fgets(line, sizeof line, f)) {
         std::string l = line;
         size_t eq = l.find(" = ");
         if (eq == std::string::npos) continue;
         l.erase(l.find_last_not_of("\r\n") + 1);
-        g.online[l.substr(0, eq)].push_back(l.substr(eq + 3));
+        r[l.substr(0, eq)].push_back(l.substr(eq + 3));
     }
     fclose(f);
+    return r;
+}
+
+// The port's own console in the save folder and what the chosen xemu files hold (--online-check: whether the EEPROM
+// verifies, the disk has a registered console and which gamertags, which of them are not here yet, the DNS setting,
+// whether xemu runs; nothing secret), asked again only when the files change or after an import
+void online_check()
+{
+    std::string key = black_ini("online_eeprom") + "|" + black_ini("online_hdd");
+    if (key == g.online_for) return;
+    g.online_for = key;
+    g.online = online_tool(L"--online-check", L"online_check.txt", 10000);
+}
+
+// "Import from xemu": the xemu console's accounts the save folder does not have yet (the game program's
+// --online-import; the first time the console itself). The result stays on the page until the next import.
+void online_import()
+{
+    auto r = online_tool(L"--online-import", L"online_import.txt", 60000);
+    auto names = [&](const char *k) {
+        std::wstring s;
+        for (const std::string &n : r[k]) s += (s.empty() ? L"" : L", ") + from_utf8(n);
+        return s;
+    };
+    g.import_bad = r.empty() || r.count("error");
+    if (r.empty()) g.import_result = std::wstring(S(Str::OnlineImportFailed)) + S(Str::OnlineCheckFailed);
+    else if (r.count("error")) g.import_result = S(Str::OnlineImportFailed) + names("error");
+    else {
+        std::wstring s;
+        auto part = [&](Str label, const char *k) {
+            if (!r.count(k)) return;
+            s += (s.empty() ? L"" : L"\uFF1B") + std::wstring(S(label)) + names(k);
+        };
+        part(Str::OnlineImported, "imported");
+        part(Str::OnlineExists, "exists");
+        part(Str::OnlineFull, "full");
+        g.import_result = s.empty() ? S(Str::OnlineNothing) : s;
+        g.import_bad = r.count("full") && !r.count("imported");
+    }
+    g.online_for.clear(); // look again: the accounts here changed
 }
 
 std::string online_value(const char *key)
@@ -2199,7 +2244,7 @@ struct Painter {
     {
         online_check();
         D2D1_RECT_F c;
-        float y = settings_page(Str::NavOnline, Str::OnlineCard, 4, &c);
+        float y = settings_page(Str::NavOnline, Str::OnlineCard, 5, &c);
         const float lx = c.left + 26, cx = c.left + 210, right = c.right - 26, bw = 120;
         auto label = [&](Str s) { text(S(s), {lx, y, cx - 10, y + 30}, 13.5f, kAsh); };
         auto path_row = [&](Str s, const char *key, int hit) {
@@ -2214,31 +2259,60 @@ struct Painter {
         label(Str::OnlineSwitch);
         segmented(kHitOnline, cx, y, {S(Str::On), S(Str::Off)}, black_ini("online") == "1" ? 0 : 1, 72);
         y += 40;
+        auto names = [&](const char *k) {
+            std::wstring s;
+            auto it = g.online.find(k);
+            if (it != g.online.end())
+                for (size_t i = 0; i < it->second.size(); i++) s += (i ? L", " : L"") + from_utf8(it->second[i]);
+            return s;
+        };
+        // the port's own console, what the game uses: registered and its gamertags, or what to do
+        label(Str::OnlineLocal);
+        {
+            std::string local = online_value("local");
+            std::wstring st;
+            bool good = false;
+            if (g.online.empty()) st = S(Str::OnlineCheckFailed);
+            else if (local == "none" || local.empty()) st = S(Str::OnlineLocalNone);
+            else if (local == "other") st = S(Str::OnlineLocalOther);
+            else if (local != "ok") st = S(Str::OnlineLocalBad);
+            else if (online_value("local_registered") != "1") st = S(Str::OnlineLocalNotReg);
+            else st = S(Str::OnlineLocalOk) + names("local_account"), good = true;
+            if (good && online_value("xemu") == "1") st = S(Str::OnlineXemu), good = false;
+            text(st, {cx, y, right, y + 30}, 13, good ? kGold : local == "none" ? kAsh : kBlood, 1.0f, DWRITE_FONT_WEIGHT_NORMAL,
+                 nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+        }
+        y += 40;
         path_row(Str::OnlineEeprom, "online_eeprom", kHitPickEeprom);
         path_row(Str::OnlineHdd, "online_hdd", kHitPickHdd);
         label(Str::OnlineStatus);
-        // the check's result: what is wrong first, else valid and the gamertags
+        // the xemu console: what is wrong first, else valid, its gamertags and which are not here yet; the import's
+        // result in its place once there is one
         std::wstring st;
-        bool good = false;
+        bool good = false, can_import = false;
         std::string ee = online_value("eeprom"), hdd = online_value("hdd");
-        if (black_ini("online_eeprom").empty() || black_ini("online_hdd").empty()) st = S(Str::OnlineFilesNone);
+        bool none = black_ini("online_eeprom").empty() || black_ini("online_hdd").empty();
+        if (none) st = S(online_value("local") == "ok" ? Str::OnlineXemuOptional : Str::OnlineFilesNone);
         else if (g.online.empty()) st = S(Str::OnlineCheckFailed);
         else if (ee == "unreadable") st = S(Str::OnlineEepromUnreadable);
         else if (ee != "ok") st = S(Str::OnlineEepromBad);
         else if (hdd != "ok") st = S(Str::OnlineHddBad) + from_utf8(hdd);
         else if (online_value("registered") != "1") st = S(Str::OnlineNotRegistered);
+        else if (online_value("same_console") == "0") st = S(Str::OnlineOtherConsole);
         else {
-            st = S(Str::OnlineOk);
-            auto it = g.online.find("account");
-            if (it != g.online.end()) {
-                st += S(Str::OnlineAccounts);
-                for (size_t i = 0; i < it->second.size(); i++) st += (i ? L", " : L"") + from_utf8(it->second[i]);
-            }
+            st = S(Str::OnlineXemuOk);
+            if (g.online.count("importable")) st += S(Str::OnlineImportable) + names("importable"), can_import = true;
+            else if (g.online.count("account")) st += S(Str::OnlineAllHere);
+            can_import = can_import || online_value("local") != "ok"; // the console itself comes over the first time
             good = true;
         }
-        if (good && online_value("xemu") == "1") st = S(Str::OnlineXemu), good = false;
-        text(st, {cx, y, right, y + 30}, 13, good ? kGold : black_ini("online_eeprom").empty() ? kAsh : kBlood, 1.0f,
-             DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+        if (good && online_value("xemu") == "1") st = S(Str::OnlineXemu), good = false, can_import = false;
+        bool show_import = !g.import_result.empty();
+        if (show_import) st = g.import_result;
+        text(st, {cx, y, right - bw - 12, y + 30}, 13,
+             show_import ? (g.import_bad ? kBlood : kGold) : good ? kGold : none ? kAsh : kBlood, 1.0f, DWRITE_FONT_WEIGHT_NORMAL,
+             nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+        button(kHitImportXemu, {right - bw, y, right, y + 30}, S(Str::OnlineImport), can_import, can_import);
 
         // DNS
         bool pc = dns_by_pc(); // a row more: the InsigniaDNS address
@@ -2821,9 +2895,16 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id == kHitPickEeprom || id == kHitPickHdd) {
             COMDLG_FILTERSPEC spec = {S(Str::OnlineFilter), id == kHitPickEeprom ? L"*.bin;*.rom" : L"*.qcow2;*.img;*.bin"};
             std::wstring f;
-            if (pick(false, &f, &spec)) black_ini_set(id == kHitPickEeprom ? "online_eeprom" : "online_hdd", to_utf8(f));
+            if (pick(false, &f, &spec)) {
+                black_ini_set(id == kHitPickEeprom ? "online_eeprom" : "online_hdd", to_utf8(f));
+                g.import_result.clear(); // it was about the files before
+            }
         }
         else if (id == kHitNetCheck) net_check();
+        else if (id == kHitImportXemu) {
+            SetCursor(LoadCursorW(nullptr, IDC_WAIT));
+            online_import();
+        }
         else if (id == kHitInsignia) ShellExecuteW(h, L"open", L"https://insignia.live/", nullptr, nullptr, SW_SHOWNORMAL);
         else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso || id == kHitSysLang || id == kHitUninstall) {
             g.list_open = id;
@@ -2986,7 +3067,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
     }
     check_game();
     for (int i = 1; i < argc; i++)
-        if (!wcscmp(argv[i], L"--snap") && i + 1 < argc)
+        if (!wcscmp(argv[i], L"--import-now")) online_import(); // with --snap, before it on the line: the Import button pressed
+        else if (!wcscmp(argv[i], L"--snap") && i + 1 < argc)
             return snap(argv[i + 1], i + 2 < argc && argv[i + 2][0] != L'-' ? _wtoi(argv[i + 2]) : 0);
 
     WNDCLASSEXW wc = {sizeof wc};
