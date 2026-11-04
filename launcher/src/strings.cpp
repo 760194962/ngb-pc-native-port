@@ -417,8 +417,8 @@ const Pair kText[(int)Str::Count] = {
      L"DNS answered without an address for AS.XBOXLIVE.COM"},
     {L"登录",
      L"Signing in"},
-    {L"进游戏后：主菜单「排行榜」→ 选自己的玩家代号，登录和榜单都在游戏里。还没有账号：按「注册步骤」在 xemu 里注册一次。",
-     L"In the game: main menu → Ranking → your gamertag; signing in happens there. No account yet: register once in xemu (\u201CHow to register\u201D)."},
+    {L"进游戏后：主菜单「排行榜」→ 选自己的玩家代号，登录和榜单都在游戏里。还没有账号：看「注册步骤」，在 xemu 里或直接在移植版里注册。",
+     L"In the game: main menu → Ranking → your gamertag; signing in happens there. No account yet: see How to register (in xemu, or right here in the port)."},
     {L"Insignia 官网",
      L"Insignia website"},
     {L"联网关闭，DNS 查询方式改回「Insignia 公网 DNS」。选好的 EEPROM 与硬盘镜像保留。",
@@ -462,22 +462,36 @@ const Pair kText[(int)Str::Count] = {
      L" (from the console’s setting in xemu)"},
     {L"注册步骤",
      L"How to register"},
-    {L"在 xemu 里注册 Insignia（只需一次）",
-     L"Registering with Insignia in xemu (once)"},
-    {L"第 1 步　准备 xemu：网络设为启用（NAT）。开机后在仪表板「设置 → 系统信息」看版本，应为 1.00.5960；不是的话进一款支持 Xbox Live 的游戏选「Xbox Live」，会自动升级。\n\n"
-     L"第 2 步　注册主机：按 Insignia 官网的连接指南取得 Insignia Setup Assistant，在 xemu 里运行，选 Register。提示 DNS 被劫持时，在电脑上运行 InsigniaDNS.exe 程序，主机的主 DNS 填这台电脑的局域网地址；开着代理 TUN 的话，先关 TUN，启动 InsigniaDNS.exe，再开 TUN。\n\n"
-     L"第 3 步　设 DNS：仪表板「网络设置」里主 DNS 填 46.101.64.175（Insignia 公网 DNS），次 DNS 填 1.1.1.1，做一次连接测试。\n\n"
-     L"第 4 步　申请订阅码：在 insignia.live 首页填邮箱，订阅码会发到邮箱。\n\n"
-     L"第 5 步　建账号：在仪表板上选国家、取玩家代号、填订阅码。服务免费，信用卡一步按官网说明填测试卡号 4111 1111 1111 1111 和假资料，不要填真卡；账单邮箱要和申请订阅码时一样。最后设一个通行码。\n\n"
-     L"第 6 步　回到这里：关掉 xemu，在上面选 xemu 用的 EEPROM（如 eeprom.bin）和硬盘镜像（如 xbox_hdd.qcow2），位置在 xemu 设置的「系统」页，再点「从 xemu 导入」。「本机账号」一行显示已注册和玩家代号就成了。以后在 xemu 里新建了账号，再点一次导入就会补进来，已有的不受影响。\n\n"
-     L"建议先备份这两个文件。xemu 里的具体操作以 Insignia 官网和它的 Discord 为准。",
-     L"1  Prepare xemu: enable networking (NAT). On the dashboard, Settings → System Info should show 1.00.5960; if not, start a game with Xbox Live and choose Xbox Live to update.\n\n"
-     L"2  Register the console: get the Insignia Setup Assistant as Insignia’s connection guide says, run it in xemu and choose Register. If it reports DNS hijacking, run the InsigniaDNS.exe program on a PC and set the console’s primary DNS to that PC’s LAN address; with a proxy’s TUN on, turn TUN off, start InsigniaDNS.exe, then turn TUN back on.\n\n"
-     L"3  Set DNS: in the dashboard’s network settings, primary DNS 46.101.64.175 (Insignia’s public DNS), secondary 1.1.1.1; run a connection test.\n\n"
-     L"4  Get a subscription code: enter your email on insignia.live; the code is emailed to you.\n\n"
-     L"5  Create the account on the dashboard: country, gamertag, the code. The service is free: at the card step use the test number 4111 1111 1111 1111 and made-up details, as the guide says, never a real card; the billing email must be the one you got the code with. Then set a pass code.\n\n"
-     L"6  Back here: close xemu, choose its EEPROM (e.g. eeprom.bin) and hard disk image (e.g. xbox_hdd.qcow2) above (xemu’s System settings show where they are) and press Import. The Accounts here row then shows registered and your gamertag. Accounts made in xemu later come over with another Import; the ones here stay as they are.\n\n"
-     L"Back up both files first. For the details in xemu, Insignia’s site and Discord have the last word."},
+    {L"注册 Insignia（只需一次）",
+     L"Registering with Insignia (once)"},
+    {L"两种方式，选一种。\n\n"
+     L"■ 方式一：已经在 xemu 里注册过 Insignia\n"
+     L"1. 关掉 xemu。\n"
+     L"2. 在「xemu EEPROM」「xemu 硬盘镜像」两行选 xemu 用的文件（如 eeprom.bin、xbox_hdd.qcow2，位置在 xemu 设置的「系统」页）。建议先备份这两个文件。\n"
+     L"3. 点「从 xemu 导入」。「本机账号」一行显示已注册和你的玩家代号就完成了。以后在 xemu 里新建了账号，再导入一次就会补进来，本机已有的不受影响。\n\n"
+     L"■ 方式二：不用 xemu，直接在移植版里注册\n"
+     L"要准备两样东西：Insignia 的注册程序 Insignia-Setup.iso（Insignia 官网免费下载）；一份装有 Xbox 仪表盘的 Xbox 硬盘镜像（如 xemu 用的 xbox_hdd.qcow2，不必注册过），移植版从里面取出仪表盘程序，它是微软的文件，移植版不能附带。\n"
+     L"1. 点「新建主机」：生成一台新的 Xbox 主机，保存在存档目录里。\n"
+     L"2. 点「注册主机」，第一次会让你选 Insignia-Setup.iso。注册程序打开后约 18 秒才能操作；选「Register Xbox」，看到 “Your Xbox was successfully registered” 后选「Quit Setup Assistant」退出。\n"
+     L"3. 点「Xbox Live 仪表盘」，第一次会让你选上面说的硬盘镜像。进入后选「NETWORK SETUP」做一次连接测试，主机账户在这一步建立。\n"
+     L"4. 在 insignia.live 首页填邮箱申请订阅码，订阅码会发到邮箱。\n"
+     L"5. 在仪表盘选「NEW ACCOUNT」：选国家、取玩家代号、填订阅码。服务免费；到信用卡一步按官网说明填测试卡号 4111 1111 1111 1111 和假资料，不要填真卡；账单邮箱要和申请订阅码时一样。最后设一个通行码。\n"
+     L"6. 退出仪表盘（BACK 退到底，或直接关窗口）。「本机账号」一行显示你的玩家代号就完成了。\n\n"
+     L"两种方式都不用改仪表盘里的 DNS：移植版会把查询转给下面「DNS」卡片选的服务器。具体操作以 Insignia 官网和它的 Discord 为准。",
+     L"Two ways; pick one.\n\n"
+     L"\u25A0 1. Registered with Insignia in xemu already\n"
+     L"1. Close xemu.\n"
+     L"2. Choose xemu\u2019s files in the xemu EEPROM and xemu hard disk rows (e.g. eeprom.bin and xbox_hdd.qcow2; xemu\u2019s System settings show where they are). Back them up first.\n"
+     L"3. Press Import. The Accounts here row then shows registered and your gamertag. Accounts you make in xemu later come over with another Import; the ones here stay as they are.\n\n"
+     L"\u25A0 2. Without xemu, in the port\n"
+     L"You need two things: Insignia\u2019s Setup Assistant, Insignia-Setup.iso (free on Insignia\u2019s website), and an Xbox hard disk image with the Xbox dashboard on it (e.g. xemu\u2019s xbox_hdd.qcow2, registered or not): the port takes the dashboard program from it, as it is Microsoft\u2019s and cannot come with the port.\n"
+     L"1. Press New console: the port makes a new Xbox console in the save folder.\n"
+     L"2. Press Register; the first time it asks for Insignia-Setup.iso. The Setup Assistant takes about 18 seconds before it answers the pad; choose Register Xbox, and after \u201CYour Xbox was successfully registered\u201D choose Quit Setup Assistant.\n"
+     L"3. Press Xbox Live; the first time it asks for the hard disk image above. In the dashboard choose NETWORK SETUP and run the connection test: it makes the console\u2019s machine account.\n"
+     L"4. Enter your email on insignia.live to get a subscription code; it is emailed to you.\n"
+     L"5. In the dashboard choose NEW ACCOUNT: country, gamertag, the code. The service is free: at the card step use the test card 4111 1111 1111 1111 and made-up details as the site says, never a real card; the billing email must be the one you got the code with. Last, set a pass code.\n"
+     L"6. Leave the dashboard (BACK all the way, or close its window). The Accounts here row then shows your gamertag.\n\n"
+     L"Neither way needs the dashboard\u2019s DNS setting changed: the port sends every lookup to the server chosen in the DNS card below. For the details, Insignia\u2019s site and Discord have the last word."},
     {L"请作者喝杯奶茶",
      L"Buy the author a milk tea"},
     {L"《黑之章》的中文汉化、飓风补丁，还有这个 PC 原生移植版（黑之章和《忍者龙剑传》2004），都是我做的。移植版从拆解原版程序做起，画面、声音、存档、联网，到最近修好的手柄震动，一点点接到了 PC 上。它们都免费，以后也一直免费，赞不赞助都不影响你玩到的任何内容。\n\n"
@@ -578,8 +592,8 @@ const Pair kText[(int)Str::Count] = {
      L"The console files in the save folder are damaged or do not match: import again"},
     {L"存档目录里的账号属于另一台主机：请重新导入",
      L"The accounts in the save folder are another console\u2019s: import again"},
-    {L"有主机，还没注册 Insignia：点「注册主机」",
-     L"A console, not registered with Insignia yet: press Register"},
+    {L"还没有主机账户（见「注册步骤」）",
+     L"No machine account yet (see How to register)"},
     {L"导入账号时才用到；不选也能用本机账号联网。",
      L"Only needed to import accounts; the accounts here play online without them."},
     {L"和本机不是同一台主机：它的账号不能导入",
@@ -620,6 +634,14 @@ const Pair kText[(int)Str::Count] = {
      L"Insignia Setup Assistant (Insignia-Setup.iso or its default.xbe)"},
     {L"这不是 Insignia 注册程序：请从 Insignia 官网下载 Insignia-Setup.iso",
      L"That is not the Insignia Setup Assistant: get Insignia-Setup.iso from Insignia\u2019s website"},
+    {L"Xbox Live \u4eea\u8868\u76d8",
+     L"Xbox Live"},
+    {L"\u4eea\u8868\u76d8\u6b63\u5728\u8fd0\u884c\uff1a\u505a\u5b8c\u540e BACK \u9000\u51fa\uff0c\u6216\u5173\u6389\u5b83\u7684\u7a97\u53e3",
+     L"The dashboard is running: when done, BACK out of it or close its window"},
+    {L"Xbox \u786c\u76d8\u955c\u50cf\uff08\u542b\u4eea\u8868\u76d8\uff0c\u5982 xbox_hdd.qcow2\uff09",
+     L"Xbox hard disk image with the dashboard (e.g. xbox_hdd.qcow2)"},
+    {L"\u8fd9\u4e2a\u955c\u50cf\u91cc\u6ca1\u6709\u79fb\u690d\u7248\u80fd\u7528\u7684\u4eea\u8868\u76d8\uff08\u8981 C:\\xodash \u91cc\u7684 5971 \u7248 xonlinedash.xbe\uff09",
+     L"No dashboard the port can run in that image (it needs C:\\xodash with xonlinedash.xbe 5971)"},
 };
 
 } // namespace

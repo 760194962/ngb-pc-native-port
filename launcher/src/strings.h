@@ -386,6 +386,10 @@ enum class Str {
     RegisterRunning,
     InsigniaFilter,
     NotSetupAssistant,
+    OpenDashboard, // the Xbox Live dashboard from the launcher (network test, new account, account management)
+    DashRunning,
+    DashFilter,
+    DashMissing,
     Count
 };
 

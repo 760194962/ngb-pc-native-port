@@ -7,6 +7,7 @@
 // online_accounts.bin. Nothing of these files is logged.
 #include "net/online.h"
 
+#include "build_profile.h"
 #include "common.h"
 #include "kernel/kexports.h"
 #include "net/dashfonts.h"
@@ -471,6 +472,21 @@ bool online_new_console(const std::wstring &out_path)
     return finish(true);
 }
 
+bool online_dash_from(const std::wstring &image, const std::wstring &out_path)
+{
+    // The Xbox Live dashboard's files (C:\xodash, C:\fonts, C:\xboxdash.xbe) from any Xbox hard disk image the player has
+    // (only read; it need not be a registered console's), into the hard disk folder: for a console of the port's own
+    std::wstring p2 = host_full_path(g_cfg.hdd_dir) + L"\\Partition2";
+    bool ok = dash_fonts_ensure(image, p2) && dash_dir_ensure(image, p2, "xodash", L"xonlinedash.xbe") &&
+              dash_file_ensure(image, p2, "xboxdash.xbe");
+    std::string r = ok ? "dashboard = ok\n" : "dashboard = missing\n";
+    if (FILE *f = _wfopen(out_path.c_str(), L"wb")) {
+        fputs(r.c_str(), f);
+        fclose(f);
+    }
+    return ok;
+}
+
 bool online_whole_eeprom(uint8_t out[256])
 {
     if (!g_enabled) return false;
@@ -604,9 +620,10 @@ bool online_init()
     }
     int accounts = 0;
     for (int i = 0; i < SLOTS; i++) accounts += slot_used(g_config, i);
-    // Not registered yet: only the Insignia Setup Assistant (a program without a build profile) goes online, to register
-    // it (the machine account it gets is written to config sector 9: online_partition0_write)
-    if (!sector_signed(g_config, 9) && g_cfg.profile) {
+    // No machine account yet: only the Insignia Setup Assistant (a program without a build profile: it registers the
+    // console with Insignia) and the Xbox Live dashboard (its network test makes the machine account, written to config
+    // sector 9: online_partition0_write) go online
+    if (!sector_signed(g_config, 9) && g_cfg.profile && g_cfg.profile != &kProfileXod) {
         SecureZeroMemory(dec, sizeof dec);
         return fail("no machine account in config sector 9 (console not registered?)",
                     L"本机主机还没注册 Insignia（启动器「联网」页「注册主机」）");

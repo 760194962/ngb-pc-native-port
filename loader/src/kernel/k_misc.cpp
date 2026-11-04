@@ -404,7 +404,9 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
     logf("[k] HalReturnToFirmware(%u): the game asked to leave (0 halt, 1 reboot, 2 quick reboot, 3 fatal error), from %s", Routine,
          xd3d::callers_of((const uint32_t *)_AddressOfReturnAddress()).c_str());
     if (dashboard_back("it asked to leave")) Sleep(INFINITE); // the port's Xbox Live dashboard: back to the game
-    if (!g_cfg.profile) { // a program without a build profile (the Insignia Setup Assistant's Quit): it ends, as a tool does
+    // a program without a build profile (the Insignia Setup Assistant's Quit), or the Xbox Live dashboard opened on its own
+    // (the launcher's; from a game it went back above): it ends, as a tool does
+    if (!g_cfg.profile || g_cfg.profile == &kProfileXod) {
         request_exit(0, "the program quit");
         Sleep(INFINITE);
     }

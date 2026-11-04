@@ -118,7 +118,11 @@ struct App {
     bool import_bad = false;
     // the port's own console: why making one failed; the Insignia Setup Assistant while it runs (it registers it)
     std::wstring local_result;
-    HANDLE setup_proc = nullptr;
+    HANDLE setup_proc = nullptr; // the Setup Assistant or the dashboard (setup_is_dash) while it runs
+    bool setup_is_dash = false;
+    // the help panel's text scrolls when it is longer than the panel (which help it is for: a new one starts at the top)
+    float help_scroll = 0, help_target = 0, help_max = 0;
+    int help_for = 0;
     // the page scrolls when it is taller than the window: where it is, where the wheel sends it (it slides there), and
     // how far it can go (the page's height less the window's, found when it is drawn)
     float page_scroll = 0, scroll_target = 0, page_max = 0;
@@ -141,7 +145,7 @@ enum {
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
-    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitNewConsole, kHitRegister, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
+    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitNewConsole, kHitRegister, kHitDashboard, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
     kHitModule = 580, // + 0 Black, 1 Ninja Gaiden 2004
     kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc, kHitExportDlc,
     kHitResign = 590,
@@ -800,7 +804,7 @@ std::map<std::string, std::vector<std::string>> online_tool(const wchar_t *optio
     std::wstring cmd = L"\"" + game_exe() + L"\" --background --hdd \"" + ini_get(L"hdd", (g.dir + L"\\savedata").c_str()) + L"\"";
     if (!ee.empty()) cmd += L" --online-eeprom \"" + from_utf8(ee) + L"\"";
     if (!hdd.empty()) cmd += L" --online-hdd \"" + from_utf8(hdd) + L"\"";
-    cmd += std::wstring(L" ") + option + L" \"" + out + L"\" \"" + g.game + L"\"";
+    cmd += std::wstring(L" ") + option + L" \"" + out + L"\" \"" + g.game + L"\""; // option may carry an argument before out
     STARTUPINFOW si = {sizeof si};
     PROCESS_INFORMATION pi = {};
     if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, g.dir.c_str(), &si, &pi)) return r;
@@ -927,6 +931,56 @@ void register_console()
     if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, g.dir.c_str(), &si, &pi)) return;
     CloseHandle(pi.hThread);
     g.setup_proc = pi.hProcess;
+    g.setup_is_dash = false;
+    SetTimer(g.hwnd, kTimerSetup, 500, nullptr);
+}
+
+// "Xbox Live": the Xbox Live dashboard on the port's own console, online, at its XBOX LIVE menu (NETWORK SETUP's
+// connection test makes the machine account; NEW ACCOUNT, ACCOUNT MANAGEMENT). Its files come once from an Xbox hard
+// disk image: xemu's chosen here, else one the player picks (the game program's --online-dash-from checks the build).
+void open_dashboard()
+{
+    if (g.setup_proc || game_running()) return;
+    g.local_result.clear();
+    std::wstring hdd = ini_get(L"hdd", (g.dir + L"\\savedata").c_str());
+    std::wstring xbe = hdd + L"\\Partition2\\xodash\\xonlinedash.xbe";
+    if (!exists(xbe)) {
+        std::wstring image = from_utf8(black_ini("online_hdd"));
+        if (image.empty() || !exists(image)) {
+            COMDLG_FILTERSPEC spec = {S(Str::DashFilter), L"*.qcow2;*.img;*.bin;*.raw"};
+            if (!pick(false, &image, &spec)) return;
+        }
+        auto r = online_tool((L"--online-dash-from \"" + image + L"\"").c_str(), L"online_dash.txt", 60000);
+        if (!r.count("dashboard") || r["dashboard"][0] != "ok" || !exists(xbe)) {
+            g.local_result = S(Str::DashMissing);
+            return;
+        }
+    }
+    // the launch data xboxdash.xbe gives it for its XBOX LIVE menu (loader kernel/k_misc.cpp dashboard_open)
+    std::vector<uint8_t> page(4096, 0);
+    uint32_t type = 2, title = 0xFFFE0000, menu = 0xC;
+    memcpy(&page[0], &type, 4);
+    memcpy(&page[4], &title, 4);
+    strcpy((char *)&page[8], "\\Device\\Harddisk0\\Partition2\\XODash;xonlinedash.xbe");
+    memcpy(&page[0x400], &menu, 4);
+    CreateDirectoryW((g.dir + L"\\cache").c_str(), nullptr);
+    std::wstring page_file = g.dir + L"\\cache\\dashboard.launchdata";
+    if (FILE *f = _wfopen(page_file.c_str(), L"wb")) {
+        fwrite(page.data(), 1, page.size(), f);
+        fclose(f);
+    } else return;
+    std::wstring cmd = L"\"" + game_exe() + L"\" --hdd \"" + hdd + L"\" --online";
+    std::string mode = black_ini("online_dns_mode"), addr = black_ini("online_insigniadns");
+    if (!mode.empty()) cmd += L" --online-dns-mode " + from_utf8(mode);
+    if (!addr.empty()) cmd += L" --online-insigniadns " + from_utf8(addr);
+    CreateDirectoryW((g.dir + L"\\logs").c_str(), nullptr);
+    cmd += L" --log \"" + g.dir + L"\\logs\\dashboard.log\" --launch-data \"" + page_file + L"\" \"" + xbe + L"\"";
+    STARTUPINFOW si = {sizeof si};
+    PROCESS_INFORMATION pi = {};
+    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, g.dir.c_str(), &si, &pi)) return;
+    CloseHandle(pi.hThread);
+    g.setup_proc = pi.hProcess;
+    g.setup_is_dash = true;
     SetTimer(g.hwnd, kTimerSetup, 500, nullptr);
 }
 
@@ -1598,10 +1652,31 @@ struct Painter {
                                              DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14,
                                              g_lang == Lang::Zh ? L"zh-cn" : L"en-us", &fmt))) {
             fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 23, 18);
+            // laid out to its full height; what does not fit scrolls with the wheel (a thin bar at the panel's edge)
+            if (g.help != g.help_for) g.help_for = g.help, g.help_scroll = g.help_target = 0;
+            const wchar_t *s = S(body_text);
+            IDWriteTextLayout *layout = nullptr;
             ID2D1SolidColorBrush *b = nullptr;
             rt->CreateSolidColorBrush(rgb(kBone, 0.92f), &b);
-            const wchar_t *s = S(body_text);
-            if (b) rt->DrawText(s, (UINT32)wcslen(s), fmt, body, b), b->Release();
+            if (b && SUCCEEDED(g.dw->CreateTextLayout(s, (UINT32)wcslen(s), fmt, body.right - body.left, 100000.0f, &layout))) {
+                DWRITE_TEXT_METRICS m = {};
+                layout->GetMetrics(&m);
+                float view = body.bottom - body.top;
+                g.help_max = std::max(0.0f, m.height - view);
+                g.help_target = std::min(g.help_target, g.help_max);
+                g.help_scroll = std::min(g.help_scroll, g.help_max);
+                rt->PushAxisAlignedClip(body, D2D1_ANTIALIAS_MODE_ALIASED);
+                rt->DrawTextLayout({body.left, body.top - g.help_scroll}, layout, b);
+                rt->PopAxisAlignedClip();
+                if (g.help_max > 0) {
+                    float track = view, thumb = std::max(40.0f, track * view / m.height);
+                    float ty = body.top + (track - thumb) * g.help_scroll / g.help_max;
+                    fill({p.right - 16, body.top, p.right - 11, body.bottom}, kInk3, 0.5f, 2);
+                    fill({p.right - 16, ty, p.right - 11, ty + thumb}, kBone, 0.55f, 2);
+                }
+                layout->Release();
+            }
+            if (b) b->Release();
             fmt->Release();
         }
         button(kHitHelpClose, {p.right - 34 - 140, p.bottom - 56, p.right - 34, p.bottom - 20}, S(Str::GotIt), true);
@@ -2366,18 +2441,22 @@ struct Painter {
             else st = S(Str::OnlineLocalOk) + names("local_account"), good = true;
             bool xemu_runs = online_value("xemu") == "1";
             if (good && xemu_runs) st = S(Str::OnlineXemu), good = false;
-            // its button: New console when there is none, Register while it is not registered
-            int hit = !g.online.empty() && (local == "none" || local.empty()) ? kHitNewConsole
-                    : local == "ok" && online_value("local_registered") != "1" ? kHitRegister : 0;
+            // its buttons: New console when there is none; with one, Register while it has no machine account (the
+            // registration steps: the Setup Assistant, then the dashboard's network test) and the Xbox Live dashboard
+            bool none = !g.online.empty() && (local == "none" || local.empty()), ok = local == "ok";
+            bool unreg = ok && online_value("local_registered") != "1";
+            const float dw = 140; // the dashboard's button
+            float text_right = none ? right - bw - 12 : ok ? right - dw - 12 - (unreg ? bw + 10 : 0) : right;
             bool busy = g.setup_proc != nullptr;
-            if (busy) st = S(Str::RegisterRunning), good = true;
+            if (busy) st = S(g.setup_is_dash ? Str::DashRunning : Str::RegisterRunning), good = true;
             if (!g.local_result.empty()) st = g.local_result, good = false;
-            text(st, {cx, y, hit ? right - bw - 12 : right, y + 30}, 13, good ? kGold : !g.local_result.empty() ? kBlood : local == "none" ? kAsh : hit == kHitRegister ? kBone : kBlood,
+            text(st, {cx, y, text_right, y + 30}, 13, good ? kGold : !g.local_result.empty() ? kBlood : none ? kAsh : unreg ? kBone : kBlood,
                  1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
-            if (hit) {
-                bool can = !busy && !xemu_runs && !game_running();
-                button(hit, {right - bw, y, right, y + 30}, S(hit == kHitNewConsole ? Str::NewConsole : Str::RegisterConsole),
-                       hit == kHitRegister && can, can);
+            bool can = !busy && !xemu_runs && !game_running();
+            if (none) button(kHitNewConsole, {right - bw, y, right, y + 30}, S(Str::NewConsole), false, can);
+            if (ok) {
+                if (unreg) button(kHitRegister, {right - dw - 10 - bw, y, right - dw - 10, y + 30}, S(Str::RegisterConsole), can, can);
+                button(kHitDashboard, {right - dw, y, right, y + 30}, S(Str::OpenDashboard), false, can);
             }
         }
         y += 40;
@@ -2769,6 +2848,12 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             InvalidateRect(h, nullptr, FALSE);
             return 0;
         }
+        if (g.help && g.help_max > 0) { // the help panel's text: the same, inside it
+            g.help_target -= GET_WHEEL_DELTA_WPARAM(wp) * 80.0f / WHEEL_DELTA;
+            g.help_target = std::min(std::max(g.help_target, 0.0f), g.help_max);
+            SetTimer(h, kTimerScroll, 15, nullptr);
+            return 0;
+        }
         if (!g.list_open && !g.help && !g.ask && g.page_max > 0) { // the page: 80 pixels a notch, sliding there
             g.scroll_target -= GET_WHEEL_DELTA_WPARAM(wp) * 80.0f / WHEEL_DELTA;
             g.scroll_target = std::min(std::max(g.scroll_target, 0.0f), g.page_max);
@@ -3036,6 +3121,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id == kHitNetCheck) net_check();
         else if (id == kHitNewConsole) g.ask = kAskNewConsole;
         else if (id == kHitRegister) register_console();
+        else if (id == kHitDashboard) open_dashboard();
         else if (id == kHitImportXemu) {
             SetCursor(LoadCursorW(nullptr, IDC_WAIT));
             online_import();
@@ -3051,9 +3137,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_TIMER:
         if (wp == kTimerInstall && !installing()) install_finished();
         if (wp == kTimerScroll) { // a third of the way each tick: quick at first, then settling
-            float d = g.scroll_target - g.page_scroll;
+            float d = g.scroll_target - g.page_scroll, e = g.help_target - g.help_scroll;
             g.page_scroll = std::fabs(d) < 0.5f ? g.scroll_target : g.page_scroll + d * 0.33f;
-            if (g.page_scroll == g.scroll_target) KillTimer(h, kTimerScroll);
+            g.help_scroll = std::fabs(e) < 0.5f ? g.help_target : g.help_scroll + e * 0.33f;
+            if (g.page_scroll == g.scroll_target && g.help_scroll == g.help_target) KillTimer(h, kTimerScroll);
         }
         if (wp == kTimerSetup && g.setup_proc && WaitForSingleObject(g.setup_proc, 0) == WAIT_OBJECT_0) {
             CloseHandle(g.setup_proc); // the Setup Assistant ended: what it registered shows now
@@ -3206,6 +3293,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
         if (!wcscmp(argv[i], L"--module") && i + 1 < argc) switch_module(!wcscmp(argv[i + 1], L"ng04") ? 1 : 0); // with --snap
         if (!wcscmp(argv[i], L"--lang") && i + 1 < argc) g_lang = !wcscmp(argv[i + 1], L"en") ? Lang::En : Lang::Zh;
         if (!wcscmp(argv[i], L"--scroll") && i + 1 < argc) g.page_scroll = g.scroll_target = (float)_wtof(argv[i + 1]); // with --snap: the page scrolled down
+        if (!wcscmp(argv[i], L"--help-scroll") && i + 1 < argc) g.help_for = g.help, g.help_scroll = g.help_target = (float)_wtof(argv[i + 1]); // with --snap, after --show-help
         if (!wcscmp(argv[i], L"--mdl2")) g_icon_font = L"Segoe MDL2 Assets";
         if (!wcscmp(argv[i], L"--monitor") && i + 1 < argc) { // with --snap: as if the monitor were WxH (the shape list)
             int w = 0, h = 0;

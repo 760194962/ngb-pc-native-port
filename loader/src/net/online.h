@@ -21,6 +21,9 @@ bool online_import(const std::wstring &out_path);
 bool online_new_console(const std::wstring &out_path);
 // The console's whole EEPROM (256 bytes) when online play is on, for ExQueryNonVolatileSetting(0xFFFF)
 bool online_whole_eeprom(uint8_t out[256]);
+// --online-dash-from IMAGE: the Xbox Live dashboard's files copied from that Xbox hard disk image into the hard disk
+// folder when not there yet ("dashboard = ok" / "missing" to out_path)
+bool online_dash_from(const std::wstring &image, const std::wstring &out_path);
 
 // The console's factory EEPROM values for ExQueryNonVolatileSetting (0x100 serial, 0x101 MAC, 0x102 online key,
 // 0x103 AV region, 0x104 game region): false = not online / not one of these

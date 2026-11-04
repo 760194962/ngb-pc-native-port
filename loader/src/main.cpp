@@ -233,6 +233,7 @@ bool parse_args()
         else if (a == L"--online-check") { if (!next(g_cfg.online_check)) return false; }
         else if (a == L"--online-import") { if (!next(g_cfg.online_import)) return false; }
         else if (a == L"--online-new-console") { if (!next(g_cfg.online_new_console)) return false; }
+        else if (a == L"--online-dash-from") { if (!next(g_cfg.online_dash_from) || !next(g_cfg.online_dash_out)) return false; }
         else if (a == L"--online-dns-mode") { // insignia / insigniadns / console (black.ini online_dns_mode)
             std::wstring v;
             if (!next(v)) return false;
@@ -630,6 +631,7 @@ int run(void *reserve, unsigned reserve_size)
     if (!g_cfg.online_check.empty()) return online_check(g_cfg.online_check) ? 0 : 1; // the launcher's 联网 page
     if (!g_cfg.online_import.empty()) return online_import(g_cfg.online_import) ? 0 : 1; // its import from xemu
     if (!g_cfg.online_new_console.empty()) return online_new_console(g_cfg.online_new_console) ? 0 : 1; // its new console
+    if (!g_cfg.online_dash_from.empty()) return online_dash_from(g_cfg.online_dash_from, g_cfg.online_dash_out) ? 0 : 1;
 
     log_init(g_cfg.log_path);
     g_exit_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
