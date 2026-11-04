@@ -71,6 +71,7 @@ add_library(blackrt SHARED
   src/mmio_decode.cpp
   src/nv2a_display.cpp
   src/usb_ohci.cpp
+  src/dashboard.cpp
   src/net/online.cpp
   src/net/nvnet.cpp
   src/net/vnet.cpp

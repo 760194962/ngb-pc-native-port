@@ -213,6 +213,79 @@ bool dash_fonts_ensure(const std::wstring &image, const std::wstring &partition2
     return copied > 0;
 }
 
+namespace {
+
+// Copies the FATX directory starting at cluster first into the host folder to, recursively; false on any failure
+bool copy_tree(Fatx &c, uint32_t first, const std::wstring &to, int depth, int &files)
+{
+    if (depth > 8 || !CreateDirectoryW(to.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) return false;
+    for (const Fatx::Entry &e : c.list(first)) {
+        std::wstring p = to + L"\\" + widen(e.name);
+        if (e.dir ? !copy_tree(c, e.first, p, depth + 1, files) : !c.copy(e, p)) {
+            logf("dash: could not copy %s", narrow(p).c_str());
+            return false;
+        }
+        if (!e.dir) files++;
+    }
+    return true;
+}
+
+void remove_tree(const std::wstring &dir)
+{
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
+            std::wstring p = dir + L"\\" + fd.cFileName;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) remove_tree(p);
+            else DeleteFileW(p.c_str());
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    RemoveDirectoryW(dir.c_str());
+}
+
+} // namespace
+
+bool dash_dir_ensure(const std::wstring &image, const std::wstring &partition2, const char *dir, const wchar_t *needed)
+{
+    std::wstring dest = partition2 + L"\\" + widen(dir), part = dest + L".part";
+    if (GetFileAttributesW((dest + L"\\" + needed).c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+    if (image.empty()) {
+        logf("dash: no %s and no registered hard disk image (black.ini online_hdd) to take it from", narrow(dest).c_str());
+        return false;
+    }
+    Disk d;
+    std::string why;
+    if (!d.open(image, why)) {
+        logf("dash: %s (%s)", why.c_str(), narrow(image).c_str());
+        return false;
+    }
+    Fatx c(d, 0x8CA80000ull, 0x1F400000ull); // C:, the dashboard's partition
+    if (!c.cluster) {
+        logf("dash: the image has no FATX C: partition (%s)", narrow(image).c_str());
+        return false;
+    }
+    for (const Fatx::Entry &e : c.list(1)) {
+        if (!e.dir || _stricmp(e.name.c_str(), dir)) continue;
+        CreateDirectoryW(partition2.c_str(), nullptr);
+        remove_tree(part); // what an interrupted copy left
+        int files = 0;
+        bool ok = copy_tree(c, e.first, part, 0, files) && GetFileAttributesW((part + L"\\" + needed).c_str()) != INVALID_FILE_ATTRIBUTES;
+        if (ok) {
+            remove_tree(dest); // a folder without the needed file
+            ok = MoveFileW(part.c_str(), dest.c_str()) != 0;
+        }
+        if (!ok) remove_tree(part);
+        logf("dash: C:\\%s %s (%d files) from %s into %s", dir, ok ? "copied" : "NOT copied", files, narrow(image).c_str(),
+             narrow(dest).c_str());
+        return ok;
+    }
+    logf("dash: the image's C: has no %s folder (%s)", dir, narrow(image).c_str());
+    return false;
+}
+
 static std::string sha256_of(const std::vector<uint8_t> &data)
 {
     BCRYPT_ALG_HANDLE alg = nullptr;

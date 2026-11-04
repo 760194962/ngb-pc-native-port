@@ -1,5 +1,7 @@
 #include "d3d/dispatch.h"
 
+#include "dashboard.h"
+
 #include "build_profile.h"
 #include "d3d/draw.h"
 #include "d3d/state.h"
@@ -115,6 +117,7 @@ extern "C" void __stdcall blackrt_lib_unimplemented(uint32_t index, const uint32
          frame[4], frame[5], frame[6]);
     log_stack_trace(frame);
     xd3d::screenshot_now("stop");
+    if (dashboard_back_to_game("a library function not done here")) Sleep(INFINITE); // the Xbox Live dashboard: the game again
     request_exit(0, "reached an unimplemented library function");
     Sleep(INFINITE);
 }

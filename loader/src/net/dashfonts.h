@@ -12,6 +12,11 @@
 // true when <partition2>\fonts holds them (already, or copied now from image)
 bool dash_fonts_ensure(const std::wstring &image, const std::wstring &partition2);
 
+// The dashboard folder dir of C: (e.g. "xodash", the Xbox Live dashboard) copied whole from the registered image into
+// <partition2>\<dir> when <partition2>\<dir>\<needed> is not there yet. true when it is there (already, or now). The copy
+// goes into <dir>.part first and is renamed when complete, so an interrupted copy is never taken for one.
+bool dash_dir_ensure(const std::wstring &image, const std::wstring &partition2, const char *dir, const wchar_t *needed);
+
 // The signed copies of the disc's two programs in <cache>, and g_cfg.game_override pointed at it (when it is not set
 // already). false: the disc's files are not the known ones (nothing changed).
 bool updater_signed_sources(const std::wstring &game_dir, const std::wstring &cache);

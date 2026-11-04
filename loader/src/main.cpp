@@ -21,6 +21,7 @@
 #include "kernel/xboxkrnl.h"
 #include "net/nvnet.h"
 #include "nv2a_display.h"
+#include "dashboard.h"
 #include "usb_ohci.h"
 #include "net/online.h"
 #include "net/dashfonts.h"
@@ -225,6 +226,7 @@ bool parse_args()
         else if (a == L"--offline") { g_cfg.online = false; settings_mark_cli("online"); }
         else if (a == L"--online-unplugged") g_cfg.online_unplugged = true; // with the online files: no cable
         else if (a == L"--online-config-out") { if (!next(g_cfg.online_config_out)) return false; }
+        else if (a == L"--return-xbe") { if (!next(g_cfg.return_xbe)) return false; }
         else if (a == L"--online-check") { if (!next(g_cfg.online_check)) return false; }
         else if (a == L"--online-dns-mode") { // insignia / insigniadns / console (black.ini online_dns_mode)
             std::wstring v;
@@ -736,8 +738,12 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
     install_ng04_exitmenu(); // Ninja Gaiden (2004)'s title menu: the same, its own way
     if (profile && !black && !profile->aux) install_music51_fix(); // the music player's six channels at -96 dB
-    if (profile && !black && !profile->aux) install_ngb_livedash(); // Ⓐ in Ranking's Live boxes: cancel, not the dashboard
-    install_ng04_livedash(); // and in Ninja Gaiden (2004)'s Master Ninja Tournament
+    // Ⓐ in Ranking's Live boxes (and Ninja Gaiden (2004)'s Master Ninja Tournament): the port's Xbox Live dashboard when it
+    // can run (dashboard.cpp), else cancel as Ⓑ
+    const bool live_dash = profile && profile != &kProfileXod && dashboard_available();
+    if (profile && !black && !profile->aux && !live_dash) install_ngb_livedash();
+    if (!live_dash) install_ng04_livedash();
+    if (live_dash) logf("live boxes: Ⓐ on their dashboard choices opens the port's Xbox Live dashboard (dashboard.cpp)");
     if (!profile && !online_enabled()) nvnet_install_unplugged(); // a program driving the NIC itself, its cable out
     nvnet_install_trap(); // online play: the NIC's registers (net/nvnet.cpp), after every other exception handler
     nv2a_display_install(); // a program without a build profile that drives the display itself (nv2a_display.cpp)

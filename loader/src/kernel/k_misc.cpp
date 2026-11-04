@@ -8,6 +8,7 @@
 #include "nv2a_display.h"
 #include "usb_ohci.h"
 #include "net/online.h"
+#include "dashboard.h"
 #include "sha1.h"
 
 #include <atomic>
@@ -52,10 +53,12 @@ void set_image_file_name(const std::wstring &xbe_path, const std::wstring &game_
         for (wchar_t &c : d) if (c == L'/') c = L'\\';
         while (!d.empty() && d.back() == L'\\') d.pop_back();
         std::wstring hdd = host_full_path(g_cfg.hdd_dir) + L"\\";
-        if (f.size() > d.size() + 1 && _wcsnicmp(f.c_str(), d.c_str(), d.size()) == 0 && f[d.size()] == L'\\')
-            rel = f.substr(d.size() + 1);
-        else if (f.size() > hdd.size() && _wcsnicmp(f.c_str(), hdd.c_str(), hdd.size()) == 0) // a title update on the disk
+        // a program on the hard disk first (a title update; the Xbox Live dashboard in C:\xodash, whose game folder is that
+        // folder: it tells its place, and its b: drive, from this name, and took \Device\CdRom0 for a disc)
+        if (f.size() > hdd.size() && _wcsnicmp(f.c_str(), hdd.c_str(), hdd.size()) == 0)
             rel = L"*" + f.substr(hdd.size());
+        else if (f.size() > d.size() + 1 && _wcsnicmp(f.c_str(), d.c_str(), d.size()) == 0 && f[d.size()] == L'\\')
+            rel = f.substr(d.size() + 1);
         else
             rel = f.substr(f.find_last_of(L'\\') + 1);
     }
@@ -245,9 +248,13 @@ static std::wstring launch_target(const char *path)
     return g_cfg.game_dir + L"\\" + widen(rest);
 }
 
-// with_data: pass the launch data page on (XLaunchNewImage); false = a fresh start (back from the dashboard)
-static bool relaunch(const std::wstring &xbe, bool with_data = true)
+// with_data: pass the launch data page on (XLaunchNewImage); false = a fresh start (back from the dashboard).
+// page: that page instead of the title's; extra: arguments added for the new program.
+static bool relaunch(const std::wstring &xbe, bool with_data = true, const XLAUNCH_DATA_PAGE *page = nullptr,
+                     const std::vector<std::wstring> &extra = {})
 {
+    if (!page) page = LaunchDataPage;
+    if (with_data && !page) with_data = false;
     // the page beside the log, the log renamed after the target ("black.log" -> "black.NinjaFCJ.log")
     std::wstring log = g_cfg.log_path, dir = L".", stem = log;
     size_t slash = log.find_last_of(L"\\/");
@@ -266,7 +273,7 @@ static bool relaunch(const std::wstring &xbe, bool with_data = true)
     if (with_data) {
         FILE *f = _wfopen(page_file.c_str(), L"wb");
         if (!f) return false;
-        fwrite(LaunchDataPage, 1, sizeof(XLAUNCH_DATA_PAGE), f);
+        fwrite(page, 1, sizeof(XLAUNCH_DATA_PAGE), f);
         fclose(f);
     }
     std::wstring new_log =
@@ -275,7 +282,8 @@ static bool relaunch(const std::wstring &xbe, bool with_data = true)
     std::vector<std::wstring> args = g_cfg.args;
     for (size_t i = 0; i < args.size(); i++) {
         // the scripted presses belong to the program they were written for
-        if ((args[i] == L"--log" || args[i] == L"--launch-data" || args[i] == L"--press") && i + 1 < args.size()) {
+        if ((args[i] == L"--log" || args[i] == L"--launch-data" || args[i] == L"--press" || args[i] == L"--return-xbe") &&
+            i + 1 < args.size()) {
             args.erase(args.begin() + i, args.begin() + i + 2);
             if ((int)i < g_cfg.xbe_arg) g_cfg.xbe_arg -= 2;
             i--;
@@ -285,6 +293,7 @@ static bool relaunch(const std::wstring &xbe, bool with_data = true)
     else args.push_back(xbe);
     args.insert(args.begin(), {L"--log", new_log});
     if (with_data) args.insert(args.begin() + 2, {L"--launch-data", page_file});
+    args.insert(args.begin(), extra.begin(), extra.end());
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     std::wstring cmd = L"\"" + std::wstring(exe) + L"\"";
@@ -299,6 +308,41 @@ static bool relaunch(const std::wstring &xbe, bool with_data = true)
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     logf("[k] relaunched as process %lu on %s (log %s)", pi.dwProcessId, narrow(xbe).c_str(), narrow(new_log).c_str());
+    return true;
+}
+
+// --- The console's Xbox Live dashboard in the port (xonlinedash.xbe, kProfileXod; dashboard.cpp has it ready) ---
+// A game's way to the dashboard (Ranking's new account, account recovery, network settings: XLaunchNewImage with no
+// title) opens it, with the launch data xboxdash.xbe gives it (0xC at +0x400: its XBOX LIVE menu, which holds NEW
+// ACCOUNT, ACCOUNT MANAGEMENT and NETWORK SETUP), and --return-xbe naming the game. Whatever way the dashboard ends --
+// done (HalReturnToFirmware), a library function not done here, a crash, KeBugCheck -- the game starts again, as the
+// console's dashboard goes back to it; closing its window ends the program as for a game. What it wrote to the config
+// area (an account) is already in the port's account store (net/online.cpp).
+static bool dashboard_open()
+{
+    if (g_cfg.profile == &kProfileXod || !dashboard_available()) return false;
+    static XLAUNCH_DATA_PAGE page;
+    memset(&page, 0, sizeof page);
+    uint32_t *ld = (uint32_t *)&page;
+    ld[0] = 2;          // from the dashboard
+    ld[1] = 0xFFFE0000; // its title
+    strcpy((char *)page.Header + 8, "\\Device\\Harddisk0\\Partition2\\XODash;xonlinedash.xbe");
+    ld[0x400 / 4] = 0xC; // the XBOX LIVE menu
+    std::wstring back = host_full_path(g_cfg.game_dir) + L"\\default.xbe";
+    logf("[k] the Xbox Live dashboard opens (back to %s when it is done)", narrow(back).c_str());
+    return relaunch(dashboard_xbe(), true, &page, {L"--return-xbe", back});
+}
+
+bool dashboard_back(const char *why) // dashboard.h dashboard_back_to_game
+{
+    static std::atomic<bool> once{false};
+    if (g_cfg.profile != &kProfileXod || g_cfg.return_xbe.empty() || once.exchange(true)) return false;
+    logf("[k] the Xbox Live dashboard ends (%s): back to %s", why, narrow(g_cfg.return_xbe).c_str());
+    if (GetFileAttributesW(g_cfg.return_xbe.c_str()) == INVALID_FILE_ATTRIBUTES || !relaunch(g_cfg.return_xbe, false)) {
+        logf("[k]     could not start the game again");
+        return false;
+    }
+    request_exit(0, "back from the dashboard to the game");
     return true;
 }
 
@@ -317,6 +361,7 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
 {
     logf("[k] HalReturnToFirmware(%u): the game asked to leave (0 halt, 1 reboot, 2 quick reboot, 3 fatal error), from %s", Routine,
          xd3d::callers_of((const uint32_t *)_AddressOfReturnAddress()).c_str());
+    if (dashboard_back("it asked to leave")) Sleep(INFINITE); // the port's Xbox Live dashboard: back to the game
     if (LaunchDataPage && (Routine == 1 || Routine == 2)) {
         const char *path = (const char *)LaunchDataPage->Header + 8;
         std::wstring xbe = launch_target(path);
@@ -324,7 +369,7 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
         // No note on the PC: the boxes that lead there answer Ⓐ as Ⓑ (ngb_livedash.cpp), so this is only a way left
         // open; it goes back to the game as the dashboard would (the user, 2026-11-01: as the Gamertag boxes do)
         if (!xbe.empty() && system_program(xbe)) {
-            logf("    %s is the Xbox's own (the dashboard's network settings): the game afresh instead", narrow(xbe).c_str());
+            logf("    %s is the Xbox's own (the dashboard's network settings): the dashboard instead", narrow(xbe).c_str());
             xbe.clear(); // the dashboard: handled below
         }
         // Ninja Gaiden 2004's title updater installs in a few hundred frames at several hundred a second and reboots at
@@ -338,6 +383,10 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
             request_exit(0, "XLaunchNewImage");
             Sleep(INFINITE);
         }
+    }
+    if ((Routine == 1 || Routine == 2) && dashboard_open()) { // the port's Xbox Live dashboard when it can run
+        request_exit(0, "XLaunchNewImage to the dashboard");
+        Sleep(INFINITE);
     }
     if (Routine == 1 || Routine == 2) {
         // No title to launch: the console goes to the dashboard (Ninja Gaiden Black's Ranking > "new user" asks for
@@ -373,6 +422,7 @@ void __stdcall KeBugCheck(uint32_t BugCheckCode)
 {
     logf("[k] KeBugCheck(0x%08x)", BugCheckCode);
     log_stack_trace((const uint32_t *)_AddressOfReturnAddress());
+    if (dashboard_back("KeBugCheck")) Sleep(INFINITE);
     request_exit(4, "KeBugCheck");
     Sleep(INFINITE);
 }

@@ -1,5 +1,7 @@
 #include "hooks.h"
 
+#include "dashboard.h"
+
 #include "build_profile.h"
 #include "d3d/draw.h"
 
@@ -393,6 +395,7 @@ LONG WINAPI unhandled_filter(EXCEPTION_POINTERS *ep)
     dump_exception(ep, "UNHANDLED");
     logc("exiting with code 1 (unhandled %s at %08lx %s; registers and stack in the log)",
          exception_name(ep->ExceptionRecord->ExceptionCode), ep->ContextRecord->Eip, where(ep->ContextRecord->Eip).c_str());
+    dashboard_back_to_game("a crash"); // the port's Xbox Live dashboard: the game starts again
     fflush(stdout);
     TerminateProcess(GetCurrentProcess(), 1); // the crashing thread may be the one that would do the exit
     return EXCEPTION_EXECUTE_HANDLER;
