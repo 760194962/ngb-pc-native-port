@@ -2528,7 +2528,7 @@ struct Painter {
         else {
             st = S(Str::OnlineXemuOk);
             if (g.online.count("importable")) st += S(Str::OnlineImportable) + names("importable"), can_import = true;
-            else if (g.online.count("account")) st += S(Str::OnlineAllHere);
+            else if (g.online.count("account")) st = S(Str::OnlineAllHere);
             can_import = can_import || online_value("local") != "ok"; // the console itself comes over the first time
             good = true;
         }
