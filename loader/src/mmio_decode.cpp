@@ -122,6 +122,36 @@ bool mmio_decode(CONTEXT *c, uint32_t off, const MmioOps &ops)
             set_reg(c, regf, wsize, v);
             return finish(p);
         }
+        if (op2 == 0xBA || op2 == 0xA3 || op2 == 0xAB || op2 == 0xB3 || op2 == 0xBB) {
+            // BT / BTS / BTR / BTC with a memory operand (the USB controller's port status is tested this way by
+            // the Insignia Setup Assistant). 0F BA has an immediate bit number; the others take it from a register.
+            // 0F BA's operation is its ModRM reg field (/4 BT, /5 BTS, /6 BTR, /7 BTC); the others name it in the
+            // opcode. A register's bit number may reach past the operand (a bit string): it moves the address.
+            if (!skip_modrm(p, regf)) return false;
+            int s = o16 ? 2 : 4;
+            const uint32_t nbits = (uint32_t)s * 8;
+            int kind; // 0 BT, 1 BTS, 2 BTR, 3 BTC
+            uint32_t bit, at = off;
+            if (op2 == 0xBA) {
+                if (regf < 4) return false;
+                kind = regf - 4;
+                bit = *p++ & (nbits - 1);
+            } else {
+                kind = op2 == 0xA3 ? 0 : op2 == 0xAB ? 1 : op2 == 0xB3 ? 2 : 3;
+                int32_t b = (int32_t)get_reg(c, regf, wsize);
+                if (o16) b = (int16_t)b;
+                at = off + (uint32_t)((b >> (o16 ? 4 : 5)) * s); // arithmetic shift: negative offsets go back
+                bit = (uint32_t)b & (nbits - 1);
+            }
+            uint32_t v = ops.read(at, s);
+            const bool cf = ((v >> bit) & 1) != 0;
+            if (kind == 1) v |= 1u << bit;
+            else if (kind == 2) v &= ~(1u << bit);
+            else if (kind == 3) v ^= 1u << bit;
+            c->EFlags = (c->EFlags & ~1u) | (cf ? 1u : 0u);
+            if (kind) ops.write(at, v, s);
+            return finish(p);
+        }
         return false;
     }
     switch (op) {

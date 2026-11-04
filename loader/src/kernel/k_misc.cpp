@@ -144,6 +144,20 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
         logf("[k] ExQueryNonVolatileSetting(0xffff): the console's EEPROM (256 bytes)");
         return 0;
     }
+    // XC_ENCRYPTED_SECTION, the EEPROM's first 0x30 bytes as stored: the Setup Assistant built 2025-01-19 decrypts the
+    // HDD key from it with each kernel family's EEPROM key it carries and refuses to register unless one matches
+    // XboxHDKey ("HDD key mismatch", 0x13F97; the port's zeros failed all three)
+    if (ValueIndex == 0xFFFE && !g_cfg.profile && ValueLength >= 0x30) {
+        uint8_t e[256];
+        if (online_whole_eeprom(e)) {
+            memcpy(Value, e, 0x30);
+            SecureZeroMemory(e, sizeof e);
+            if (Type) *Type = 3;
+            if (ResultLength) *ResultLength = 0x30;
+            logf("[k] ExQueryNonVolatileSetting(0xfffe): the console's encrypted EEPROM section (48 bytes)");
+            return 0;
+        }
+    }
     uint32_t dword = 0, size = 4, type = 4 /* REG_DWORD */;
     bool known = true;
     switch (ValueIndex) {
