@@ -968,6 +968,92 @@ uint32_t convert_vertices(const VertexShader *vs, uint32_t first, uint32_t count
     return stride;
 }
 
+// A vertex shader with a declaration and no program is the Xbox's fixed-function pipeline fed through that
+// declaration: inputs no FVF code describes, such as a packed normal (the Xbox Live dashboard's selected item, which
+// went undrawn: the highlight showed black). Its vertices go to the host's fixed-function pipeline converted to the
+// FVF layout that holds the same inputs. Registers: 0 position, 2 normal, 3 diffuse, 4 specular, 9-12 texture
+// coordinates 0-3. 0 when the declaration has anything else (blend weights, fog, point size, back colours) or no
+// 3-float position: the draw stays undrawn, as before.
+uint32_t decl_fvf(const VertexShader *vs)
+{
+    uint32_t fvf = 0, ntex = 0, texsz[4] = {2, 2, 2, 2};
+    for (uint32_t i = 0; i < vs->num_elements; i++) {
+        uint8_t reg = vs->elements[i].reg, t = vs->elements[i].xtype;
+        if (reg == 0 && t == 0x32) fvf |= D3DFVF_XYZ;
+        else if (reg == 2) fvf |= D3DFVF_NORMAL;
+        else if (reg == 3) fvf |= D3DFVF_DIFFUSE;
+        else if (reg == 4) fvf |= D3DFVF_SPECULAR;
+        else if (reg >= 9 && reg <= 12) {
+            uint32_t s = reg - 9, n = t == 0x40 || t == 0x72 ? 4 : t >> 4;
+            texsz[s] = n < 1 ? 1 : n > 4 ? 4 : n;
+            if (s + 1 > ntex) ntex = s + 1;
+        } else return 0;
+    }
+    if (!(fvf & D3DFVF_XYZ)) return 0;
+    fvf |= ntex << D3DFVF_TEXCOUNT_SHIFT;
+    for (uint32_t s = 0; s < ntex; s++)
+        fvf |= texsz[s] == 1 ? D3DFVF_TEXCOORDSIZE1(s) : texsz[s] == 3 ? D3DFVF_TEXCOORDSIZE3(s)
+             : texsz[s] == 4 ? D3DFVF_TEXCOORDSIZE4(s) : D3DFVF_TEXCOORDSIZE2(s);
+    return fvf;
+}
+
+std::vector<uint8_t> g_declconv; // only grows
+std::vector<float> g_declconv_el;
+
+// Vertices [first, first+count) of the current streams (or user data for stream 0) for decl_fvf(vs) == fvf, in
+// g_declconv. Returns the stride.
+uint32_t convert_decl_vertices(const VertexShader *vs, uint32_t fvf, uint32_t first, uint32_t count, const uint8_t *up,
+                               uint32_t up_stride)
+{
+    perf::Scope perf_scope(perf::kConvert);
+    uint32_t ntex = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT, texsz[4] = {}, texoff[4] = {};
+    uint32_t off_n = 12, off_d = off_n + (fvf & D3DFVF_NORMAL ? 12 : 0), off_s = off_d + (fvf & D3DFVF_DIFFUSE ? 4 : 0);
+    uint32_t stride = off_s + (fvf & D3DFVF_SPECULAR ? 4 : 0);
+    for (uint32_t s = 0; s < ntex; s++) {
+        uint32_t code = (fvf >> (16 + 2 * s)) & 3; // 0 two, 1 three, 2 four, 3 one
+        texsz[s] = code == 0 ? 2 : code == 1 ? 3 : code == 2 ? 4 : 1;
+        texoff[s] = stride;
+        stride += texsz[s] * 4;
+    }
+    if (g_declconv.size() < (size_t)count * stride) g_declconv.resize((size_t)count * stride);
+    if (g_declconv_el.size() < (size_t)count * 4) g_declconv_el.resize((size_t)count * 4);
+    memset(g_declconv.data(), 0, (size_t)count * stride); // texture coordinate sets the declaration skips
+    for (uint32_t e = 0; e < vs->num_elements; e++) {
+        const VertexElement &el = vs->elements[e];
+        uint32_t off, n;
+        bool color = false;
+        if (el.reg == 0) off = 0, n = 3;
+        else if (el.reg == 2) off = off_n, n = 3;
+        else if (el.reg == 3) off = off_d, n = 4, color = true;
+        else if (el.reg == 4) off = off_s, n = 4, color = true;
+        else off = texoff[el.reg - 9], n = texsz[el.reg - 9];
+        const uint8_t *base;
+        uint32_t s_stride;
+        if (up && el.stream == 0) {
+            base = up;
+            s_stride = up_stride;
+        } else {
+            base = stream_data(el.stream);
+            s_stride = g_st.streams[el.stream].stride ? g_st.streams[el.stream].stride : vs->stream_stride[el.stream];
+        }
+        float *f = g_declconv_el.data();
+        if (base) decode_run(el.xtype, base + (size_t)first * s_stride + el.offset, s_stride, f, 4, count);
+        else
+            for (uint32_t v = 0; v < count; v++) f[v * 4] = f[v * 4 + 1] = f[v * 4 + 2] = 0, f[v * 4 + 3] = 1;
+        uint8_t *o = g_declconv.data() + off;
+        for (uint32_t v = 0; v < count; v++, o += stride, f += 4) {
+            if (color) {
+                auto c8 = [](float x) { return (uint32_t)(std::min(std::max(x, 0.0f), 1.0f) * 255.0f + 0.5f); };
+                uint32_t c = c8(f[3]) << 24 | c8(f[0]) << 16 | c8(f[1]) << 8 | c8(f[2]); // RGBA -> ARGB
+                memcpy(o, &c, 4);
+            } else {
+                memcpy(o, f, n * 4);
+            }
+        }
+    }
+    return stride;
+}
+
 } // namespace
 
 // Linear (pitch) textures are addressed with texel coordinates on the NV2A; D3D9 wants 0..1.
@@ -1661,7 +1747,16 @@ bool begin_draw(DrawCtx &ctx)
             ctx.fvf = h;
         }
     } else if (VertexShader *vs = vs_from_handle(h)) {
-        if (IDirect3DVertexShader9 *hv = vs_host_shader(vs, bump_divide_stages())) {
+        if (!vs->program) { // fixed-function vertices through a declaration (decl_fvf)
+            if (uint32_t f = decl_fvf(vs)) {
+                set_vs(d, nullptr);
+                set_fvf(d, f);
+                apply_fvf_texture_scale(d, false);
+                ctx.path = Path::Fvf;
+                ctx.fvf = f;
+                ctx.vs = vs; // the draw converts the vertices (convert_decl_vertices)
+            }
+        } else if (IDirect3DVertexShader9 *hv = vs_host_shader(vs, bump_divide_stages())) {
             set_vs(d, hv);
             upload_vs_constants(d);
             ctx.path = Path::Prog;
@@ -2338,6 +2433,13 @@ void __stdcall D3DDevice_DrawVerticesUP(uint32_t PrimitiveType, uint32_t VertexC
         draw_up(PrimitiveType, VertexCount, g_conv.data(), stride);
         return;
     }
+    if (ctx.vs) { // fixed-function vertices through a declaration
+        uint32_t stride = convert_decl_vertices(ctx.vs, ctx.fvf, 0, VertexCount, (const uint8_t *)pVertexStreamZeroData,
+                                                VertexStreamZeroStride);
+        debug_draw("DrawVerticesUP(decl)", ctx, PrimitiveType, VertexCount, (const float *)g_declconv.data(), stride / 4);
+        draw_up(PrimitiveType, VertexCount, g_declconv.data(), stride);
+        return;
+    }
     debug_draw("DrawVerticesUP", ctx, PrimitiveType, VertexCount, (const float *)pVertexStreamZeroData, VertexStreamZeroStride / 4);
     if (draw_wide_lines(ctx, PrimitiveType, VertexCount, pVertexStreamZeroData, VertexStreamZeroStride)) return;
     draw_up(PrimitiveType, VertexCount,
@@ -2356,6 +2458,12 @@ void __stdcall D3DDevice_DrawVertices(uint32_t PrimitiveType, uint32_t StartVert
         debug_draw("DrawVertices", ctx, PrimitiveType, VertexCount, g_conv.data(), stride / 4);
         set_decl(host3d::dev(), decl_for(ctx.vs));
         draw_up(PrimitiveType, VertexCount, g_conv.data(), stride);
+        return;
+    }
+    if (ctx.vs) { // fixed-function vertices through a declaration
+        uint32_t stride = convert_decl_vertices(ctx.vs, ctx.fvf, StartVertex, VertexCount, nullptr, 0);
+        debug_draw("DrawVertices(decl)", ctx, PrimitiveType, VertexCount, (const float *)g_declconv.data(), stride / 4);
+        draw_up(PrimitiveType, VertexCount, g_declconv.data(), stride);
         return;
     }
     debug_draw("DrawVertices", ctx, PrimitiveType, VertexCount, nullptr, 0);
@@ -2437,6 +2545,17 @@ void __stdcall D3DDevice_DrawIndexedVertices(uint32_t PrimitiveType, uint32_t Ve
         set_decl(host3d::dev(), decl_for(ctx.vs));
         // indices refer to vertex 0: point the data "mn vertices before" the converted block
         draw_indexed_up(PrimitiveType, VertexCount, pIndexData, (const uint8_t *)g_conv.data() - (size_t)mn * stride, stride);
+        return;
+    }
+    if (ctx.vs) { // fixed-function vertices through a declaration
+        uint32_t mn = 0xFFFF, mx = 0;
+        for (uint32_t i = 0; i < VertexCount; i++) {
+            mn = pIndexData[i] < mn ? pIndexData[i] : mn;
+            mx = pIndexData[i] > mx ? pIndexData[i] : mx;
+        }
+        uint32_t stride = convert_decl_vertices(ctx.vs, ctx.fvf, mn, mx - mn + 1, nullptr, 0);
+        debug_draw("DrawIndexedVertices(decl)", ctx, PrimitiveType, VertexCount, (const float *)g_declconv.data(), stride / 4);
+        draw_indexed_up(PrimitiveType, VertexCount, pIndexData, g_declconv.data() - (size_t)mn * stride, stride);
         return;
     }
     const uint8_t *base = stream_data(0);
@@ -2536,6 +2655,14 @@ void draw_inline_array(uint32_t prim, const uint32_t *data, uint32_t dwords)
         uint32_t stride = convert_vertices(ctx.vs, 0, count, (const uint8_t *)data, in_stride);
         set_decl(host3d::dev(), decl_for(ctx.vs));
         draw_up(prim, count, g_conv.data(), stride);
+        return;
+    }
+    if (ctx.vs) { // fixed-function vertices through a declaration: the same stream-0 layout
+        uint32_t in_stride = ctx.vs->stream_stride[0];
+        if (!in_stride) return;
+        uint32_t count = dwords * 4 / in_stride;
+        uint32_t stride = convert_decl_vertices(ctx.vs, ctx.fvf, 0, count, (const uint8_t *)data, in_stride);
+        draw_up(prim, count, g_declconv.data(), stride);
         return;
     }
     uint32_t stride = fvf_stride(ctx.fvf);
