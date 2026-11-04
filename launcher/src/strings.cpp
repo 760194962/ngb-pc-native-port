@@ -361,8 +361,8 @@ const Pair kText[(int)Str::Count] = {
      L"xemu EEPROM"},
     {L"xemu 硬盘镜像",
      L"xemu hard disk"},
-    {L"xemu 主机",
-     L"xemu console"},
+    {L"可导入的账号",
+     L"To import"},
     {L"导入用：选 xemu 里注册过 Insignia 的 EEPROM 和硬盘镜像",
      L"To import: the EEPROM and hard disk registered in xemu"},
     {L"✓ 主机身份有效 · 已注册 Insignia",
@@ -582,10 +582,10 @@ const Pair kText[(int)Str::Count] = {
      L"compared and blended (percentage-closer filtering, done in hardware by that generation of GPUs when the shadow "
      L"map is filtered linearly), instead of a hard, stepped edge. Off: the earlier way, one compare, a hard edge.\n\n"
      L"Little cost (a few more shadow-map reads, only where shadows are drawn). Takes effect the next time the game starts."},
-    {L"本机账号",
-     L"Accounts here"},
-    {L"✓ 已注册 Insignia  ·  账号：",
-     L"✓ Registered with Insignia  ·  Accounts: "},
+    {L"本机主机",
+     L"This console"},
+    {L"✓ 已注册 Insignia",
+     L"✓ Registered with Insignia"},
     {L"还没有：从 xemu 导入（下面），或点「新建主机」",
      L"None yet: import from xemu (below), or make a New console"},
     {L"存档目录里的主机文件损坏或不配套：请重新导入",
@@ -642,6 +642,12 @@ const Pair kText[(int)Str::Count] = {
      L"Xbox hard disk image with the dashboard (e.g. xbox_hdd.qcow2)"},
     {L"\u8fd9\u4e2a\u955c\u50cf\u91cc\u6ca1\u6709\u79fb\u690d\u7248\u80fd\u7528\u7684\u4eea\u8868\u76d8\uff08\u8981 C:\\xodash \u91cc\u7684 5971 \u7248 xonlinedash.xbe\uff09",
      L"No dashboard the port can run in that image (it needs C:\\xodash with xonlinedash.xbe 5971)"},
+    {L"本机账号",
+     L"Accounts"},
+    {L"还没有玩家代号：在「Xbox Live 仪表盘」里选 NEW ACCOUNT 新建",
+     L"No gamertag yet: make one with NEW ACCOUNT in the Xbox Live dashboard"},
+    {L"从 xemu 导入（已在 xemu 里注册过 Insignia 才需要）",
+     L"Import from xemu (only if you registered with Insignia in xemu)"},
 };
 
 } // namespace

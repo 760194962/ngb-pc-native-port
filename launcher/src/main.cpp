@@ -62,6 +62,8 @@ struct App {
     IWICBitmapSource *pay_src[2] = {}; // the author's WeChat Pay and Alipay codes (the Support page)
     Page page = kStart;
     int hover = -1; // hit id under the mouse
+    float mouse_x = -1, mouse_y = -1; // where the mouse is (DIPs; -1 outside the window): a cut text's full wording there
+    int tip = -1;                     // which one shows (an index into g_tips), -1 none
     bool pressed = false;
     std::wstring dir;  // the launcher's folder
     std::wstring ini;  // launcher.ini
@@ -271,6 +273,13 @@ struct Hit {
     D2D1_RECT_F r;
 };
 std::vector<Hit> g_hits;
+// One-line texts cut short (an ellipsis): where they are on the window and their whole wording, shown when the mouse
+// rests on them (Painter::tip_box)
+struct Tip {
+    D2D1_RECT_F r;
+    std::wstring s;
+};
+std::vector<Tip> g_tips;
 
 bool inside(const D2D1_RECT_F &r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
 
@@ -1242,6 +1251,8 @@ const wchar_t *icon_font()
     return font;
 }
 
+const DWRITE_TRIMMING kNoTrim = {DWRITE_TRIMMING_GRANULARITY_NONE, 0, 0};
+
 struct Painter {
     ID2D1RenderTarget *rt;
     ID2D1Bitmap *hero = nullptr, *texture = nullptr;
@@ -1269,6 +1280,23 @@ struct Painter {
             fmt->SetTrimming(&t, dots);
         }
         IDWriteTextLayout *layout = nullptr;
+        if (one_line && !s.empty()) { // cut short? (laid out without the ellipsis, wider than its place): its tip
+            IDWriteTextLayout *whole = nullptr;
+            fmt->SetTrimming(&kNoTrim, nullptr);
+            DWRITE_TEXT_METRICS m;
+            if (SUCCEEDED(g.dw->CreateTextLayout(s.c_str(), (UINT32)s.size(), fmt, 100000.0f, r.bottom - r.top, &whole)) &&
+                SUCCEEDED(whole->GetMetrics(&m)) && m.width > r.right - r.left + 0.5f) {
+                D2D1_MATRIX_3X2_F t;
+                rt->GetTransform(&t); // the page's scroll: tips are kept where they are on the window
+                D2D1_RECT_F w = {r.left + t._31, std::max(r.top + t._32, 0.0f), r.right + t._31, std::min(r.bottom + t._32, kH)};
+                if (w.bottom > w.top) g_tips.push_back({w, s});
+            }
+            release(whole);
+            if (dots) {
+                DWRITE_TRIMMING tr = {DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+                fmt->SetTrimming(&tr, dots);
+            }
+        }
         if (SUCCEEDED(g.dw->CreateTextLayout(s.c_str(), (UINT32)s.size(), fmt, r.right - r.left, r.bottom - r.top, &layout))) {
             if (spacing != 0.0f) {
                 IDWriteTextLayout1 *l1 = nullptr;
@@ -2405,7 +2433,11 @@ struct Painter {
     {
         online_check();
         D2D1_RECT_F c;
-        float y = settings_page(Str::NavOnline, Str::OnlineCard, 5, &c);
+        // the console card: the switch, the console, then its gamertags one a row (8 at most)
+        auto it_acc = g.online.find("local_account");
+        size_t n_acc = it_acc == g.online.end() ? 0 : it_acc->second.size();
+        bool local_ok = online_value("local") == "ok";
+        float y = settings_page(Str::NavOnline, Str::OnlineCard, 2 + (local_ok ? (int)std::max<size_t>(n_acc, 1) : 0), &c);
         const float lx = c.left + 26, cx = c.left + 210, right = c.right - 26, bw = 120;
         auto label = [&](Str s) { text(S(s), {lx, y, cx - 10, y + 30}, 13.5f, kAsh); };
         auto path_row = [&](Str s, const char *key, int hit) {
@@ -2438,7 +2470,7 @@ struct Painter {
             else if (local == "other") st = S(Str::OnlineLocalOther);
             else if (local != "ok") st = S(Str::OnlineLocalBad);
             else if (online_value("local_registered") != "1") st = S(Str::OnlineLocalNotReg);
-            else st = S(Str::OnlineLocalOk) + names("local_account"), good = true;
+            else st = S(Str::OnlineLocalOk), good = true;
             bool xemu_runs = online_value("xemu") == "1";
             if (good && xemu_runs) st = S(Str::OnlineXemu), good = false;
             // its buttons: New console when there is none; with one, Register while it has no machine account (the
@@ -2460,6 +2492,23 @@ struct Painter {
             }
         }
         y += 40;
+        if (local_ok) { // its gamertags, or how to make one
+            label(Str::OnlineAccountsRow);
+            if (!n_acc) {
+                text(S(Str::OnlineNoGamertag), {cx, y, right, y + 30}, 13, kAsh, 1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
+                     DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+                y += 40;
+            }
+            for (size_t i = 0; i < n_acc; i++) {
+                text(L"\u2022  " + from_utf8(it_acc->second[i]), {cx, y, right, y + 30}, 13.5f, kBone, 1.0f, DWRITE_FONT_WEIGHT_NORMAL,
+                     nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+                y += 40;
+            }
+        }
+
+        // importing from xemu: its files and what they hold (only for a console registered in xemu)
+        D2D1_RECT_F cx2 = {c.left, c.bottom + 12, c.right, c.bottom + 12 + 50 + 3 * 40 + 8};
+        y = card(cx2, S(Str::OnlineXemuCard));
         path_row(Str::OnlineEeprom, "online_eeprom", kHitPickEeprom);
         path_row(Str::OnlineHdd, "online_hdd", kHitPickHdd);
         label(Str::OnlineStatus);
@@ -2493,7 +2542,7 @@ struct Painter {
 
         // DNS
         bool pc = dns_by_pc(); // a row more: the InsigniaDNS address
-        D2D1_RECT_F c2 = {c.left, c.bottom + 12, c.right, c.bottom + 12 + 50 + (pc ? 4 : 3) * 40 + 8};
+        D2D1_RECT_F c2 = {c.left, cx2.bottom + 12, c.right, cx2.bottom + 12 + 50 + (pc ? 4 : 3) * 40 + 8};
         y = card(c2, S(Str::DnsCard), help_id(Str::DnsCard));
         // the DNS the game will use, as chosen below (not the console's own setting: the port redirects every lookup)
         label(Str::DnsConsole);
@@ -2546,9 +2595,41 @@ struct Painter {
         text(S(Str::ComingSoon), {x, 196, x + 700, 230}, 15, kAsh);
     }
 
+    // The whole wording of the cut text under the mouse, in a box beside it (wrapped, kept inside the window)
+    void tip_box()
+    {
+        g.tip = -1;
+        if (g.mouse_x < 0 || g.drag || g.list_open) return;
+        for (size_t i = g_tips.size(); i-- > 0;)
+            if (inside(g_tips[i].r, g.mouse_x, g.mouse_y)) { g.tip = (int)i; break; }
+        if (g.tip < 0) return;
+        const std::wstring &s = g_tips[g.tip].s;
+        IDWriteTextFormat *fmt = nullptr;
+        if (FAILED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                                          DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13, g_lang == Lang::Zh ? L"zh-cn" : L"en-us", &fmt)))
+            return;
+        IDWriteTextLayout *l = nullptr;
+        DWRITE_TEXT_METRICS m = {};
+        if (SUCCEEDED(g.dw->CreateTextLayout(s.c_str(), (UINT32)s.size(), fmt, 520.0f, 1000.0f, &l)) && SUCCEEDED(l->GetMetrics(&m))) {
+            float w = m.width + 24, hgt = m.height + 16;
+            float x = std::min(g.mouse_x + 14, kW - w - 8), y = g.mouse_y + 22;
+            if (y + hgt > kH - 8) y = g.mouse_y - hgt - 10; // above the mouse near the bottom
+            x = std::max(x, 8.0f), y = std::max(y, 8.0f);
+            D2D1_RECT_F b = {x, y, x + w, y + hgt};
+            fill(b, 0x16141a, 0.97f, 4);
+            stroke(b, kInk3, 1.0f, 4);
+            ID2D1SolidColorBrush *br = nullptr;
+            rt->CreateSolidColorBrush(rgb(kBone, 0.95f), &br);
+            if (br) rt->DrawTextLayout({x + 12, y + 8}, l, br), br->Release();
+        }
+        release(l);
+        fmt->Release();
+    }
+
     void draw()
     {
         g_hits.clear();
+        g_tips.clear();
         background();
         nav();
         // the page, moved up by how far it is scrolled and kept right of the navigation; its hits moved with it after
@@ -2591,6 +2672,7 @@ struct Painter {
         }
         if (g.help) help_panel();
         if (g.ask) ask_panel();
+        if (!g.help && !g.ask) tip_box();
     }
 };
 
@@ -2876,6 +2958,11 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
         int id = hit_at(GET_X_LPARAM(lp) * scale, GET_Y_LPARAM(lp) * scale);
+        g.mouse_x = GET_X_LPARAM(lp) * scale, g.mouse_y = GET_Y_LPARAM(lp) * scale;
+        int tip = -1;
+        for (size_t i = g_tips.size(); i-- > 0;)
+            if (inside(g_tips[i].r, g.mouse_x, g.mouse_y)) { tip = (int)i; break; }
+        if (tip != g.tip || tip >= 0) InvalidateRect(h, nullptr, FALSE); // shown, moved with the mouse, or gone
         if (id != g.hover) {
             g.hover = id;
             SetCursor(LoadCursorW(nullptr, id == kHitDnsAddr ? (LPCWSTR)IDC_IBEAM : id >= 0 && id != 0x7fff ? (LPCWSTR)IDC_HAND : (LPCWSTR)IDC_ARROW));
@@ -2887,6 +2974,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     }
     case WM_MOUSELEAVE:
         g.hover = -1;
+        g.mouse_x = g.mouse_y = -1;
         InvalidateRect(h, nullptr, FALSE);
         return 0;
     case WM_SETCURSOR:
@@ -3294,6 +3382,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
         if (!wcscmp(argv[i], L"--lang") && i + 1 < argc) g_lang = !wcscmp(argv[i + 1], L"en") ? Lang::En : Lang::Zh;
         if (!wcscmp(argv[i], L"--scroll") && i + 1 < argc) g.page_scroll = g.scroll_target = (float)_wtof(argv[i + 1]); // with --snap: the page scrolled down
         if (!wcscmp(argv[i], L"--help-scroll") && i + 1 < argc) g.help_for = g.help, g.help_scroll = g.help_target = (float)_wtof(argv[i + 1]); // with --snap, after --show-help
+        if (!wcscmp(argv[i], L"--mouse") && i + 2 < argc) g.mouse_x = (float)_wtof(argv[i + 1]), g.mouse_y = (float)_wtof(argv[i + 2]); // with --snap: the mouse there (a cut text's tip)
         if (!wcscmp(argv[i], L"--mdl2")) g_icon_font = L"Segoe MDL2 Assets";
         if (!wcscmp(argv[i], L"--monitor") && i + 1 < argc) { // with --snap: as if the monitor were WxH (the shape list)
             int w = 0, h = 0;

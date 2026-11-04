@@ -390,6 +390,9 @@ enum class Str {
     DashRunning,
     DashFilter,
     DashMissing,
+    OnlineAccountsRow, // the Online page: the console's gamertags, one a row, and the import card
+    OnlineNoGamertag,
+    OnlineXemuCard,
     Count
 };
 
