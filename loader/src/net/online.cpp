@@ -1,7 +1,9 @@
 // Online play's console identity (project/docs/09). Insignia knows a console by what xemu's registered set holds: the
 // EEPROM (serial number, MAC address, online key, and the HDD key in its RC4-encrypted section) and the hard disk's
 // config area (sector 8 network settings, the machine account in sector 9, the Live accounts after it). Both files
-// are only read, from the paths black.ini names; nothing of them is written anywhere or logged.
+// are only read, from the paths black.ini names; nothing of them is logged. What the game or the dashboard writes to
+// the config area (an account made in the port's own Xbox Live dashboard) goes to the port's account store in the
+// hard disk folder (online_accounts.bin), laid over the registered disk's on later starts.
 #include "net/online.h"
 
 #include "common.h"
@@ -146,6 +148,56 @@ bool read_config_area(const std::wstring &path, std::vector<uint8_t> &out, std::
     return true;
 }
 
+// --- the port's account store: <hard disk folder>\online_accounts.bin = "NGBACCT1", the console's serial number (12 bytes,
+// EEPROM 0x34), 4 zero bytes, then sectors 8-1023 of the config area as last written. Used only with the console whose
+// serial it names (another EEPROM chosen later leaves it alone); written whole to a temporary file, then moved over the
+// old one, so a crash or power loss mid-write leaves the previous store ---
+
+constexpr char STORE_MAGIC[8] = {'N', 'G', 'B', 'A', 'C', 'C', 'T', '1'};
+constexpr size_t STORE_HEAD = 24;
+
+std::wstring store_path() { return host_full_path(g_cfg.hdd_dir) + L"\\online_accounts.bin"; }
+
+// Lays the store over c (the registered disk's config area) when it is this console's. Returns the sectors it changed.
+int store_apply(std::vector<uint8_t> &c, const uint8_t serial[12])
+{
+    std::vector<uint8_t> s(STORE_HEAD + CONFIG_AREA - OVERLAY_START);
+    FILE *f = nullptr;
+    if (_wfopen_s(&f, store_path().c_str(), L"rb") || !f) return 0;
+    size_t n = fread(s.data(), 1, s.size(), f);
+    fclose(f);
+    if (n != s.size() || memcmp(s.data(), STORE_MAGIC, 8)) {
+        logf("online: the account store %s is not one (%zu bytes); left unused", narrow(store_path()).c_str(), n);
+        return 0;
+    }
+    if (memcmp(s.data() + 8, serial, 12)) {
+        logf("online: the account store belongs to another console (another EEPROM was chosen); left unused");
+        return 0;
+    }
+    int changed = 0;
+    for (uint32_t off = OVERLAY_START; off < CONFIG_AREA; off += 512)
+        if (memcmp(&c[off], &s[STORE_HEAD + off - OVERLAY_START], 512)) changed++;
+    memcpy(&c[OVERLAY_START], s.data() + STORE_HEAD, CONFIG_AREA - OVERLAY_START);
+    SecureZeroMemory(s.data(), s.size());
+    return changed;
+}
+
+bool store_save(const std::vector<uint8_t> &c, const uint8_t serial[12])
+{
+    std::wstring path = store_path(), tmp = path + L".tmp";
+    FILE *f = nullptr;
+    if (_wfopen_s(&f, tmp.c_str(), L"wb") || !f) return false;
+    uint8_t head[STORE_HEAD] = {};
+    memcpy(head, STORE_MAGIC, 8);
+    memcpy(head + 8, serial, 12);
+    bool ok = fwrite(head, 1, sizeof head, f) == sizeof head &&
+              fwrite(&c[OVERLAY_START], 1, CONFIG_AREA - OVERLAY_START, f) == CONFIG_AREA - OVERLAY_START && fflush(f) == 0;
+    fclose(f);
+    if (ok) ok = MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    if (!ok) DeleteFileW(tmp.c_str());
+    return ok;
+}
+
 bool sector_signed(const std::vector<uint8_t> &c, int sector)
 {
     uint32_t sig;
@@ -197,9 +249,13 @@ bool online_check(const std::wstring &out_path)
     auto put = [&](const char *k, const std::string &v) { r += std::string(k) + " = " + v + "\n"; };
     put("xemu", process_running(L"xemu.exe") ? "1" : "0");
     uint8_t e[256];
+    bool have_serial = false; // the console's serial number (EEPROM 0x34): whose account store applies
+    uint8_t serial[12];
     if (g_cfg.online_eeprom.empty()) put("eeprom", "missing");
     else if (!read_file(g_cfg.online_eeprom, 0, e, sizeof e)) put("eeprom", "unreadable");
     else {
+        memcpy(serial, e + 0x34, 12);
+        have_serial = true;
         uint8_t dec[28];
         put("eeprom", kcrypto_selftest() && decrypt_eeprom(e, dec) ? "ok" : "invalid");
         SecureZeroMemory(dec, sizeof dec);
@@ -211,6 +267,7 @@ bool online_check(const std::wstring &out_path)
     else if (!read_config_area(g_cfg.online_hdd, c, why)) put("hdd", why);
     else {
         put("hdd", "ok");
+        if (have_serial) store_apply(c, serial); // accounts made in the port's dashboard too
         put("registered", sector_signed(c, 9) ? "1" : "0");
         for (int s = 10; s < 32; s++)
             if (sector_signed(c, s) && !account_name(c, s).empty()) put("account", account_name(c, s));
@@ -258,6 +315,8 @@ bool online_init()
     if (!ver) return fail("online_eeprom: the security section does not verify (not an Xbox EEPROM?)", L"EEPROM 文件无效");
     std::string why;
     if (!read_config_area(g_cfg.online_hdd, g_config, why)) return fail("online_hdd: " + why, L"读不了硬盘镜像");
+    if (int n = store_apply(g_config, g_eeprom + 0x34))
+        logf("online: the port's account store (%s) laid over %d config sector(s) of the registered disk", narrow(store_path()).c_str(), n);
     int accounts = 0;
     for (int s = 9; s < 32; s++) accounts += sector_signed(g_config, s);
     if (!sector_signed(g_config, 9))
@@ -297,8 +356,9 @@ bool online_partition0_write(uint64_t offset, const uint8_t *buf, uint32_t len)
     if (!g_enabled || offset < OVERLAY_START || offset + len > CONFIG_AREA) return false;
     std::lock_guard<std::mutex> g(g_config_lock);
     memcpy(&g_config[(size_t)offset], buf, len);
-    logf("online: config sectors %llu-%llu written (kept for this run only; the registered disk is not changed)", offset / 512,
-         (offset + len - 1) / 512);
+    bool saved = store_save(g_config, g_eeprom + 0x34); // the port's account store; the registered disk is not changed
+    logf("online: config sectors %llu-%llu written: %s", offset / 512, (offset + len - 1) / 512,
+         saved ? "kept in the port's account store" : "COULD NOT SAVE the account store (kept for this run only)");
     if (!g_cfg.online_config_out.empty()) { // tests: what the game wrote (an account made in the dashboard) kept in a file
         if (FILE *f = _wfopen(g_cfg.online_config_out.c_str(), L"wb")) {
             fwrite(g_config.data(), 1, g_config.size(), f);
