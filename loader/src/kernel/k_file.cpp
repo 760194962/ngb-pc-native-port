@@ -430,6 +430,8 @@ NTSTATUS __stdcall NtWriteFile(HANDLE FileHandle, HANDLE Event, void *ApcRoutine
     KTRACE("%p '%s', ev %p, apc %p, %p, len 0x%x, off %lld) -> 0x%08x (", FileHandle, handle_desc(FileHandle).c_str(), Event,
            ApcRoutine, Buffer, Length, ByteOffset ? ByteOffset->QuadPart : -1LL, s);
     if (!NT_OK(s) && s != XSTATUS_PENDING) logf("[k] NtWriteFile('%s') failed 0x%08x", handle_desc(FileHandle).c_str(), s);
+    if (!NT_OK(s) && !g_cfg.profile && Buffer && Length && Length < 1024) // a program without a profile: its console text
+        logf("[k]   text: %.*s", (int)Length, (const char *)Buffer);
     return s;
 }
 

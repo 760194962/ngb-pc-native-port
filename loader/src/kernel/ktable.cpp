@@ -192,6 +192,22 @@ const KExport kExports[] = {
     V(356, HalBootSMCVideoMode),
     V(357, IdexChannelObject),
     F(360, HalInitiateShutdown, 0),
+    // nxdk programs (the Insignia Setup Assistant): k_sync.cpp, k_nxdk.cpp
+    F(29, ExSaveNonVolatileSetting, 4),
+    {52, "InterlockedDecrement", K_FAST, 1, (void *)&xk::KInterlockedDecrement},
+    {53, "InterlockedIncrement", K_FAST, 1, (void *)&xk::KInterlockedIncrement},
+    {54, "InterlockedExchange", K_FAST, 2, (void *)&xk::KInterlockedExchange},
+    F(104, KeGetCurrentThread, 0),
+    F(108, KeInitializeEvent, 3),
+    F(112, KeInitializeSemaphore, 3),
+    F(132, KeReleaseSemaphore, 4),
+    F(201, NtOpenDirectoryObject, 2),
+    F(205, NtPulseEvent, 2),
+    F(208, NtQueryDirectoryObject, 6),
+    F(302, RtlRaiseException, 1),
+    F(306, RtlTryEnterCriticalSection, 1),
+    F(312, RtlUnwind, 4),
+    {320, "RtlZeroMemory", K_STD, 2, (void *)&xk::KRtlZeroMemory},
 };
 
 const KExport *find_export(uint32_t ordinal)

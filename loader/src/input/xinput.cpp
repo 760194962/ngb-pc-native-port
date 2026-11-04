@@ -648,6 +648,15 @@ static const xd3d::Hle kNgbTable[] = {
 
 using Hle = xd3d::Hle;
 #include "auxtab/input_tables.inc"
+// The first pad as an Xbox XINPUT_GAMEPAD (18 bytes: buttons, 8 analog buttons, 4 stick axes): the USB controller
+// model's gamepad reports (usb_ohci.cpp)
+void pad_report(uint8_t out[18])
+{
+    XGamepad g;
+    read_pad(0, g);
+    memcpy(out, &g, 18);
+}
+
 } // namespace xinput
 
 namespace xd3d {

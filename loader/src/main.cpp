@@ -20,6 +20,8 @@
 #include "kernel/ktable.h"
 #include "kernel/xboxkrnl.h"
 #include "net/nvnet.h"
+#include "nv2a_display.h"
+#include "usb_ohci.h"
 #include "net/online.h"
 #include "net/dashfonts.h"
 #include "xbe.h"
@@ -735,7 +737,10 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && !black && !profile->aux) install_music51_fix(); // the music player's six channels at -96 dB
     if (profile && !black && !profile->aux) install_ngb_livedash(); // Ⓐ in Ranking's Live boxes: cancel, not the dashboard
     install_ng04_livedash(); // and in Ninja Gaiden (2004)'s Master Ninja Tournament
+    if (!profile && !online_enabled()) nvnet_install_unplugged(); // a program driving the NIC itself, its cable out
     nvnet_install_trap(); // online play: the NIC's registers (net/nvnet.cpp), after every other exception handler
+    nv2a_display_install(); // a program without a build profile that drives the display itself (nv2a_display.cpp)
+    usb_ohci_install();     // ... and USB, with an Xbox controller on it (usb_ohci.cpp)
     if (!profile) g_cfg.fps = 30;
     if (!kdpc_init()) {
         logf("could not start the kernel DPC/timer thread");

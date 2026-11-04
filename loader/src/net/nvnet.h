@@ -9,6 +9,7 @@
 #include <cstdint>
 
 bool nvnet_install();                             // online_init: reserve the register page
+bool nvnet_install_unplugged();                   // main: a program without a build profile, online play off
 void nvnet_install_trap();                        // after the crash handlers: the trap (the model starts on first access)
 bool nvnet_connect_interrupt(void *kinterrupt);   // KeConnectInterrupt: true if it is the NIC's (bus level 4)
 uint32_t nvnet_link_state();                      // PhyGetLinkState: link up, 100 Mbit/s, full duplex (0 = offline)

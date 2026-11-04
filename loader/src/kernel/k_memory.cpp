@@ -189,6 +189,8 @@ uint32_t __stdcall MmGetPhysicalAddress(void *BaseAddress)
     // bit set, which the NIC model (net/nvnet.cpp) maps back; real physical addresses are all below 64 MB.
     uint32_t caller = (uint32_t)(uintptr_t)_ReturnAddress();
     if (online_enabled() && caller >= g_xnet_lo && caller < g_xnet_hi) return (uint32_t)(uintptr_t)p | 0x80000000u;
+    // A program without a build profile (nxdk: its own NIC and USB drivers hand these to the device models): the same
+    if (!g_cfg.profile) return (uint32_t)(uintptr_t)p | 0x80000000u;
     KNOTE_ONCE("MmGetPhysicalAddress(%p) on non-contiguous memory; returning address & 0x7FFFFFFF", BaseAddress);
     return (uint32_t)(uintptr_t)p & 0x7FFFFFFF;
 }

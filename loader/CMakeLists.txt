@@ -67,6 +67,10 @@ add_library(blackrt SHARED
   src/kernel/k_misc.cpp
   src/kernel/k_ngb.cpp
   src/kernel/k_crypto.cpp
+  src/kernel/k_nxdk.cpp
+  src/mmio_decode.cpp
+  src/nv2a_display.cpp
+  src/usb_ohci.cpp
   src/net/online.cpp
   src/net/nvnet.cpp
   src/net/vnet.cpp

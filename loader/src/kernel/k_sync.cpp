@@ -442,4 +442,56 @@ void __stdcall RtlLeaveCriticalSection(XRTL_CRITICAL_SECTION *cs)
     if (InterlockedDecrement((volatile LONG *)&cs->LockCount) >= 0) SetEvent(cs_event(cs));
 }
 
+// nxdk programs (the Insignia Setup Assistant) make and release these themselves; waits go through KeWaitFor*
+void __stdcall KeInitializeEvent(XKEVENT *Event, uint32_t Type, BOOLEAN State)
+{
+    KTRACE("%p, %u, %u", Event, Type, State);
+    Event->Header.Type = (uint8_t)(Type == 0 ? XOBJ_EVENT_NOTIFICATION : XOBJ_EVENT_SYNCHRONIZATION);
+    Event->Header.Size = sizeof(XKEVENT) / 4;
+    Event->Header.SignalState = State ? 1 : 0;
+    Event->Header.WaitListHead.Flink = Event->Header.WaitListHead.Blink = &Event->Header.WaitListHead;
+}
+
+void __stdcall KeInitializeSemaphore(XKSEMAPHORE *Semaphore, int32_t Count, int32_t Limit)
+{
+    KTRACE("%p, %d, %d", Semaphore, Count, Limit);
+    Semaphore->Header.Type = XOBJ_SEMAPHORE;
+    Semaphore->Header.Size = sizeof(XKSEMAPHORE) / 4;
+    Semaphore->Header.SignalState = Count;
+    Semaphore->Header.WaitListHead.Flink = Semaphore->Header.WaitListHead.Blink = &Semaphore->Header.WaitListHead;
+    Semaphore->Limit = Limit;
+}
+
+int32_t __stdcall KeReleaseSemaphore(XKSEMAPHORE *Semaphore, int32_t Increment, int32_t Adjustment, BOOLEAN Wait)
+{
+    KTRACE("%p, %d, %d, %u", Semaphore, Increment, Adjustment, Wait);
+    EnterCriticalSection(&g_disp);
+    int32_t prev = Semaphore->Header.SignalState;
+    Semaphore->Header.SignalState = prev + Adjustment;
+    g_gen[Semaphore]++;
+    auto it = g_wake.find(Semaphore);
+    if (it != g_wake.end()) SetEvent(it->second);
+    LeaveCriticalSection(&g_disp);
+    return prev;
+}
+
+void *__stdcall KeGetCurrentThread() { return xthread_kthread(xthread_current()); }
+
+BOOLEAN __stdcall RtlTryEnterCriticalSection(XRTL_CRITICAL_SECTION *cs)
+{
+    KTRACE("%p", cs);
+    void *me = xthread_kthread(xthread_current());
+    if (_InterlockedCompareExchange((volatile long *)&cs->LockCount, 0, -1) == -1) {
+        cs->OwningThread = me;
+        cs->RecursionCount = 1;
+        return TRUE;
+    }
+    if (cs->OwningThread == me) {
+        InterlockedIncrement((volatile LONG *)&cs->LockCount);
+        cs->RecursionCount++;
+        return TRUE;
+    }
+    return FALSE;
+}
+
 } // namespace xk

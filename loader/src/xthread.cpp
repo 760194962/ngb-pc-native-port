@@ -62,6 +62,10 @@ XThread *xthread_create_context(uint32_t tls_size)
         t->tls_size = tls_size;
         t->tls_data = (uint8_t *)_aligned_malloc(tls_size + 16, 16);
         memset(t->tls_data, 0, tls_size + 16);
+        // The console's kernel puts the TLS block at the top of the stack, its end 16-byte aligned; nxdk programs (the
+        // Insignia Setup Assistant) assert TlsData + 4 is aligned (lib/winapi/thread.c). The supported games keep the
+        // start-aligned block they were tested with.
+        if (!g_cfg.profile) t->tls_data += (16 - tls_size % 16) % 16;
     }
     *(uint32_t *)(t->ethread + KTHREAD_TLS_DATA) = (uint32_t)(uintptr_t)t->tls_data;
     *(uint32_t *)(t->prcb + 0) = (uint32_t)(uintptr_t)t->ethread;

@@ -204,4 +204,22 @@ extern XANSI_STRING HalDiskSerialNumber;
 void ktick_update(); // called by the DPC thread each time it wakes
 
 void ksync_dump_waits(); // k_sync.cpp: press-file "waits"
+
+// nxdk programs (the Insignia Setup Assistant): k_sync.cpp, k_nxdk.cpp
+void __stdcall KeInitializeEvent(XKEVENT *Event, uint32_t Type, BOOLEAN State);
+void __stdcall KeInitializeSemaphore(XKSEMAPHORE *Semaphore, int32_t Count, int32_t Limit);
+int32_t __stdcall KeReleaseSemaphore(XKSEMAPHORE *Semaphore, int32_t Increment, int32_t Adjustment, BOOLEAN Wait);
+void *__stdcall KeGetCurrentThread();
+BOOLEAN __stdcall RtlTryEnterCriticalSection(XRTL_CRITICAL_SECTION *cs);
+NTSTATUS __stdcall ExSaveNonVolatileSetting(uint32_t ValueIndex, uint32_t Type, const void *Value, uint32_t ValueLength);
+int32_t __fastcall KInterlockedDecrement(volatile int32_t *Addend);
+int32_t __fastcall KInterlockedIncrement(volatile int32_t *Addend);
+int32_t __fastcall KInterlockedExchange(volatile int32_t *Target, int32_t Value);
+NTSTATUS __stdcall NtOpenDirectoryObject(HANDLE *DirectoryHandle, XOBJECT_ATTRIBUTES *ObjectAttributes);
+NTSTATUS __stdcall NtQueryDirectoryObject(HANDLE DirectoryHandle, void *Buffer, uint32_t Length, BOOLEAN ReturnSingleEntry,
+                                          uint32_t *Context, uint32_t *ReturnLength);
+NTSTATUS __stdcall NtPulseEvent(HANDLE EventHandle, int32_t *PreviousState);
+void __stdcall RtlRaiseException(void *ExceptionRecord);
+void __stdcall RtlUnwind(void *TargetFrame, void *TargetIp, void *ExceptionRecord, void *ReturnValue);
+void __stdcall KRtlZeroMemory(void *Destination, uint32_t Length);
 } // namespace xk

@@ -4,6 +4,8 @@
 #include "hooks.h"
 #include "kernel/kexports.h"
 #include "net/nvnet.h"
+#include "nv2a_display.h"
+#include "usb_ohci.h"
 #include "net/online.h"
 #include "sha1.h"
 
@@ -97,6 +99,7 @@ uint32_t __stdcall AvSetDisplayMode(void *RegisterBase, uint32_t Step, uint32_t 
                                     uint32_t FrameBuffer)
 {
     KTRACE("%p, %u, 0x%x, 0x%x, %u, 0x%x", RegisterBase, Step, Mode, Format, Pitch, FrameBuffer);
+    nv2a_display_mode(Mode, Format, Pitch, FrameBuffer); // a program drawing its own framebuffer (nv2a_display.cpp)
     return 0;
 }
 
@@ -158,6 +161,21 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
     if (n <= 4 || n % 10000 == 0)
         logf("[k] ExQueryNonVolatileSetting(0x%x, len %u) -> %s 0x%x%s", ValueIndex, ValueLength, known ? "" : "UNKNOWN, ", dword,
              n == 4 ? " (later queries of it: every 10000th logged)" : "");
+    if (!known && !g_cfg.profile && ValueIndex >= 0x100 && ValueIndex <= 0x102) {
+        // A program without a build profile (the Insignia Setup Assistant) offline: placeholder factory values, so it gets
+        // past its start (it reboots without a MAC address). Online, the registered console's come from above.
+        static const uint8_t serial[12] = {'0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'};
+        static const uint8_t mac[6] = {0x00, 0x50, 0xF2, 0x00, 0x00, 0x01}; // Microsoft's OUI, as Xbox consoles have
+        static const uint8_t key[16] = {};
+        const uint8_t *v = ValueIndex == 0x100 ? serial : ValueIndex == 0x101 ? mac : key;
+        uint32_t vs = ValueIndex == 0x100 ? 12 : ValueIndex == 0x101 ? 6 : 16;
+        if (ValueLength < vs) return XSTATUS_BUFFER_TOO_SMALL;
+        if (Type) *Type = 3;
+        memcpy(Value, v, vs);
+        if (ResultLength) *ResultLength = vs;
+        logf("[k] ExQueryNonVolatileSetting(0x%x): offline placeholder (%u bytes)", ValueIndex, vs);
+        return XSTATUS_SUCCESS;
+    }
     if (!known) return XSTATUS_OBJECT_NAME_NOT_FOUND;
     if (ValueLength < size) return XSTATUS_BUFFER_TOO_SMALL;
     if (Type) *Type = type;
@@ -376,7 +394,9 @@ void __stdcall KeInitializeInterrupt(XKINTERRUPT *Interrupt, void *ServiceRoutin
 
 BOOLEAN __stdcall KeConnectInterrupt(XKINTERRUPT *Interrupt)
 {
-    if (nvnet_connect_interrupt(Interrupt)) { // online play: the NIC's interrupt is raised by its model (net/nvnet.cpp)
+    if (nvnet_connect_interrupt(Interrupt) || // online play: the NIC's interrupt is raised by its model (net/nvnet.cpp)
+        nv2a_connect_interrupt(Interrupt) || // a program driving the display (nv2a_display.cpp) and USB (usb_ohci.cpp) itself
+        usb_ohci_connect_interrupt(Interrupt)) {
         if (Interrupt->Connected) return FALSE;
         Interrupt->Connected = 1;
         return TRUE;
