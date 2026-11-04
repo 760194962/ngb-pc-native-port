@@ -652,6 +652,9 @@ using Hle = xd3d::Hle;
 // model's gamepad reports (usb_ohci.cpp)
 void pad_report(uint8_t out[18])
 {
+    // The USB model's controller (nxdk programs: the Insignia Setup Assistant) is read without XInitDevices, which loads
+    // the PC pads for the games: only scripted presses reached it (the user's pad did nothing, r969)
+    load_xinput();
     XGamepad g;
     read_pad(0, g);
     memcpy(out, &g, 18);
