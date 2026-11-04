@@ -393,6 +393,7 @@ enum class Str {
     OnlineAccountsRow, // the Online page: the console's gamertags, one a row, and the import card
     OnlineNoGamertag,
     OnlineXemuCard,
+    OnlineDamaged, // an account that did not check out with its console's key (left out of an import)
     Count
 };
 

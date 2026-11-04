@@ -596,8 +596,8 @@ const Pair kText[(int)Str::Count] = {
      L"Not ready to play online yet: register first (How to register)"},
     {L"导入账号时才用到；不选也能用本机账号联网。",
      L"Only needed to import accounts; the accounts here play online without them."},
-    {L"和本机不是同一台主机：它的账号不能导入",
-     L"Not the same console as the one here: its accounts cannot be imported"},
+    {L"（会转到本机主机）",
+     L" (moved onto this console)"},
     {L"：",
      L": "},
     {L"✓ 账号都已在本机",
@@ -623,9 +623,9 @@ const Pair kText[(int)Str::Count] = {
     {L"新建一台主机？",
      L"Make a new console?"},
     {L"移植版会生成一台新的 Xbox 主机（新的序列号和密钥），保存在存档目录里。接着用 Insignia 注册程序注册它（「注册主机」），再建玩家代号。\n\n"
-     L"它和 xemu 里的主机是两台不同的主机：xemu 里的账号以后不能导入到这台。已经在 xemu 里注册过 Insignia 的话，请改用「从 xemu 导入」。",
+     L"以前在 xemu 里联网玩过的话，直接「从 xemu 导入」更省事，不用新建。新建以后，xemu 里的账号也还能导入过来（会转到这台新主机上）。",
      L"The port makes a new Xbox console (a new serial number and keys) in the save folder. Then register it with the Insignia Setup Assistant (Register) and make a gamertag.\n\n"
-     L"It is not the console in xemu: xemu\u2019s accounts cannot be imported onto it later. Registered with Insignia in xemu already? Use Import instead."},
+     L"Played online in xemu before? Import is simpler, with no new console. Made one anyway, xemu\u2019s accounts can still be imported onto it."},
     {L"新建失败：",
      L"Could not make it: "},
     {L"注册程序正在运行：在它的窗口里选「Register Xbox」，完成后选「Quit」关掉它",
@@ -648,6 +648,8 @@ const Pair kText[(int)Str::Count] = {
      L"No gamertag yet: make one with NEW ACCOUNT in the Xbox Live dashboard"},
     {L"从 xemu 导入（以前在 xemu 里联网玩过才需要）",
      L"Import from xemu (only if you played online in xemu before)"},
+    {L"校验不过、没有导入：",
+     L"Did not check out, not imported: "},
 };
 
 } // namespace

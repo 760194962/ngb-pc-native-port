@@ -286,6 +286,123 @@ int find_xuid(const std::vector<uint8_t> &c, const uint8_t *xuid)
     return -1;
 }
 
+// --- an Xbox Live account belongs to its console (xonlinedash 0x1192A1 writes one, 0x119396 reads it; checked on three
+// real accounts): the record (its sector from offset 12, 0x6C bytes) holds the account's key at 0x50 encrypted with
+// 3DES-CBC, the key HMAC-SHA1(C1, HDD key)[0..4) + HMAC-SHA1(C2, HDD key)[0..20) (odd parity), the IV the 8 bytes of
+// its sector-11 table entry; and at 0x64 HMAC-SHA1(HDD key, the record's first 100 bytes, key in clear)[0..8). C1 and
+// C2 are the XOnline library's (xonlinedash.xbe 0x19E490 / 0x19E47C), read from the player's own copy of the dashboard
+// (Microsoft's data: not in the port). Moving an account to another console: decrypt and check with the old console's
+// HDD key, encrypt and sign with the new one's, with a new IV. ---
+
+constexpr uint32_t ACCT_REC = 12, ACCT_KEY = 0x50, ACCT_SIG = 0x64, ACCT_SIGNED = 100;
+
+struct AcctConsts {
+    uint8_t c1[16], c2[16];
+};
+
+// C1 and C2 from <hard disk>\Partition2\xodash\xonlinedash.xbe, the build the port knows (kProfileXod's SHA-256)
+bool acct_consts(AcctConsts &k)
+{
+    std::wstring path = host_full_path(g_cfg.hdd_dir) + L"\\Partition2\\xodash\\xonlinedash.xbe";
+    std::vector<uint8_t> x;
+    if (FILE *f = _wfopen(path.c_str(), L"rb")) {
+        fseek(f, 0, SEEK_END);
+        x.resize((size_t)ftell(f));
+        fseek(f, 0, SEEK_SET);
+        if (fread(x.data(), 1, x.size(), f) != x.size()) x.clear();
+        fclose(f);
+    }
+    if (x.size() < 0x1000) return false;
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    uint8_t digest[32] = {};
+    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) return false;
+    BCryptHash(alg, nullptr, 0, x.data(), (ULONG)x.size(), digest, 32);
+    BCryptCloseAlgorithmProvider(alg, 0);
+    char hex[65];
+    for (int i = 0; i < 32; i++) snprintf(hex + i * 2, 3, "%02x", digest[i]);
+    if (strcmp(hex, kProfileXod.sha256)) return false;
+    uint32_t base, nsec, secp;
+    memcpy(&base, &x[0x104], 4);
+    memcpy(&nsec, &x[0x11C], 4);
+    memcpy(&secp, &x[0x120], 4);
+    auto copy = [&](uint32_t va, uint8_t *out) {
+        for (uint32_t i = 0; i < nsec; i++) {
+            uint32_t h[4];
+            size_t at = secp - base + i * 56 + 4;
+            if (at + 16 > x.size()) return false;
+            memcpy(h, &x[at], 16); // virtual address, size, raw address, raw size
+            if (va >= h[0] && va + 16 <= h[0] + h[3] && h[2] + (va - h[0]) + 16 <= x.size()) {
+                memcpy(out, &x[h[2] + va - h[0]], 16);
+                return true;
+            }
+        }
+        return false;
+    };
+    return copy(0x19E490, k.c1) && copy(0x19E47C, k.c2);
+}
+
+// The account key's 3DES key for a console's HDD key
+void acct_des_key(const AcctConsts &k, const uint8_t hd[16], uint8_t key[24])
+{
+    uint8_t h1[20], h2[20];
+    xk::XcHMAC(k.c1, 16, hd, 16, nullptr, 0, h1);
+    xk::XcHMAC(k.c2, 16, hd, 16, nullptr, 0, h2);
+    memcpy(key, h1, 4);
+    memcpy(key + 4, h2, 20);
+    xk::XcDESKeyParity(key, 24);
+    SecureZeroMemory(h1, sizeof h1);
+    SecureZeroMemory(h2, sizeof h2);
+}
+
+void acct_crypt(const uint8_t key[24], const uint8_t iv[8], uint8_t data[16], bool encrypt)
+{
+    alignas(8) uint8_t table[1024];
+    uint8_t fb[8];
+    memcpy(fb, iv, 8);
+    xk::XcKeyTable(1, table, key);
+    xk::XcBlockCryptCBC(1, 16, data, data, table, encrypt ? 1 : 0, fb);
+    SecureZeroMemory(table, sizeof table);
+}
+
+// Account slot i of from (a console with HDD key from_hd) into slot to of c (HDD key to_hd): its sector and table entry,
+// the key encrypted and the record signed again. false when it does not check out with from_hd (left out).
+bool acct_move(const std::vector<uint8_t> &from, int i, const uint8_t from_hd[16], std::vector<uint8_t> &c, int to,
+               const uint8_t to_hd[16], const AcctConsts &k)
+{
+    uint8_t sec[512], entry[12], rec_key[24], sig[20];
+    memcpy(sec, &from[(FIRST_SLOT + i) * 512], 512);
+    memcpy(entry, &from[TABLE_SECTOR * 512 + 12 + 12 * i], 12);
+    uint8_t *rec = sec + ACCT_REC;
+    acct_des_key(k, from_hd, rec_key);
+    acct_crypt(rec_key, entry + 4, rec + ACCT_KEY, false);
+    xk::XcHMAC(from_hd, 16, rec, ACCT_SIGNED, nullptr, 0, sig);
+    bool ok = !memcmp(sig, rec + ACCT_SIG, 8);
+    if (ok && BCryptGenRandom(nullptr, entry + 4, 8, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) ok = false;
+    if (ok) {
+        xk::XcHMAC(to_hd, 16, rec, ACCT_SIGNED, nullptr, 0, sig);
+        memcpy(rec + ACCT_SIG, sig, 8);
+        acct_des_key(k, to_hd, rec_key);
+        acct_crypt(rec_key, entry + 4, rec + ACCT_KEY, true);
+        memcpy(&c[(FIRST_SLOT + to) * 512], sec, 512);
+        memcpy(&c[TABLE_SECTOR * 512 + 12 + 12 * to], entry, 12);
+        sector_checksum(c, FIRST_SLOT + to);
+    }
+    SecureZeroMemory(sec, sizeof sec);
+    SecureZeroMemory(rec_key, sizeof rec_key);
+    SecureZeroMemory(sig, sizeof sig);
+    return ok;
+}
+
+// The HDD key of an EEPROM (its security section); false if it does not verify
+bool eeprom_hdkey(const uint8_t e[256], uint8_t hd[16])
+{
+    uint8_t dec[28];
+    bool ok = decrypt_eeprom(e, dec) != nullptr;
+    if (ok) memcpy(hd, dec + 8, 16);
+    SecureZeroMemory(dec, sizeof dec);
+    return ok;
+}
+
 // Reads and checks the xemu EEPROM (black.ini online_eeprom) into e; "" or why not, for the player
 std::wstring xemu_eeprom(uint8_t e[256])
 {
@@ -322,20 +439,32 @@ bool import_xemu(std::string &r)
     if (!sector_signed(img, 9)) return err("no machine account in the image", L"xemu 硬盘里没有注册过的主机：先在 xemu 里注册 Insignia");
     uint8_t mine[256];
     bool have_eeprom = read_file(local_eeprom_path(), 0, mine, sizeof mine);
-    if (have_eeprom && memcmp(mine, e, sizeof e))
-        return err("the port has another console", L"移植版已经是另一台主机，账户不能跨主机导入");
     std::vector<uint8_t> c;
     uint8_t serial[12];
     int st = store_load(c, serial);
-    if (st == 1 && memcmp(serial, e + 0x34, 12)) return err("the account store is another console's", L"本地账户属于另一台主机");
-    bool fresh = st != 1;
+    // The port has a console of its own (made here): xemu's accounts move onto it, encrypted and signed again for it
+    const bool other = have_eeprom && memcmp(mine, e, sizeof e);
+    uint8_t from_hd[16] = {}, to_hd[16] = {};
+    AcctConsts k = {};
+    if (other) {
+        if (st != 1 || memcmp(serial, mine + 0x34, 12))
+            return err("the port's console has no account store of its own", L"本地账户文件缺失或不配套（请回报）");
+        std::wstring p2 = host_full_path(g_cfg.hdd_dir) + L"\\Partition2";
+        if (!dash_dir_ensure(g_cfg.online_hdd, p2, "xodash", L"xonlinedash.xbe") || !acct_consts(k))
+            return err("the dashboard the accounts' crypto needs is missing", L"导入到这台主机要用到 xemu 硬盘里的 Xbox Live 仪表盘，没找到");
+        if (!eeprom_hdkey(e, from_hd) || !eeprom_hdkey(mine, to_hd))
+            return err("an EEPROM does not verify", L"EEPROM 无效");
+    } else if (st == 1 && memcmp(serial, e + 0x34, 12)) {
+        return err("the account store is another console's", L"本地账户属于另一台主机");
+    }
+    bool fresh = !other && st != 1;
     if (fresh) {
         c = img; // everything: network settings, machine account, the accounts
         memset(c.data(), 0, OVERLAY_START);
         for (int i = 0; i < SLOTS; i++)
             if (slot_used(c, i)) put("imported", slot_name(c, i));
     } else {
-        if (!sector_signed(c, 9)) memcpy(&c[9 * 512], &img[9 * 512], 512);
+        if (!other && !sector_signed(c, 9)) memcpy(&c[9 * 512], &img[9 * 512], 512); // never another console's
         bool table = false;
         for (int i = 0; i < SLOTS; i++) {
             if (!slot_used(img, i)) continue;
@@ -355,15 +484,27 @@ bool import_xemu(std::string &r)
                 memcpy(&c[TABLE_SECTOR * 512], &img[TABLE_SECTOR * 512], 512);
                 memset(&c[TABLE_SECTOR * 512 + 12], 0, 12 * SLOTS);
             }
-            memcpy(&c[(FIRST_SLOT + to) * 512], &img[(FIRST_SLOT + i) * 512], 512);
-            memcpy(slot_entry(c, to), slot_entry(img, i), 12);
+            if (other) {
+                if (!acct_move(img, i, from_hd, c, to, to_hd, k)) {
+                    logf("online: import from xemu: an account does not check out with its console's key; left out");
+                    put("damaged", name);
+                    continue;
+                }
+            } else {
+                memcpy(&c[(FIRST_SLOT + to) * 512], &img[(FIRST_SLOT + i) * 512], 512);
+                memcpy(slot_entry(c, to), slot_entry(img, i), 12);
+            }
             table = true;
             put("imported", name);
         }
         if (table) sector_checksum(c, TABLE_SECTOR);
     }
-    bool ok = (have_eeprom || write_atomic(local_eeprom_path(), e, sizeof e)) && store_save(c, e + 0x34);
+    SecureZeroMemory(from_hd, sizeof from_hd);
+    SecureZeroMemory(to_hd, sizeof to_hd);
+    SecureZeroMemory(&k, sizeof k);
+    bool ok = (have_eeprom || write_atomic(local_eeprom_path(), e, sizeof e)) && store_save(c, (other ? mine : e) + 0x34);
     SecureZeroMemory(e, sizeof e);
+    SecureZeroMemory(mine, sizeof mine);
     SecureZeroMemory(img.data(), img.size());
     SecureZeroMemory(c.data(), c.size());
     if (!ok) return err("could not write the port's console files", L"写不了本地的主机文件（存档目录只读？）");

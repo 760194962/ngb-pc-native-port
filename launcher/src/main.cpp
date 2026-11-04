@@ -867,6 +867,7 @@ void online_import()
         part(Str::OnlineImported, "imported");
         part(Str::OnlineExists, "exists");
         part(Str::OnlineFull, "full");
+        part(Str::OnlineDamaged, "damaged");
         g.import_result = s.empty() ? S(Str::OnlineNothing) : s;
         g.import_bad = r.count("full") && !r.count("imported");
     }
@@ -2524,10 +2525,12 @@ struct Painter {
         else if (ee != "ok") st = S(Str::OnlineEepromBad);
         else if (hdd != "ok") st = S(Str::OnlineHddBad) + from_utf8(hdd);
         else if (online_value("registered") != "1") st = S(Str::OnlineNotRegistered);
-        else if (online_value("same_console") == "0") st = S(Str::OnlineOtherConsole);
         else {
             st = S(Str::OnlineXemuOk);
-            if (g.online.count("importable")) st += S(Str::OnlineImportable) + names("importable"), can_import = true;
+            if (g.online.count("importable")) { // another console's accounts move onto this one (re-encrypted: loader net/online.cpp)
+                st += S(Str::OnlineImportable) + names("importable"), can_import = true;
+                if (online_value("same_console") == "0") st += S(Str::OnlineOtherConsole);
+            }
             else if (g.online.count("account")) st = S(Str::OnlineAllHere);
             can_import = can_import || online_value("local") != "ok"; // the console itself comes over the first time
             good = true;
