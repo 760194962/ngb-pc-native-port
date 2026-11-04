@@ -8,10 +8,14 @@
 #include "kernel/nt.h"
 #include "net/online.h"
 
+#include <algorithm>
+#include <cstdio>
 #include <intrin.h>
 
 #include <map>
 #include <mutex>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -23,6 +27,10 @@ std::mutex g_contig_mutex;
 uint8_t *g_contig_base;                     // == 0x80000000 when the fixed reservation worked
 std::map<uint32_t, uint32_t> g_contig_free;  // offset -> size
 std::map<uint32_t, uint32_t> g_contig_used;  // offset -> size
+// For running out (a player's crash after 89 minutes, 2.1.3): who holds the memory (offset -> the allocation's caller),
+// how much is held, and each new 4 MB high-water mark, logged
+std::map<uint32_t, uint32_t> g_contig_site;
+uint32_t g_contig_held, g_contig_mark;
 
 HANDLE g_pool_heap;
 constexpr uint32_t POOL_MAGIC = 0x4C4F4F50; // 'POOL'
@@ -103,8 +111,43 @@ uint32_t __stdcall ExQueryPoolBlockSize(void *PoolBlock)
 
 // --- contiguous memory ---
 
+// Under g_contig_mutex: the largest free block, and the callers holding the most (count and bytes), for the log
+static std::string contig_report()
+{
+    uint32_t largest = 0, free_total = 0;
+    for (auto &f : g_contig_free) largest = std::max(largest, f.second), free_total += f.second;
+    std::map<uint32_t, std::pair<uint32_t, uint32_t>> by_site; // caller -> {blocks, bytes}
+    for (auto &u : g_contig_used) {
+        auto s = g_contig_site.find(u.first);
+        auto &e = by_site[s == g_contig_site.end() ? 0 : s->second];
+        e.first++, e.second += u.second;
+    }
+    std::vector<std::pair<uint32_t, std::pair<uint32_t, uint32_t>>> v(by_site.begin(), by_site.end());
+    std::sort(v.begin(), v.end(), [](auto &a, auto &b) { return a.second.second > b.second.second; });
+    char buf[160];
+    snprintf(buf, sizeof buf, "%u KB held in %zu blocks, %u KB free (largest block %u KB); most held by:", g_contig_held >> 10,
+             g_contig_used.size(), free_total >> 10, largest >> 10);
+    std::string r = buf;
+    for (size_t i = 0; i < v.size() && i < 6; i++) {
+        snprintf(buf, sizeof buf, " %08x %u KB in %u", v[i].first, v[i].second.second >> 10, v[i].second.first);
+        r += buf;
+    }
+    return r;
+}
+
+static void *contig_alloc(uint32_t NumberOfBytes, uint32_t LowestAcceptableAddress, uint32_t HighestAcceptableAddress,
+                          uint32_t Alignment, uint32_t site);
+
 void *__stdcall MmAllocateContiguousMemoryEx(uint32_t NumberOfBytes, uint32_t LowestAcceptableAddress,
                                              uint32_t HighestAcceptableAddress, uint32_t Alignment, uint32_t ProtectionType)
+{
+    KTRACE("0x%x, 0x%x, 0x%x, 0x%x, 0x%x)", NumberOfBytes, LowestAcceptableAddress, HighestAcceptableAddress, Alignment, ProtectionType);
+    return contig_alloc(NumberOfBytes, LowestAcceptableAddress, HighestAcceptableAddress, Alignment,
+                        (uint32_t)(uintptr_t)_ReturnAddress());
+}
+
+static void *contig_alloc(uint32_t NumberOfBytes, uint32_t LowestAcceptableAddress, uint32_t HighestAcceptableAddress,
+                          uint32_t Alignment, uint32_t site)
 {
     uint32_t size = (NumberOfBytes + PAGE - 1) & ~(PAGE - 1);
     if (!size) size = PAGE;
@@ -127,21 +170,27 @@ void *__stdcall MmAllocateContiguousMemoryEx(uint32_t NumberOfBytes, uint32_t Lo
             if (start > b) g_contig_free[b] = start - b;
             if (start + size < b + s) g_contig_free[start + size] = b + s - (start + size);
             g_contig_used[start] = size;
+            g_contig_site[start] = site;
+            g_contig_held += size;
             result = g_contig_base + start;
             break;
         }
+        if (result && g_contig_held >= g_contig_mark + (4u << 20)) { // a new high-water mark (4 MB steps)
+            g_contig_mark = g_contig_held & ~((4u << 20) - 1);
+            logf("[k] contiguous memory: %s", contig_report().c_str());
+        }
+        if (!result)
+            logf("[k] MmAllocateContiguousMemoryEx: out of contiguous memory for 0x%x bytes (from %08x): %s", NumberOfBytes, site,
+                 contig_report().c_str());
     }
     if (result) memset(result, 0, size);
-    KTRACE("0x%x, 0x%x, 0x%x, 0x%x, 0x%x) -> %p (", NumberOfBytes, LowestAcceptableAddress, HighestAcceptableAddress, Alignment,
-           ProtectionType, result);
-    if (!result) logf("[k] MmAllocateContiguousMemoryEx: out of contiguous memory for 0x%x bytes", NumberOfBytes);
     return result;
 }
 
 void *__stdcall MmAllocateContiguousMemory(uint32_t NumberOfBytes)
 {
     KTRACE("0x%x", NumberOfBytes);
-    return MmAllocateContiguousMemoryEx(NumberOfBytes, 0, 0xFFFFFFFF, 0, PAGE_READWRITE);
+    return contig_alloc(NumberOfBytes, 0, 0xFFFFFFFF, 0, (uint32_t)(uintptr_t)_ReturnAddress());
 }
 
 void __stdcall MmFreeContiguousMemory(void *BaseAddress)
@@ -156,6 +205,8 @@ void __stdcall MmFreeContiguousMemory(void *BaseAddress)
     }
     uint32_t size = it->second;
     g_contig_used.erase(it);
+    g_contig_site.erase(off);
+    g_contig_held -= size;
     auto next = g_contig_free.lower_bound(off);
     if (next != g_contig_free.end() && next->first == off + size) {
         size += next->second;

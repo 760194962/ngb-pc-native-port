@@ -123,6 +123,7 @@ struct Voice : Object {
 struct Buffer : Voice {
     uint8_t *data = nullptr;
     uint32_t bytes = 0;
+    uint8_t *own = nullptr; // the memory the library allocated for it (CreateSoundBuffer), given back when it goes
     uint32_t cur = 0; // next source frame to fetch
     uint32_t loop_start = 0, loop_len = 0, play_start = 0, play_len = 0; // bytes
     bool playing = false, looping = false;
@@ -832,8 +833,9 @@ HRESULT __stdcall IDirectSound_CreateSoundBuffer(Object *pThis, BufferDesc *pdsb
     b->vtbl = kPlainVtbl;
     b->bytes = pdsbd->dwBufferBytes;
     if (b->bytes) { // the library allocates the buffer memory unless the game supplies it later
-        b->data = (uint8_t *)xk::MmAllocateContiguousMemoryEx(b->bytes, 0, 0xFFFFFFFF, 0, PAGE_READWRITE);
-        memset(b->data, 0, b->bytes);
+        b->data = b->own = (uint8_t *)xk::MmAllocateContiguousMemoryEx(b->bytes, 0, 0xFFFFFFFF, 0, PAGE_READWRITE);
+        if (b->data) memset(b->data, 0, b->bytes);
+        else logf("[dsound] CreateSoundBuffer: no contiguous memory for %u bytes (the buffer stays silent)", b->bytes);
     }
     {
         std::lock_guard<std::recursive_mutex> g(g_mutex);
@@ -1080,6 +1082,11 @@ uint32_t __stdcall IDirectSoundBuffer_Release(void *p)
     if (b->refs && --b->refs == 0) {
         g_buffers.erase(std::remove(g_buffers.begin(), g_buffers.end(), b), g_buffers.end());
         b->magic = 0;
+        // The memory the library allocated goes back (out of the mixer's list, under its lock: nothing reads it now).
+        // It never did before: a long session ran the 64 MB of contiguous memory out and the next buffer's memset
+        // wrote to null (a player's crash after 89 minutes, 2.1.3).
+        if (b->own) xk::MmFreeContiguousMemory(b->own);
+        b->own = b->data = nullptr;
         return 0;
     }
     return b->refs;
