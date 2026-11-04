@@ -116,6 +116,16 @@ uint32_t __cdecl DbgPrint(const char *Format, ...)
     va_end(ap);
     size_t n = strlen(msg);
     while (n && (msg[n - 1] == '\n' || msg[n - 1] == '\r')) msg[--n] = 0;
+    // No keys in the log: the Insignia Setup Assistant prints its registration request, the console's HDD key and online
+    // key in it ("hdd_key": "<32 hex digits>"). Any run of 32 or more hex digits is hidden, whatever prints it.
+    for (size_t i = 0; msg[i];) {
+        size_t j = i;
+        while (isxdigit((unsigned char)msg[j])) j++;
+        if (j - i >= 32) {
+            memset(msg + i, '*', j - i);
+            i = j;
+        } else i = j > i ? j : i + 1;
+    }
     logf("[DbgPrint] %s", msg);
     return 0;
 }
