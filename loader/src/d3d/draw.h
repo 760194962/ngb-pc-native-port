@@ -29,6 +29,7 @@ void draw_inline_array(uint32_t prim, const uint32_t *data, uint32_t dwords);
 // cfg:pixwatch: read the watched back-buffer pixel back; a change is logged against the previous caller (draw.cpp).
 void pixwatch_check(const char *next, bool depth_read = true);
 bool write_png(const wchar_t *path, uint32_t w, uint32_t h, const uint8_t *bgra); // BGRA, top row first
+std::string callers_of(const uint32_t *sp); // the game code up the stack (for kernel logs)
 // The shaders / vertex input the draws remember having sent are unknown again (after a fullscreen pass).
 void forget_sent_shaders();
 // After a device Reset: Direct3D is back at its defaults, so every state, texture and shader the draws remember

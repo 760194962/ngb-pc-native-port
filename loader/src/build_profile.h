@@ -289,13 +289,27 @@ inline const BuildProfile kProfileNg04Updater = {
     0x0008C5B4, 0, 0, kNg04UpQpc, 1, 0x00017F5A, "NG04UP", L"Ninja Gaiden",
 };
 
+// The Xbox Live part of the console's dashboard (C:\xodash\xonlinedash.xbe, XODASH 5971 on XDK 5849 libraries, title
+// FFFE0000): Xbox Live account creation (Insignia: the gamertag). The player's own file, from their xemu hard disk image;
+// never shipped. Plain D3D8 as the 2004 updater's (tables: tools/gen_aux_tables.py "XOD"). _rtinit 0x8159D / _cinit
+// 0x81545, no fibers, QueryPerformanceCounter's rdtsc 0x7BA16 (work/ng04/profile_probe.py, 2026-11-04).
+inline const uint32_t kXodQpc[] = {0x7BA16};
+inline const BuildProfile kProfileXod = {
+    "Xbox Dashboard 5971: xonlinedash.xbe (Xbox Live)",
+    "ffe013d6067025281bc3c9bc9f9b62c99107baafdfb1005c2e98ae6dbc74714d",
+    0xFFFE0000, 43, false,
+    {{0x14CF60, 0x14CF6C}, {0x14CF70, 0x14CFE0}, {0x14CFE4, 0x14CFFC}},
+    {"D3D", "DSOUND", "XPP", nullptr},
+    0x001439FC, 0, 0, kXodQpc, 1, 0x0007BA16, "XOD", L"Xbox Live",
+};
+
 inline const BuildProfile *const kProfiles[] = {&kProfileBlack, &kProfileNgbHurricaneX21, &kProfileNgbUs,
                                                 &kProfileNgbHurricaneJp, &kProfileNgbBasicX2, &kProfileNinjaTomoe, &kProfileNinjaTrilogy,
                                                 &kProfileNinjaFCJ, &kProfileNinjaFCU, &kProfileNg04Tu,
                                                 &kProfileNg04Tomoe, &kProfileNg04Trilogy, &kProfileNg04Disc,
                                                 &kProfileNgbUsRetail, &kProfileNinjaTomoeRetail, &kProfileNinjaTrilogyRetail,
                                                 &kProfileNg04Downloader, &kProfileNg04DownloaderTu,
-                                                &kProfileNg04Updater};
+                                                &kProfileNg04Updater, &kProfileXod};
 
 // Ninja Gaiden 2004's disc as Redump has it ("Ninja Gaiden (USA, Asia) (En,Ja)", the user's, 2026-11-01): the same
 // build 1.02.04 as the files above (same time stamp and sections) but each program without the one byte those carry in

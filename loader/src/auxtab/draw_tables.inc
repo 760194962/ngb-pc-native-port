@@ -38,6 +38,12 @@ static const Hle kAuxDrawNG04UP[] = {
     {0x00041cd0u, "D3DDevice_DrawIndexedVertices", (void *)&D3DDevice_DrawIndexedVertices, "s s s", false},
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxDrawXOD[] = {
+    {0x000eaa80u, "D3DDevice_DrawVerticesUP", (void *)&D3DDevice_DrawVerticesUP, "s s s s", false},
+    {0x000eabf0u, "D3DDevice_DrawVertices", (void *)&D3DDevice_DrawVertices, "s s s", false},
+    {0x000eac90u, "D3DDevice_DrawIndexedVertices", (void *)&D3DDevice_DrawIndexedVertices, "s s s", false},
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_draw_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -71,6 +77,10 @@ const Hle *hle_draw_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04UP")) {
         *count = sizeof kAuxDrawNG04UP / sizeof kAuxDrawNG04UP[0] - 1;
         return kAuxDrawNG04UP;
+    }
+    if (!strcmp(xbe, "XOD")) {
+        *count = sizeof kAuxDrawXOD / sizeof kAuxDrawXOD[0] - 1;
+        return kAuxDrawXOD;
     }
     *count = 0;
     return nullptr;

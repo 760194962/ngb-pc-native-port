@@ -21,14 +21,17 @@ import os
 import re
 import sys
 
-XBES = ['NinjaTomoe', 'NinjaTrilogy', 'NinjaFCJ', 'NinjaFCU', 'NG04TU', 'NG04DISC', 'NG04DL', 'NG04UP']
+XBES = ['NinjaTomoe', 'NinjaTrilogy', 'NinjaFCJ', 'NinjaFCU', 'NG04TU', 'NG04DISC', 'NG04DL', 'NG04UP', 'XOD']
 # where each XBE is, relative to the work dir (default: ../game/x21/<name>.xbe). NG04TU: Ninja Gaiden (2004) title
 # update 1.06.04 (TDATA/54430003/$u/default.xbe), the main program the Hurricane Packs need; NG04DISC: its disc program
 # 1.02.04, run when the update is not installed; NG04DL: the disc's downloader.xbe (the XDK content downloader the
 # Xbox Live "NEW NOTICE!" starts); NG04UP: the disc's update.xbe (the XDK's online updater, which fetches the title update
 # when Xbox Live asks for it).
 XBE_PATHS = {'NG04TU': os.path.join('ng04', 'tu_default.xbe'), 'NG04DISC': os.path.join('ng04', 'disc_default.xbe'),
-             'NG04DL': os.path.join('ng04', 'downloader.xbe'), 'NG04UP': os.path.join('ng04', 'update.xbe')}
+             'NG04DL': os.path.join('ng04', 'downloader.xbe'), 'NG04UP': os.path.join('ng04', 'update.xbe'),
+             # XOD: the Xbox Live part of the console's dashboard (C:\xodash\xonlinedash.xbe, 5971; the player's own, taken
+             # from their xemu hard disk image, never shipped): Xbox Live account creation
+             'XOD': os.path.join('xod', 'xonlinedash.xbe')}
 # Builds of x2.1's own libraries (same code at other addresses): their entries and D3D data layout are x2.1's, carried
 # over by code matching (tools/x21_map.py), so the register conventions verified on x2.1 hold.
 FROM_X21 = {'NG04TU', 'NG04DISC'}
@@ -50,7 +53,10 @@ NATIVE_FUNCS = {'NG04DL': [0x000404D0, 0x00040440, 0x0004C620, 0x0004C660, 0x000
                 # the updater: the same XPR loading and helpers, SetIndices (the index data and base vertex into the
                 # device, read by the inline DrawIndexedPrimitive) and CreateIndexBuffer2 (an XMemAlloc and a header)
                 'NG04UP': [0x00042290, 0x00042200, 0x000418C0, 0x00041900, 0x0003F320, 0x00041920, 0x0003E270,
-                           0x0008C9FB]}
+                           0x0008C9FB],
+                # the dashboard's Xbox Live part: the same functions of the same D3D library (matched by name and bytes)
+                'XOD': [0x000EBEF0, 0x000EBE60, 0x000EBFA0, 0x000EBFE0, 0x000E8FE0, 0x000EA4F0, 0x000E7EA0,
+                        0x0014C793]}
 
 
 def sections_of(x):

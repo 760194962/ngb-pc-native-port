@@ -1208,6 +1208,9 @@ static void dump_bound_texture(int s, const Resource *r)
 // A BGRA picture as PNG (screenshots of a program drawing its own framebuffer: nv2a_display.cpp)
 bool write_png(const wchar_t *path, uint32_t w, uint32_t h, const uint8_t *bgra) { return write_png_bgra(path, w, h, bgra); }
 
+// The game code that called the function whose stack pointer this is (up to five, innermost first): for the kernel's logs
+std::string callers_of(const uint32_t *sp) { return game_callers(sp); }
+
 // cfg:pixwatch:X,Y: in a traced frame the back-buffer pixel X,Y (Xbox pixels) is read back before every draw and at
 // the swap; a change is put on the draw before (its callers). Finds the draw behind a band with no obvious owner
 // (2026-10-22). The 1x1 surfaces are made and released each time, so nothing in the default pool outlives a Reset.

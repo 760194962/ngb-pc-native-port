@@ -208,6 +208,11 @@ const KExport kExports[] = {
     F(306, RtlTryEnterCriticalSection, 1),
     F(312, RtlUnwind, 4),
     {320, "RtlZeroMemory", K_STD, 2, (void *)&xk::KRtlZeroMemory},
+    // the dashboard's Xbox Live part (xonlinedash.xbe): k_nxdk.cpp
+    F(9, HalReadSMCTrayState, 2),
+    F(91, IoDismountVolumeByName, 1),
+    F(286, RtlFreeAnsiString, 1),
+    F(290, RtlInitUnicodeString, 2),
 };
 
 const KExport *find_export(uint32_t ordinal)

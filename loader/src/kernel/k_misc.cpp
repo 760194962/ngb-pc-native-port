@@ -4,6 +4,7 @@
 #include "hooks.h"
 #include "kernel/kexports.h"
 #include "net/nvnet.h"
+#include "d3d/draw.h"
 #include "nv2a_display.h"
 #include "usb_ohci.h"
 #include "net/online.h"
@@ -314,7 +315,8 @@ static bool system_program(const std::wstring &xbe)
 
 void __stdcall HalReturnToFirmware(uint32_t Routine)
 {
-    logf("[k] HalReturnToFirmware(%u): the game asked to leave (0 halt, 1 reboot, 2 quick reboot, 3 fatal error)", Routine);
+    logf("[k] HalReturnToFirmware(%u): the game asked to leave (0 halt, 1 reboot, 2 quick reboot, 3 fatal error), from %s", Routine,
+         xd3d::callers_of((const uint32_t *)_AddressOfReturnAddress()).c_str());
     if (LaunchDataPage && (Routine == 1 || Routine == 2)) {
         const char *path = (const char *)LaunchDataPage->Header + 8;
         std::wstring xbe = launch_target(path);

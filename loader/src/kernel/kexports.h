@@ -222,4 +222,8 @@ NTSTATUS __stdcall NtPulseEvent(HANDLE EventHandle, int32_t *PreviousState);
 void __stdcall RtlRaiseException(void *ExceptionRecord);
 void __stdcall RtlUnwind(void *TargetFrame, void *TargetIp, void *ExceptionRecord, void *ReturnValue);
 void __stdcall KRtlZeroMemory(void *Destination, uint32_t Length);
+NTSTATUS __stdcall HalReadSMCTrayState(uint32_t *State, uint32_t *Count);
+NTSTATUS __stdcall IoDismountVolumeByName(XANSI_STRING *DeviceName);
+void __stdcall RtlFreeAnsiString(XANSI_STRING *AnsiString);
+void __stdcall RtlInitUnicodeString(XUNICODE_STRING *DestinationString, const wchar_t *SourceString);
 } // namespace xk

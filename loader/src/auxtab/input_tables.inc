@@ -90,6 +90,18 @@ static const Hle kAuxInputNG04UP[] = {
     {0x0008d536u, "XInitDevices", (void *)&XInitDevices, "s s", false}, // jmp thunk to 0x0008c73c
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxInputXOD[] = {
+    {0x00144040u, "XInitDevices", (void *)&XInitDevices, "s s", false},
+    {0x0014594au, "XGetDeviceChanges", (void *)&XGetDeviceChanges, "s s s", true},
+    {0x001459b7u, "XInputOpen", (void *)&XInputOpen, "s s s s", true},
+    {0x00145a0du, "XInputClose", (void *)&XInputClose, "s", false},
+    {0x00145bf1u, "XInputGetState", (void *)&XInputGetState, "s s", true},
+    {0x00145928u, "XGetDevices", (void *)&XGetDevices, "s", true},
+    {0x00144d1au, "XGetDeviceEnumerationStatus", (void *)&XGetDeviceEnumerationStatus, "", true},
+    {0x00145a19u, "XInputGetCapabilities", (void *)&XInputGetCapabilities, "s s", true},
+    {0x00145923u, "XInitDevices", (void *)&XInitDevices, "s s", false}, // jmp thunk to 0x00144040
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_input_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -123,6 +135,10 @@ const Hle *hle_input_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04UP")) {
         *count = sizeof kAuxInputNG04UP / sizeof kAuxInputNG04UP[0] - 1;
         return kAuxInputNG04UP;
+    }
+    if (!strcmp(xbe, "XOD")) {
+        *count = sizeof kAuxInputXOD / sizeof kAuxInputXOD[0] - 1;
+        return kAuxInputXOD;
     }
     *count = 0;
     return nullptr;

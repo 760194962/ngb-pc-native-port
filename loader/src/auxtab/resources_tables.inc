@@ -86,6 +86,18 @@ static const Hle kAuxResourcesNG04UP[] = {
     {0x00042340u, "Get2DSurfaceDesc", (void *)&D3D_Get2DSurfaceDesc, "s s s", false}, // jmp thunk to 0x00044ad0
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxResourcesXOD[] = {
+    {0x000ea530u, "D3DDevice_CreateVertexBuffer2", (void *)&D3DDevice_CreateVertexBuffer2, "s", true},
+    {0x000ea580u, "D3DVertexBuffer_Lock2", (void *)&D3DVertexBuffer_Lock2, "s s", true},
+    {0x000ea5d0u, "D3DPalette_Lock2", (void *)&D3DPalette_Lock2, "s s", true},
+    {0x000ebdd0u, "D3DResource_AddRef", (void *)&D3DResource_AddRef, "s", true},
+    {0x000ebe10u, "D3DResource_Release", (void *)&D3DResource_Release, "s", true},
+    {0x000ebcb0u, "D3D_DestroyResource", (void *)&D3D_DestroyResource, "s", false},
+    {0x000ebf20u, "D3DResource_BlockUntilNotBusy", (void *)&D3DResource_BlockUntilNotBusy, "s", false},
+    {0x000ee7d0u, "Get2DSurfaceDesc", (void *)&D3D_Get2DSurfaceDesc, "s s s", false},
+    {0x000ec000u, "Get2DSurfaceDesc", (void *)&D3D_Get2DSurfaceDesc, "s s s", false}, // jmp thunk to 0x000ee7d0
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_resource_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -119,6 +131,10 @@ const Hle *hle_resource_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04UP")) {
         *count = sizeof kAuxResourcesNG04UP / sizeof kAuxResourcesNG04UP[0] - 1;
         return kAuxResourcesNG04UP;
+    }
+    if (!strcmp(xbe, "XOD")) {
+        *count = sizeof kAuxResourcesXOD / sizeof kAuxResourcesXOD[0] - 1;
+        return kAuxResourcesXOD;
     }
     *count = 0;
     return nullptr;

@@ -1,5 +1,6 @@
-// Kernel exports that nxdk programs import and the games do not (the Insignia Setup Assistant, title FFFF0002:
-// SDL2, lwIP, its own NIC and USB drivers, mbedtls). The synchronization ones are in k_sync.cpp.
+// Kernel exports that the games do not import: nxdk programs' (the Insignia Setup Assistant, title FFFF0002: SDL2,
+// lwIP, its own NIC and USB drivers, mbedtls) and the dashboard's Xbox Live part (xonlinedash.xbe). The synchronization
+// ones are in k_sync.cpp.
 #include "kernel/kexports.h"
 #include "kernel/nt.h"
 
@@ -60,5 +61,37 @@ void __stdcall RtlUnwind(void *TargetFrame, void *TargetIp, void *ExceptionRecor
 }
 
 void __stdcall KRtlZeroMemory(void *Destination, uint32_t Length) { memset(Destination, 0, Length); }
+
+// The DVD tray: closed, with media (the SMC's 0x60), no change since boot
+NTSTATUS __stdcall HalReadSMCTrayState(uint32_t *State, uint32_t *Count)
+{
+    if (State) *State = 0x60;
+    if (Count) *Count = 0;
+    return XSTATUS_SUCCESS;
+}
+
+NTSTATUS __stdcall IoDismountVolumeByName(XANSI_STRING *DeviceName)
+{
+    logf("[k] IoDismountVolumeByName('%s'): nothing to dismount", DeviceName ? xstr(DeviceName).c_str() : "");
+    return XSTATUS_SUCCESS;
+}
+
+// Strings RtlUnicodeStringToAnsiString allocated (ExAllocatePoolWithTag, k_rtl.cpp)
+void __stdcall RtlFreeAnsiString(XANSI_STRING *AnsiString)
+{
+    if (AnsiString && AnsiString->Buffer) {
+        ExFreePool(AnsiString->Buffer);
+        AnsiString->Buffer = nullptr;
+        AnsiString->Length = AnsiString->MaximumLength = 0;
+    }
+}
+
+void __stdcall RtlInitUnicodeString(XUNICODE_STRING *DestinationString, const wchar_t *SourceString)
+{
+    size_t n = SourceString ? wcslen(SourceString) : 0;
+    DestinationString->Buffer = (wchar_t *)SourceString;
+    DestinationString->Length = (uint16_t)(n * 2);
+    DestinationString->MaximumLength = (uint16_t)(SourceString ? n * 2 + 2 : 0);
+}
 
 } // namespace xk

@@ -195,6 +195,33 @@ static const Hle kAuxDsoundNG04UP[] = {
     {0x00058f38u, "IDirectSoundBuffer_Stop", (void *)&IDirectSoundBuffer_Stop, "s", true},
     {0, nullptr, nullptr, "", false},
 };
+static const Hle kAuxDsoundXOD[] = {
+    {0x00104774u, "DirectSoundCreate", (void *)&DirectSoundCreate, "s s s", true},
+    {0x001047bbu, "DirectSoundCreateStream", (void *)&DirectSoundCreateStream, "s s", true},
+    {0x001045aau, "IDirectSound_CreateSoundBuffer", (void *)&IDirectSound_CreateSoundBuffer, "s s s s", true},
+    {0x001023aau, "IDirectSound_Release", (void *)&IDirectSound_Release, "s", true},
+    {0x00103496u, "DirectSoundDoWork", (void *)&DirectSoundDoWork, "", false},
+    {0x0010330eu, "IDirectSound_SetEffectData", (void *)&IDirectSound_SetEffectData, "s s s s s s", true},
+    {0x00103338u, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_Simple3, "s s s", true},
+    {0x001023c5u, "IDirectSoundBuffer_Release", (void *)&IDirectSoundBuffer_Release, "s", true},
+    {0x00103358u, "IDirectSoundBuffer_SetVolume", (void *)&Voice_SetVolume, "s s", true},
+    {0x00103374u, "IDirectSoundBuffer_SetHeadroom", (void *)&Voice_SetHeadroom, "s s", true},
+    {0x00103390u, "IDirectSoundBuffer_Play", (void *)&IDirectSoundBuffer_Play, "s s s s", true},
+    {0x001033ccu, "IDirectSoundBuffer_GetStatus", (void *)&IDirectSoundBuffer_GetStatus, "s s", true},
+    {0x001033e8u, "IDirectSoundBuffer_GetCurrentPosition", (void *)&IDirectSoundBuffer_GetCurrentPosition, "s s s", true},
+    {0x00103454u, "IDirectSoundBuffer_SetNotificationPositions", (void *)&IDirectSoundBuffer_SetNotificationPositions, "s s s", true},
+    {0x00103408u, "IDirectSoundBuffer_SetCurrentPosition", (void *)&IDirectSoundBuffer_SetCurrentPosition, "s s", true},
+    {0x00103aa9u, "IDirectSoundBuffer_SetFrequency", (void *)&IDirectSoundBuffer_SetFrequency, "s s", true},
+    {0x00104005u, "IDirectSoundBuffer_SetBufferData", (void *)&IDirectSoundBuffer_SetBufferData, "s s s", true},
+    {0x00103474u, "IDirectSoundStream_SetHeadroom", (void *)&Voice_SetHeadroom, "s s", true},
+    {0x00103479u, "IDirectSoundStream_SetMixBinVolumes_8", (void *)&Voice_SetMixBinVolumes, "s s", true},
+    {0x0010347eu, "IDirectSoundStream_FlushEx", (void *)&IDirectSoundStream_FlushEx, "s s s s", true},
+    {0x00103ac5u, "IDirectSoundStream_SetMixBins", (void *)&Voice_SetMixBins, "s s", true},
+    {0x00103424u, "IDirectSoundBuffer_Lock", (void *)&IDirectSoundBuffer_Lock, "s s s s s s s s", true},
+    {0x001023c0u, "IDirectSoundBuffer_Unlock", (void *)&IDirectSoundBuffer_Unlock, "s s s s s", true},
+    {0x001033b4u, "IDirectSoundBuffer_Stop", (void *)&IDirectSoundBuffer_Stop, "s", true},
+    {0, nullptr, nullptr, "", false},
+};
 const Hle *hle_dsound_table_aux(const char *xbe, size_t *count)
 {
     if (!strcmp(xbe, "NinjaTomoe")) {
@@ -228,6 +255,10 @@ const Hle *hle_dsound_table_aux(const char *xbe, size_t *count)
     if (!strcmp(xbe, "NG04UP")) {
         *count = sizeof kAuxDsoundNG04UP / sizeof kAuxDsoundNG04UP[0] - 1;
         return kAuxDsoundNG04UP;
+    }
+    if (!strcmp(xbe, "XOD")) {
+        *count = sizeof kAuxDsoundXOD / sizeof kAuxDsoundXOD[0] - 1;
+        return kAuxDsoundXOD;
     }
     *count = 0;
     return nullptr;
