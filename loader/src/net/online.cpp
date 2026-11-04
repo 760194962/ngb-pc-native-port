@@ -13,6 +13,7 @@
 #include "net/nvnet.h"
 #include "sha1.h"
 
+#include <bcrypt.h>
 #include <tlhelp32.h>
 
 #include <algorithm>
@@ -374,7 +375,108 @@ bool import_xemu(std::string &r)
     return true;
 }
 
+// --- a console of the port's own, without xemu: a new EEPROM made as xemu makes one (hw/xbox/eeprom_generation.c) ---
+
+// An EEPROM section checksum: the complement of the end-around-carry sum of its dwords (checked on a registered
+// console's EEPROM: the factory section 0x34-0x5F at 0x30, the user section 0x64-0xBF at 0x60)
+uint32_t eeprom_checksum(const uint8_t *p, size_t n)
+{
+    uint64_t t = 0;
+    for (size_t i = 0; i + 4 <= n; i += 4) {
+        uint32_t v;
+        memcpy(&v, p + i, 4);
+        t += v;
+        t = (t & 0xFFFFFFFF) + (t >> 32);
+    }
+    return ~(uint32_t)t;
+}
+
+// A new console: random serial number (12 digits: all the Setup Assistant checks, 0x11595), MAC address (Microsoft's
+// 00:50:F2), online key, HDD key and confounder; North America, NTSC-M, English. The security section encrypted with
+// the 1.0 kernel's states, as the registered xemu console's is. false if the system's random numbers fail.
+bool make_eeprom(uint8_t e[256])
+{
+    uint8_t r[64];
+    if (BCryptGenRandom(nullptr, r, sizeof r, BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) return false;
+    memset(e, 0, 256);
+    for (int i = 0; i < 12; i++) e[0x34 + i] = (uint8_t)('0' + r[i] % 10); // serial number (a slight bias: harmless)
+    e[0x40] = 0x00, e[0x41] = 0x50, e[0x42] = 0xF2;                        // MAC address
+    memcpy(e + 0x43, r + 12, 3);
+    memcpy(e + 0x48, r + 15, 16); // online key
+    uint32_t av = 0x00400100;     // NTSC-M
+    memcpy(e + 0x58, &av, 4);
+    uint32_t sum = eeprom_checksum(e + 0x34, 0x2C);
+    memcpy(e + 0x30, &sum, 4);
+    uint32_t lang = 1; // English
+    memcpy(e + 0x90, &lang, 4);
+    sum = eeprom_checksum(e + 0x64, 0x5C);
+    memcpy(e + 0x60, &sum, 4);
+    uint8_t plain[28];
+    memcpy(plain, r + 31, 8);       // confounder
+    memcpy(plain + 8, r + 39, 16);  // HDD key
+    uint32_t region = 1;            // North America
+    memcpy(plain + 24, &region, 4);
+    const HashStates &s = kStates[0]; // 1.0
+    uint8_t key[20], rc4[258];
+    xhash(s, plain, 28, e);  // the stored hash
+    xhash(s, e, 20, key);    // the RC4 key: the hash of it
+    xk::XcRC4Key(rc4, 20, key);
+    memcpy(e + 0x14, plain, 28);
+    xk::XcRC4Crypt(rc4, 28, e + 0x14);
+    SecureZeroMemory(r, sizeof r);
+    SecureZeroMemory(plain, sizeof plain);
+    SecureZeroMemory(key, sizeof key);
+    uint8_t dec[28];
+    bool ok = decrypt_eeprom(e, dec) != nullptr; // as the game will read it
+    SecureZeroMemory(dec, sizeof dec);
+    return ok;
+}
+
 } // namespace
+
+bool online_new_console(const std::wstring &out_path)
+{
+    // A console of the port's own in the hard disk folder, not yet registered with Insignia (the Setup Assistant does
+    // that); only when there is none (it would replace that console and leave its accounts behind)
+    std::string r;
+    auto finish = [&](bool ok) {
+        if (FILE *f = _wfopen(out_path.c_str(), L"wb")) {
+            fputs(r.c_str(), f);
+            fclose(f);
+        }
+        return ok;
+    };
+    uint8_t e[256];
+    std::vector<uint8_t> c;
+    uint8_t serial[12];
+    if (read_file(local_eeprom_path(), 0, e, sizeof e) || store_load(c, serial) != 0) {
+        r = "error = " + narrow(L"本机已经有主机了") + "\n";
+        return finish(false);
+    }
+    if (!kcrypto_selftest() || !make_eeprom(e)) {
+        r = "error = " + narrow(L"生成主机失败（请回报）") + "\n";
+        return finish(false);
+    }
+    c.assign(CONFIG_AREA, 0); // no network settings (the defaults: DHCP), no machine account, no accounts yet
+    bool ok = write_atomic(local_eeprom_path(), e, sizeof e) && store_save(c, e + 0x34);
+    SecureZeroMemory(e, sizeof e);
+    if (!ok) {
+        DeleteFileW(local_eeprom_path().c_str());
+        r = "error = " + narrow(L"写不了存档目录") + "\n";
+        return finish(false);
+    }
+    logf("online: a new console of the port's own made in %s (not registered with Insignia yet)",
+         narrow(host_full_path(g_cfg.hdd_dir)).c_str());
+    r = "created = 1\n";
+    return finish(true);
+}
+
+bool online_whole_eeprom(uint8_t out[256])
+{
+    if (!g_enabled) return false;
+    memcpy(out, g_eeprom, 256);
+    return true;
+}
 
 bool online_import(const std::wstring &out_path)
 {
@@ -502,10 +604,14 @@ bool online_init()
     }
     int accounts = 0;
     for (int i = 0; i < SLOTS; i++) accounts += slot_used(g_config, i);
-    if (!sector_signed(g_config, 9)) {
+    // Not registered yet: only the Insignia Setup Assistant (a program without a build profile) goes online, to register
+    // it (the machine account it gets is written to config sector 9: online_partition0_write)
+    if (!sector_signed(g_config, 9) && g_cfg.profile) {
         SecureZeroMemory(dec, sizeof dec);
-        return fail("no machine account in config sector 9 (console not registered?)", L"本地主机没有注册过 Insignia（先在 xemu 里注册再导入）");
+        return fail("no machine account in config sector 9 (console not registered?)",
+                    L"本机主机还没注册 Insignia（启动器「联网」页「注册主机」）");
     }
+    if (!sector_signed(g_config, 9)) logc("online: the console is not registered with Insignia yet (no machine account)");
     memcpy(xk::XboxHDKey, dec + 8, 16);
     SecureZeroMemory(dec, sizeof dec);
     logc("online: on - the port's console (%s kernel states), %d Live account(s)", ver, accounts);

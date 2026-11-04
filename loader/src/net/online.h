@@ -16,6 +16,11 @@ bool online_check(const std::wstring &out_path);
 // port's own (the hard disk folder's online_eeprom.bin and online_accounts.bin): its accounts the port lacks. What was
 // imported, skipped or wrong goes to out_path for the launcher. false on an error.
 bool online_import(const std::wstring &out_path);
+// --online-new-console: a console of the port's own (a new EEPROM, an empty config area) in the hard disk folder when it
+// has none; to be registered with Insignia by the Setup Assistant. "created = 1" or "error = why" to out_path.
+bool online_new_console(const std::wstring &out_path);
+// The console's whole EEPROM (256 bytes) when online play is on, for ExQueryNonVolatileSetting(0xFFFF)
+bool online_whole_eeprom(uint8_t out[256]);
 
 // The console's factory EEPROM values for ExQueryNonVolatileSetting (0x100 serial, 0x101 MAC, 0x102 online key,
 // 0x103 AV region, 0x104 game region): false = not online / not one of these

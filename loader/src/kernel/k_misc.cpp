@@ -125,6 +125,15 @@ uint32_t __cdecl DbgPrint(const char *Format, ...)
 NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type, void *Value, uint32_t ValueLength,
                                              uint32_t *ResultLength)
 {
+    // The whole EEPROM for a program without a build profile (the Insignia Setup Assistant) online: the console's own,
+    // whose section checksums it checks before registering (it offers to rewrite them otherwise; 0x11E87). The games and
+    // the dashboard keep the port's zeros: their settings come from black.ini, one by one (below).
+    if (ValueIndex == 0xFFFF && !g_cfg.profile && ValueLength >= 256 && online_whole_eeprom((uint8_t *)Value)) {
+        if (Type) *Type = 3;
+        if (ResultLength) *ResultLength = 256;
+        logf("[k] ExQueryNonVolatileSetting(0xffff): the console's EEPROM (256 bytes)");
+        return 0;
+    }
     uint32_t dword = 0, size = 4, type = 4 /* REG_DWORD */;
     bool known = true;
     switch (ValueIndex) {
@@ -385,6 +394,10 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
     logf("[k] HalReturnToFirmware(%u): the game asked to leave (0 halt, 1 reboot, 2 quick reboot, 3 fatal error), from %s", Routine,
          xd3d::callers_of((const uint32_t *)_AddressOfReturnAddress()).c_str());
     if (dashboard_back("it asked to leave")) Sleep(INFINITE); // the port's Xbox Live dashboard: back to the game
+    if (!g_cfg.profile) { // a program without a build profile (the Insignia Setup Assistant's Quit): it ends, as a tool does
+        request_exit(0, "the program quit");
+        Sleep(INFINITE);
+    }
     if (LaunchDataPage && (Routine == 1 || Routine == 2)) {
         const char *path = (const char *)LaunchDataPage->Header + 8;
         std::wstring xbe = launch_target(path);

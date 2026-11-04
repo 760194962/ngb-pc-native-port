@@ -142,6 +142,7 @@ void usage()
            "                    image (both only read; black.ini online = 1, online_eeprom, online_hdd); --offline: off\n"
            "  --online-check F  check the online files (black.ini or the flags above), write what was found to F, exit\n"
            "  --online-import F import the xemu console's accounts the port lacks into the hard disk folder, report to F, exit\n"
+           "  --online-new-console F  make a console of the port's own in the hard disk folder (none there yet), report to F\n"
            "  --online-dns-mode M  insignia (default): every DNS query to Insignia's; insigniadns: every query to the\n"
            "                    InsigniaDNS at --online-insigniadns IP; console: as the console's settings\n"
            "  --no-pc-menus     no PC SETTINGS pages in the game's Options menu (built at start into cache\\menus\n"
@@ -225,11 +226,13 @@ bool parse_args()
             settings_mark_cli(a == L"--online-eeprom" ? "online_eeprom" : a == L"--online-hdd" ? "online_hdd" : "online_dns");
         }
         else if (a == L"--offline") { g_cfg.online = false; settings_mark_cli("online"); }
+        else if (a == L"--online") { g_cfg.online = true; settings_mark_cli("online"); } // the launcher's Register console
         else if (a == L"--online-unplugged") g_cfg.online_unplugged = true; // with the online files: no cable
         else if (a == L"--online-config-out") { if (!next(g_cfg.online_config_out)) return false; }
         else if (a == L"--return-xbe") { if (!next(g_cfg.return_xbe)) return false; }
         else if (a == L"--online-check") { if (!next(g_cfg.online_check)) return false; }
         else if (a == L"--online-import") { if (!next(g_cfg.online_import)) return false; }
+        else if (a == L"--online-new-console") { if (!next(g_cfg.online_new_console)) return false; }
         else if (a == L"--online-dns-mode") { // insignia / insigniadns / console (black.ini online_dns_mode)
             std::wstring v;
             if (!next(v)) return false;
@@ -626,6 +629,7 @@ int run(void *reserve, unsigned reserve_size)
     }
     if (!g_cfg.online_check.empty()) return online_check(g_cfg.online_check) ? 0 : 1; // the launcher's 联网 page
     if (!g_cfg.online_import.empty()) return online_import(g_cfg.online_import) ? 0 : 1; // its import from xemu
+    if (!g_cfg.online_new_console.empty()) return online_new_console(g_cfg.online_new_console) ? 0 : 1; // its new console
 
     log_init(g_cfg.log_path);
     g_exit_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);

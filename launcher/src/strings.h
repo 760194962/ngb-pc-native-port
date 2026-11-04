@@ -377,6 +377,15 @@ enum class Str {
     OnlineNothing,
     OnlineImportFailed,
     OnlineXemuOk,
+    // a console of the port's own without xemu (--online-new-console) and registering it (the Insignia Setup Assistant)
+    NewConsole,
+    RegisterConsole,
+    AskNewConsoleTitle,
+    AskNewConsole,
+    NewConsoleFailed,
+    RegisterRunning,
+    InsigniaFilter,
+    NotSetupAssistant,
     Count
 };
 

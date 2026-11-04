@@ -116,13 +116,16 @@ struct App {
     // the last import from xemu: what came over, was already here or did not fit (or why it failed)
     std::wstring import_result;
     bool import_bad = false;
+    // the port's own console: why making one failed; the Insignia Setup Assistant while it runs (it registers it)
+    std::wstring local_result;
+    HANDLE setup_proc = nullptr;
     // the InsigniaDNS address being typed in the DNS card's field (digits and dots), and what was found or wrong
     bool dns_edit = false;
     std::wstring dns_text, dns_note;
     bool dns_note_bad = false;
 };
 enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete, kAskReset, kAskUnsavedStart, kAskUnsavedClose, kAskRestore, kAskImport,
-       kAskExport, kAskResign, kAskUninstall };
+       kAskExport, kAskResign, kAskUninstall, kAskNewConsole };
 App g;
 
 // Hit ids: 0..kPageCount-1 the navigation, then these
@@ -135,7 +138,7 @@ enum {
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
-    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
+    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitNewConsole, kHitRegister, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
     kHitModule = 580, // + 0 Black, 1 Ninja Gaiden 2004
     kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc, kHitExportDlc,
     kHitResign = 590,
@@ -254,6 +257,7 @@ void init_monitor_aspect(int test_w = 0, int test_h = 0) // test_w x test_h: --m
     }
 }
 constexpr UINT_PTR kTimerInstall = 1;
+constexpr UINT_PTR kTimerSetup = 2; // the Insignia Setup Assistant running: look again at the console when it ends
 struct Hit {
     int id;
     D2D1_RECT_F r;
@@ -850,6 +854,76 @@ void online_import()
         g.import_bad = r.count("full") && !r.count("imported");
     }
     g.online_for.clear(); // look again: the accounts here changed
+}
+
+// "New console": a console of the port's own in the save folder (the game program's --online-new-console), not yet
+// registered with Insignia; only when there is none (asked first: kAskNewConsole)
+void new_console()
+{
+    auto r = online_tool(L"--online-new-console", L"online_new.txt", 15000);
+    g.local_result.clear();
+    if (!r.count("created")) g.local_result = std::wstring(S(Str::NewConsoleFailed)) + (r.count("error") ? from_utf8(r["error"][0]) : S(Str::OnlineCheckFailed));
+    g.online_for.clear();
+}
+
+// The Insignia Setup Assistant the player gave (cache\insignia\default.xbe, taken from Insignia-Setup.iso): its title ID
+// is FFFF0002 (the certificate's, at 8)
+std::wstring setup_xbe() { return g.dir + L"\\cache\\insignia\\default.xbe"; }
+bool is_setup_assistant(const std::wstring &xbe)
+{
+    FILE *f = _wfopen(xbe.c_str(), L"rb");
+    if (!f) return false;
+    uint8_t h[0x1000];
+    size_t n = fread(h, 1, sizeof h, f);
+    fclose(f);
+    if (n < 0x180 || memcmp(h, "XBEH", 4)) return false;
+    uint32_t base, cert, id;
+    memcpy(&base, h + 0x104, 4);
+    memcpy(&cert, h + 0x118, 4);
+    if (cert < base || cert - base + 12 > n) return false;
+    memcpy(&id, h + cert - base + 8, 4);
+    return id == 0xFFFF0002;
+}
+
+// "Register": the Insignia Setup Assistant on the port's own console, online (whatever the switch: registering needs
+// the network), with the DNS chosen here; its Register Xbox writes the machine account the console needs (the game
+// program keeps it in the save folder). Asked for once (the ISO or its default.xbe), kept in cache\insignia.
+void register_console()
+{
+    if (g.setup_proc || game_running()) return;
+    g.local_result.clear();
+    std::wstring xbe = setup_xbe();
+    if (!is_setup_assistant(xbe)) {
+        COMDLG_FILTERSPEC spec = {S(Str::InsigniaFilter), L"*.iso;*.xbe"};
+        std::wstring f;
+        if (!pick(false, &f, &spec)) return;
+        std::wstring dir = g.dir + L"\\cache\\insignia";
+        CreateDirectoryW((g.dir + L"\\cache").c_str(), nullptr);
+        CreateDirectoryW(dir.c_str(), nullptr);
+        if (f.size() > 4 && !_wcsicmp(f.c_str() + f.size() - 4, L".xbe")) CopyFileW(f.c_str(), xbe.c_str(), FALSE);
+        else {
+            install::Progress p;
+            install::extract(f, dir, p); // its own files; the check for the game's that follows fails, as it should
+        }
+        if (!is_setup_assistant(xbe)) {
+            DeleteFileW(xbe.c_str());
+            g.local_result = S(Str::NotSetupAssistant);
+            return;
+        }
+    }
+    std::wstring hdd = ini_get(L"hdd", (g.dir + L"\\savedata").c_str());
+    std::wstring cmd = L"\"" + game_exe() + L"\" --hdd \"" + hdd + L"\" --online --force";
+    std::string mode = black_ini("online_dns_mode"), addr = black_ini("online_insigniadns");
+    if (!mode.empty()) cmd += L" --online-dns-mode " + from_utf8(mode);
+    if (!addr.empty()) cmd += L" --online-insigniadns " + from_utf8(addr);
+    CreateDirectoryW((g.dir + L"\\logs").c_str(), nullptr);
+    cmd += L" --log \"" + g.dir + L"\\logs\\insignia-setup.log\" \"" + xbe + L"\"";
+    STARTUPINFOW si = {sizeof si};
+    PROCESS_INFORMATION pi = {};
+    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, g.dir.c_str(), &si, &pi)) return;
+    CloseHandle(pi.hThread);
+    g.setup_proc = pi.hProcess;
+    SetTimer(g.hwnd, kTimerSetup, 500, nullptr);
 }
 
 std::string online_value(const char *key)
@@ -1453,6 +1527,7 @@ struct Painter {
         if (g.ask == kAskExport) title = Str::ExportX, body = Str::AskExport;
         if (g.ask == kAskResign) title = Str::AskResignTitle, body = Str::AskResign;
         if (g.ask == kAskUninstall) title = Str::AskUninstallTitle, body = Str::AskUninstall;
+        if (g.ask == kAskNewConsole) title = Str::AskNewConsoleTitle, body = Str::AskNewConsole;
         std::wstring body_text = S(body);
         if (g.ask == kAskUninstall) {
             wchar_t b[1024];
@@ -2278,9 +2353,21 @@ struct Painter {
             else if (local != "ok") st = S(Str::OnlineLocalBad);
             else if (online_value("local_registered") != "1") st = S(Str::OnlineLocalNotReg);
             else st = S(Str::OnlineLocalOk) + names("local_account"), good = true;
-            if (good && online_value("xemu") == "1") st = S(Str::OnlineXemu), good = false;
-            text(st, {cx, y, right, y + 30}, 13, good ? kGold : local == "none" ? kAsh : kBlood, 1.0f, DWRITE_FONT_WEIGHT_NORMAL,
-                 nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+            bool xemu_runs = online_value("xemu") == "1";
+            if (good && xemu_runs) st = S(Str::OnlineXemu), good = false;
+            // its button: New console when there is none, Register while it is not registered
+            int hit = !g.online.empty() && (local == "none" || local.empty()) ? kHitNewConsole
+                    : local == "ok" && online_value("local_registered") != "1" ? kHitRegister : 0;
+            bool busy = g.setup_proc != nullptr;
+            if (busy) st = S(Str::RegisterRunning), good = true;
+            if (!g.local_result.empty()) st = g.local_result, good = false;
+            text(st, {cx, y, hit ? right - bw - 12 : right, y + 30}, 13, good ? kGold : !g.local_result.empty() ? kBlood : local == "none" ? kAsh : hit == kHitRegister ? kBone : kBlood,
+                 1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+            if (hit) {
+                bool can = !busy && !xemu_runs && !game_running();
+                button(hit, {right - bw, y, right, y + 30}, S(hit == kHitNewConsole ? Str::NewConsole : Str::RegisterConsole),
+                       hit == kHitRegister && can, can);
+            }
         }
         y += 40;
         path_row(Str::OnlineEeprom, "online_eeprom", kHitPickEeprom);
@@ -2796,6 +2883,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 else if (ask == kAskDelete) delete_image();
                 else if (ask == kAskReset) reset_page(g.page);
                 else if (ask == kAskUninstall) uninstall_now();
+                else if (ask == kAskNewConsole) new_console();
                 else start_install();
             }
             InvalidateRect(h, nullptr, FALSE);
@@ -2901,6 +2989,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             }
         }
         else if (id == kHitNetCheck) net_check();
+        else if (id == kHitNewConsole) g.ask = kAskNewConsole;
+        else if (id == kHitRegister) register_console();
         else if (id == kHitImportXemu) {
             SetCursor(LoadCursorW(nullptr, IDC_WAIT));
             online_import();
@@ -2915,6 +3005,12 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     }
     case WM_TIMER:
         if (wp == kTimerInstall && !installing()) install_finished();
+        if (wp == kTimerSetup && g.setup_proc && WaitForSingleObject(g.setup_proc, 0) == WAIT_OBJECT_0) {
+            CloseHandle(g.setup_proc); // the Setup Assistant ended: what it registered shows now
+            g.setup_proc = nullptr;
+            KillTimer(h, kTimerSetup);
+            g.online_for.clear();
+        }
         InvalidateRect(h, nullptr, FALSE);
         return 0;
     case WM_CLOSE:

@@ -115,6 +115,7 @@ struct Config {
     std::wstring online_insigniadns;
     std::wstring online_check; // --online-check FILE: check the online files, write the result there and exit (the launcher)
     std::wstring online_import; // --online-import FILE: import from xemu's files into the hard disk folder, report there, exit
+    std::wstring online_new_console; // --online-new-console FILE: a console of the port's own, report there, exit
     bool known_build = false;  // the XBE is the NTSC-U build the address tables are for (main.cpp)
     std::wstring game_override; // --game-override: files there replace the game's of the same relative path
     std::wstring menu_cache;    // the port's rebuilt front-end files (fe/pages.cpp), served like --game-override after it
