@@ -1,34 +1,44 @@
-# 09 联网：用自己的 Insignia 账号进排行榜（2026-10-23）
+# 09 联网：用自己的 Insignia 账号进排行榜（2026-10-23 起；2.2 改为移植版自己的主机，2026-11-05）
 
 目标（用户原话）：「我只希望我的游戏能以自己的 signia 服务器账号进入排行榜，查看排名」。不做多人对战。
+2.2 的目标（用户，2026-11-04）：「游戏读自己目录的 eeprom 和账户等，支持从 xemu 的 eeprom 和 hdd 当中导入账户到自己的
+目录」，以及没用过 xemu 的玩家也能注册、建玩家代号。
 
 结论：**已实现并由用户亲测成功**（2026-10-23，`run\user_online`）：游戏里的排行榜列出用户自己的玩家代号，登录
-Insignia 后显示真实的中忍榜单，用户的名次也在其中。
+Insignia 后显示真实的中忍榜单，用户的名次也在其中。2.2.0 / 2.2.1（2026-11-05 发布）起，游戏只用存档文件夹里移植版自己的
+主机，可以从 xemu 导入，也可以在移植版里新建、注册（下文「2.2：移植版自己的主机」）。下面「做法」到「XePublicKeyData」
+各节写于 2.1 时期（读 xemu 文件），其中网卡、加密、DNS 的部分至今不变。
 
 ## 怎么打开
 
-默认关闭，不打开时游戏和以前完全一样（看不到网络，排行榜报无法连接）。需要玩家自己已经在 xemu 里注册过 Insignia
-的那一套文件。启动器的「联网」页（下文「界面」）写的就是这几行：
+默认关闭，不打开时游戏和以前完全一样（看不到网络，排行榜报无法连接）。启动器的「联网」页写的是这几行：
 
 ```
 # black.ini（路径可以有空格，UTF-8）
 online = 1
-online_eeprom = E:\games\emu\xemu\xemu\Component\4- Eemprom\eeprom.bin
-online_hdd = E:\games\emu\xemu\xemu\Component\3- Xbox HDD\xbox_hdd.qcow2
 online_dns_mode = insignia     # 默认：所有 DNS 查询转给 online_dns；insigniadns：转给 online_insigniadns
 # online_insigniadns = 192.168.2.8   （insigniadns 时：开着 InsigniaDNS 的那台电脑）
 # online_dns = 46.101.64.175   （可选：Insignia 的 DNS）
+# 只在从 xemu 导入时用（2.1 时期的玩家留着它们：第一次开联网时自动导入一次）
+online_eeprom = E:\games\emu\xemu\xemu\Component\4- Eemprom\eeprom.bin
+online_hdd = E:\games\emu\xemu\xemu\Component\3- Xbox HDD\xbox_hdd.qcow2
 ```
 
+联网用的主机在存档文件夹（启动器的 `hdd`，默认 `savedata`）：`online_eeprom.bin`、`online_accounts.bin`（下文）。
+
 命令行：
-- `--online-eeprom <文件> --online-hdd <文件>`：同时打开联网；`--offline`：关闭。
+- `--online`：打开联网（用存档文件夹里的主机）；`--online-eeprom <文件> --online-hdd <文件>`：xemu 的文件（同时打开联网）；
+  `--offline`：关闭。
 - `--online-dns-mode insignia|insigniadns|console`：DNS 查询方式；`--online-insigniadns <IP>`：InsigniaDNS 的地址。
-- `--online-check <输出文件>`：检查两个文件后退出，给启动器用。
+- 给启动器用、做完就退出的：`--online-check <输出>`（检查）、`--online-import <输出>`（从 xemu 导入）、
+  `--online-new-console <输出>`（新建主机）、`--online-dash-from <硬盘镜像> <输出>`（取出仪表盘的文件）。
 
 注意：
 
-- 两个文件只读，不写回；硬盘镜像可以是 xemu 的 qcow2（未压缩簇）或原始镜像。
-- 同一台「主机」不能同时登录两次：启动时发现 `xemu.exe` 在运行就不开联网（日志 `online: off (xemu is running…)`）。
+- xemu 的两个文件只读，不写回；硬盘镜像可以是 xemu 的 qcow2（未压缩簇）或原始镜像。
+- 同一台「主机」不能同时登录两次：存档文件夹里的主机和 `online_eeprom` 是同一台（从 xemu 导入的）时，发现 `xemu.exe` 在
+  运行就不开联网（日志 `online: off (xemu is running the same console…)`）；在移植版里新建的主机不受影响（2.2.1）。
+  存档文件夹里还没有主机、要从 xemu 导入时，xemu 也必须关着（要读它的硬盘镜像）。
 - DNS：默认 `online_dns_mode = insignia`，游戏发出的所有 DNS 查询（不论问哪个地址）都转给 `online_dns`，玩家不用开
   InsigniaDNS。`insigniadns` 时所有查询都转给 `online_insigniadns`（开着 InsigniaDNS.exe 的电脑），地址不是 IPv4 时改用
   Insignia 的并提示。`console`（第一版启动器写的，界面已不再提供）和 xemu 一样：主机网络设定里是手动 DNS 时（注册时常见：
@@ -94,7 +104,7 @@ online_dns_mode = insignia     # 默认：所有 DNS 查询转给 online_dns；i
 | 主机 DNS 设定 | 同上 | 配置区第 8 扇区：偏移 76 的标志位 8 = 手动 DNS，96 / 100 两个 DNS（用户的盘：标志 8、192.168.2.8 / 1.1.1.1，与 InsigniaDNS 窗口里的主机设定一致）。标志位 8 的含义只由这一块盘推断，还没有拿自动 DNS 的盘对照过 |
 | 检查网络 | `launcher/src/main.cpp` `net_check` | 在单独线程里按当前查询方式向那台 DNS 问 `AS.XBOXLIVE.COM`，3 秒超时：答出地址＝正常；198.18.0.0/15＝代理 TUN；无回应＝网络或 InsigniaDNS |
 | 游戏里的提示 | `d3d/perfhud.cpp` `notice`、`net/vnet.cpp`、`ngb/d3d_ngb.cpp` | 画面右下角一行字，8 秒，每种一局一次：DNS 回答 198.18.x.x、DNS 4 秒无回应、安全网关（3074）第一次回包＝「已连接 Insignia」、`online = 1` 但没开成（xemu 在运行、文件无效…）在进排行榜时提示。与性能叠加层共用绘制，没有提示时每帧只多一次原子读 |
-| Ⓐ 当取消 | `ngb_livedash.cpp` | 排行榜三个对话框处理函数 FUN_002FFAB0 / FUN_003023B0 / FUN_00302560（读 0xD219A8 + 端口×0x78 的按键：0x110 Ⓐ、0x220 Ⓑ）里，Ⓐ 去仪表板的 6 段代码（push 0x40 / push 5 / call 音效 → XLaunchNewImageA(NULL)，原因 6 网络设定、7 新账号、8 修复账号）开头改为 jmp 到同一框的 Ⓑ 代码；只有 Ⓐ 的那个框（case 4）跳到各框共用的关闭代码。改之前核对 6 处字节，不符就不改 |
+| Ⓐ 当取消（2.2 起只在没有仪表盘文件时；有时Ⓐ打开移植版的 Xbox Live 仪表盘，见下文） | `ngb_livedash.cpp` | 排行榜三个对话框处理函数 FUN_002FFAB0 / FUN_003023B0 / FUN_00302560（读 0xD219A8 + 端口×0x78 的按键：0x110 Ⓐ、0x220 Ⓑ）里，Ⓐ 去仪表板的 6 段代码（push 0x40 / push 5 / call 音效 → XLaunchNewImageA(NULL)，原因 6 网络设定、7 新账号、8 修复账号）开头改为 jmp 到同一框的 Ⓑ 代码；只有 Ⓐ 的那个框（case 4）跳到各框共用的关闭代码。改之前核对 6 处字节，不符就不改 |
 
 证据：
 - **检查模式：** 用户的文件 → `eeprom = ok`、`registered = 1`、`account = <用户的玩家代号>`、`dns = manual 192.168.2.8 / 1.1.1.1`；错误文件 → `eeprom = invalid`、`hdd = cannot read the file`。
@@ -188,9 +198,107 @@ InsigniaDNS.exe」。原先只写了「关掉 TUN」。提示「DNS 被代理的
 - **以后什么时候回头看：** 如果哪天日志出现 `XcVerifyPKCS1Signature: no RSA1 public key` 或上面三个 `UNIMPLEMENTED`，说明
   服务器发了这种请求，那时要补的是读光盘扇区（把 `\Device\CdRom0` 的原始扇区读接到游戏镜像上），不是公钥。
 
+## 2.2：移植版自己的主机（2026-11-04 / 05）
+
+2.1 时期游戏直接读 xemu 的 EEPROM 和硬盘镜像（只读，写回只留在内存）。问题：账号只能在 xemu 里建，游戏里建的账号关掉
+就没了，没用过 xemu 的玩家进不来。2.2 起游戏只读存档文件夹里的一台「本机主机」，xemu 只是导入的来源。
+
+### 存档文件夹里的两个文件（`net/online.cpp`）
+
+- `online_eeprom.bin`：256 字节，和 xemu / 真机的 EEPROM 同一格式（主机身份：序列号、MAC、在线密钥；加密区里的硬盘钥匙）。
+- `online_accounts.bin`：`"NGBACCT1"` + 序列号（12）+ 4 个零字节，接着是配置区第 8–1023 扇区（第 8 网络设定、第 9 机器账户
+  `SN.<序列号>`、第 11 账号表、第 12 起每个账号一扇区，共 8 格）。游戏写配置区（`online_partition0_write`）时整份写回：
+  先写临时文件再改名，断电只丢这一次。
+- `online_accounts.bak`（2.2.0）：每次运行第一次写之前，把原来的一份复制过去；主文件缺失或损坏时从它读回（日志
+  `read from its backup`）。新建主机时删掉旧的备份，免得以后把上一台主机的读回来。
+- `online_registered.txt`（2.2.1）：注册程序得到 Insignia 的答复后写 `serial = <序列号>`，只给启动器看（下文）。
+- 启动时（`online_init`）：存档文件夹里没有主机、但 `black.ini` 留着 xemu 的两个文件（2.1 的玩家）→ 自动导入一次
+  （日志 `imported into … (first start)`）；之后不再读 xemu 的文件。实测：空存档文件夹 + 用户 xemu 的文件，2.2.0 第一次
+  启动就导入，联网打开（2026-11-05，r974，测完删除）。
+
+### 从 xemu 导入（`--online-import`）
+
+- 存档文件夹里没有主机：xemu 的主机整台搬过来（EEPROM 原样，配置区原样）。
+- 已经有主机：按 XUID 合并，xemu 里有而本机没有的账号放进空格（本机 A、D + xemu A、B、C → A、B、C、D；用户的设计）。
+  格子移动、中间留空都没问题。满 8 格的报「满了」。
+- **不是同一台主机时**（10136cf，2026-11-04）：账号记录里的密钥是用主机硬盘钥匙加密、签名的，要重签：
+  - 记录 = 账号扇区偏移 12 起 0x6C 字节；[0x50,0x60) 是账号密钥，3DES-CBC（EDE）；
+  - 钥匙 = HMAC-SHA1(C1, 硬盘钥匙)[0:4] + HMAC-SHA1(C2, 硬盘钥匙)[0:20]，按 DES 调奇偶；IV = 账号表里这一格的 8 字节；
+  - [0x64,0x6C) = HMAC-SHA1(硬盘钥匙, 明文记录[0:100])[0:8]；
+  - C1、C2 是仪表盘程序里的两个常数（xonlinedash 0x19E490 / 0x19E47C；写 0x1192A1、读 0x119396），运行时从玩家自己的
+    `xonlinedash.xbe` 读（先核对 SHA-256），不写进移植版。
+  - 用 xemu 主机的硬盘钥匙解开、核对签名，再用本机的钥匙加密、签名。所以导入一定要 xemu 的 EEPROM：硬盘镜像里只有加密后的账号。
+  - 离线核对过 3 个真账号（r972）。**Insignia 认不认这种账号没测过**：Insignia 的「账号恢复」说恢复后账号只在那台主机
+    有效，说明服务器记着账号属于哪台主机，重签过来的账号很可能登录不了。替代办法是在仪表盘里用 ACCOUNT RECOVERY
+    （玩家代号 + Insignia 网站 Recovery Info 里的 16 位卡号），仪表盘里有这个菜单（`DOWNLOAD_ACCOUNT="ACCOUNT RECOVERY"`），没实测。
+
+### 不用 xemu：新建主机（`--online-new-console`，55b2068）
+
+- 生成新 EEPROM：12 位随机序列号、MAC 00:50:F2:xx:xx:xx、北美区、NTSC-M、语言 1；出厂区校验和（0x30，覆盖 0x34–0x5F）、
+  用户区校验和（0x60，覆盖 0x64–0xBF）都是「端回进位和取反」；加密区（哈希 20 + RC4 加密的 28 字节：混淆 8、硬盘钥匙 16、
+  区域 4）用「1.0」内核的 SHA-1 中间状态，和 xemu `eeprom_generation.c` 一样。配置区全空（网络设定为默认 DHCP，没有机器账户）。
+- 存档文件夹不存在时连上级目录一起建（009dddd）。
+- 2.2.1：主机文件损坏或不配套时启动器给「重建主机」：旧文件改名 `.old`，再新建。
+
+### 在移植版里跑 Insignia 注册程序（e75a831 起）
+
+`Insignia-Setup.iso` 是 nxdk 自制程序（title FFFF0002）：SDL2 软件帧缓冲 + LVGL 界面、lwIP + nvnetdrv、OHCI USB + xid
+手柄、mbedtls HTTPS。它不用 D3D 和 XAPI，自己驱动硬件，所以（只在没有游戏配置的程序上）多模拟了：
+
+| 部分 | 文件 | 说明 |
+|---|---|---|
+| 显示 | `nv2a_display.cpp` | 显示寄存器 + 帧缓冲送到窗口（`--screenshot` 存 `fb_*.png`） |
+| USB | `usb_ohci.cpp` | OHCI 控制器 + 1 号口一个 Duke 手柄（电平中断）；PC 手柄由它自己加载（d40ba11） |
+| 指令解码 | `mmio_decode.cpp` | 与网卡共用；2025-01-19 版用 `bt` 测 USB 口状态，补了 BT/BTS/BTR/BTC 的内存形式（0F BA /4–7、0F A3/AB/B3/BB，85f262e） |
+| 内核 | `k_nxdk.cpp` 等 | 15 个导出；TLS 末端对齐；`KeWaitForSingleObject` 找调用者时不越过栈顶（7201ddf） |
+| EEPROM | `k_misc.cpp` | `ExQueryNonVolatileSetting(0xFFFF)` 给整块 EEPROM；`0xFFFE`（加密区，EEPROM[0:0x30]）给 2025 版：它用内置的 3 把 EEPROM 钥匙解开、和 `XboxHDKey` 比，不给就报「HDD key mismatch」（85f262e） |
+| 日志 | `k_misc.cpp` `DbgPrint` | 注册请求里有硬盘钥匙和在线密钥：32 位以上的十六进制一律打成 `*` |
+
+- 它只做「向 Insignia 登记这台主机」：`POST /api/v1/xbox`（序列号、硬盘钥匙、在线密钥），本机什么也不写。
+- 2.2.1：从它的 `DbgPrint` 看结果：`HTTP/1.1 200`（登记成功）或 422「Your Xbox is already registered」→ 写
+  `online_registered.txt`，启动器显示「主机已注册。下一步：在仪表盘里做联网测试」、不再给「注册主机」。实测 422 这条
+  （2026-11-05，r975，Insignia 真服务器）；200 这条按 2.2.0 用户注册成功那次日志的格式写的，没有单独实测。
+- 实测：2023-02-13 版完整注册成功（r969，2026-11-04）；2025-01-19 版（玩家拿到的）由用户在移植版里注册成功、服务器回 200
+  （2026-11-05，`run\reg_test`）；两版拔网线时都停在「Failed to connect to the server」（回归测试，2.2.0 发布前）。
+  2023 版留在 `run\insignia_setup_2023\default.xbe`。
+
+### Xbox Live 仪表盘（d36a523 起）
+
+- 跑的是微软仪表盘的 Xbox Live 部分 `xonlinedash.xbe`（5971 版，XDK 5849 库；`gen_aux_tables` 的 `XOD`，`kProfileXod`）。
+  文件从玩家给的任意 Xbox 硬盘镜像里取（C:\xodash、C:\fonts、C:\xboxdash.xbe，`--online-dash-from`），放进存档文件夹的
+  `Partition2`；移植版不带微软的文件。
+- 它从硬盘运行时，要 `XC_MISC`（0x11）带 0x8，且 C:\xboxdash.xbe 存在、证书版本 0x185ead00，否则立刻退出；两样都给了
+  （0x8 只给仪表盘；xboxdash.xbe 只放着，从不运行）。要启动数据（类型 2、title FFFE0000、路径、+0x400 = 0xC：XBOX LIVE
+  菜单），且联网要开着（不然它的 XOnline 对象是空的）。
+- **机器账户由它的 NETWORK SETUP 联网测试建立**（写第 9 扇区 `SN.<序列号>`，r969 实测），注册程序不建。所以注册之后一定要
+  做这一步，游戏才能登录（没有机器账户时只有注册程序和仪表盘能开联网）。
+- 选中项高亮原来是黑的：仪表盘用「只有声明、没有程序」的顶点着色器，等于按那个顶点格式走固定管线；现在在 CPU 上转成 FVF
+  画（df7db78）。游戏都不用这种着色器。
+- **游戏 → 仪表盘 → 游戏**（9c20e7f、e1f45c3）：排行榜里去仪表板的选项，游戏的 Live 库直接启动 `XODash\xonlinedash.xbe`
+  并带上自己的启动数据（title + 请求在 +0x400），原样传过去；仪表盘再启动游戏时把数据交回。用通用的 0xC 页时顶层按Ⓑ没有
+  去处，所以一定要传游戏自己的。没有仪表盘文件时仍按Ⓐ当取消（`ngb_livedash.cpp`）。
+- 第一个在移植版里建的玩家代号：用户，r954（2026-11-04）。那次的主机和账号留在 `run\keep_console_akiraHyabs`。
+- **开着代理 TUN 时**（2026-11-05 实测）：「Insignia 公网 DNS」被截走，注册照样成功（HTTPS 经代理也到得了），但联网测试问
+  `MACS.XBOXLIVE.COM` 得到 198.18.x.x，建不出机器账户。2.2.0 起启动器打开仪表盘前先问一次 DNS，被截走就不打开并提示；仪表盘
+  关掉后还没有机器账户也提示。改用「本地 InsigniaDNS.exe」（192.168.2.8）后联网测试通过，建出了机器账户。
+
+### 启动器「联网」页（2.2）
+
+- 「联网排行榜」卡：开关；「本机主机」一行按状态显示：没有（新建主机）/ 2.1 玩家还没导入（提示开游戏时自动导入，不给新建）/
+  损坏或不配套（重建主机）/ 还不能联网（注册主机 + Xbox Live 仪表盘）/ 已注册还没做联网测试 / 可以联网；xemu 开着且是同一台
+  主机时提示关掉。「本机账号」一行一个玩家代号。
+- 「从 xemu 导入」卡：xemu EEPROM、xemu 硬盘镜像、可导入的账号 + 「从 xemu 导入」。
+- 页面比窗口高时可以滚动（dccfc07）；截断的文字鼠标悬停显示全文；状态用大白话（156e0ea）。
+- 测试参数（配 `--snap`）：`--import-now`、`--dash-now`、`--rebuild-now`、`--show-ask N`、`--show-help register`。
+
 ## 未完成 / 已知问题
 
+- 没实测：从排行榜建账号再回到游戏；2004 大师锦标赛进出仪表盘；重签导入的账号能否登录 Insignia（见上，风险不小）；仪表盘
+  的 ACCOUNT RECOVERY 和账号管理。
+- 导出到 xemu（把本机账号写回 xemu 的硬盘镜像）：用户提过，没做；要写用户的 qcow2，动手前要用户同意并先备份。
+- 没用过 xemu 的玩家仍要有一个带仪表板的 Xbox 硬盘镜像（取仪表盘的文件），说明里还没写去哪里找。
 - 用户测试时切到后台后画面变黑（游戏仍在出帧、能操作；那次是强制集显的测试版，窗口在另一块显示器上）；尚未查明，用户
   说先不管。
 - `XePublicKeyData` 为空：查过，对 Insignia 没有影响，见「XePublicKeyData 为空（2026-10-23 查）」。
-- 只测了 UDP；TCP 从没出现在线上（服务都走安全网关的 UDP 隧道），出现时日志会记 `IP protocol 6 … not relayed`。
+- TCP：排行榜只走安全网关的 UDP 隧道；2.0.0 起 `vnet.cpp` 也转发 TCP（2004 的下载程序、更新程序），2.2 的注册程序
+  （HTTPS 443）也走它，实测正常（日志 `TCP Xbox:… connected`）。
