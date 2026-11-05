@@ -261,6 +261,8 @@ void read_press_file(uint32_t now_ms)
                     else if (k == "rhwoffset") g_cfg.rhw_offset = v;
                     else if (k == "rhwedge") g_cfg.rhw_edge_fix = v;
                     else if (k == "quadsnap") g_cfg.quad_snap = v;
+                    else if (k == "quadweight") g_cfg.quad_weight = v;
+                    else if (k == "quadgrad") g_cfg.quad_grad = v;
                     else if (k == "resolve") g_cfg.resolve = v;
                     else if (k == "shadowpullc") g_cfg.shadow_pull_bias = atoi(line.c_str() + c + 1);
                     else if (k == "shadowpulls") g_cfg.shadow_pull_slope = atoi(line.c_str() + c + 1);

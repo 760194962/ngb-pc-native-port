@@ -147,12 +147,19 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
                 // does not fringe its opaque neighbour (between texels, where an upscaled picture samples; at the
                 // console's pixel centres it is the same texel). An on-or-off mask (a cut-out's 0 and 255) takes the
                 // nearest texel's alpha: its edge as sharp as the console's; soft alpha (text) stays filtered.
-                // Explicit gradients: those of the clamped coordinate, not of the texel corners (which jump).
+                // The four reads take plain tex2D. With explicit gradients (tex2Dgrad, those of the clamped coordinate:
+                // the texel corners' jump) the pause menu's dozen full-screen layers at 10x kept an RTX 3060 77% busy,
+                // 50% this way, 40% with no weighting (2026-11-05). The quad variant runs only above 1x, where 2D is
+                // magnified: neighbouring pixels' corners differ by a texel at most, the level of detail stays at the
+                // top level either way. cfg:quadgrad:1 reads with the gradients again, for comparison.
                 std::string q =
                     "    float2 gx = ddx(uv), gy = ddy(uv), f = uv * qs[#].xy - 0.5, fb = floor(f), w = f - fb;\n"
                     "    float2 c = (fb + 0.5) * qs[#].zw;\n"
-                    "    float4 q0 = tex2Dgrad(s2d#, c, gx, gy), q1 = tex2Dgrad(s2d#, c + float2(qs[#].z, 0), gx, gy);\n"
-                    "    float4 q2 = tex2Dgrad(s2d#, c + float2(0, qs[#].w), gx, gy), q3 = tex2Dgrad(s2d#, c + qs[#].zw, gx, gy);\n"
+                    + std::string(g_cfg.quad_grad
+                    ? "    float4 q0 = tex2Dgrad(s2d#, c, gx, gy), q1 = tex2Dgrad(s2d#, c + float2(qs[#].z, 0), gx, gy);\n"
+                      "    float4 q2 = tex2Dgrad(s2d#, c + float2(0, qs[#].w), gx, gy), q3 = tex2Dgrad(s2d#, c + qs[#].zw, gx, gy);\n"
+                    : "    float4 q0 = tex2D(s2d#, c), q1 = tex2D(s2d#, c + float2(qs[#].z, 0));\n"
+                      "    float4 q2 = tex2D(s2d#, c + float2(0, qs[#].w)), q3 = tex2D(s2d#, c + qs[#].zw);\n") +
                     "    float4 wq = float4((1 - w.x) * (1 - w.y), w.x * (1 - w.y), (1 - w.x) * w.y, w.x * w.y);\n"
                     "    float4 qa = float4(q0.a, q1.a, q2.a, q3.a), aw = wq * qa;\n"
                     "    float sa = dot(aw, 1);\n"
@@ -255,6 +262,7 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
     key.push_back((char)((specular ? 1 : 0) | (def_diffuse ? 2 : 0) | (def_specular ? 4 : 0)));
     key.push_back((char)g_cfg.ffp_debug);
     key.push_back((char)g_cfg.untex);
+    key.push_back((char)g_cfg.quad_grad);
     if (key == g_ffp_last_key) return g_ffp_last_ps;
     auto it = g_ffp_cache.find(key);
     if (it != g_ffp_cache.end()) {
