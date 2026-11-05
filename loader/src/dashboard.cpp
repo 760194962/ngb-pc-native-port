@@ -49,6 +49,9 @@ bool dashboard_available()
         logf("dash: the Xbox Live dashboard is not available (its files are not in the registered disk image): Live boxes cancel");
         return false;
     }
+    // its sounds (the main dashboard's C:\Audio): it runs silent without them
+    if (GetFileAttributesW((p2 + L"\\Audio\\" + DASH_AUDIO_FILE).c_str()) == INVALID_FILE_ATTRIBUTES && !g_cfg.online_hdd.empty())
+        dash_dir_ensure(g_cfg.online_hdd, p2, "Audio", DASH_AUDIO_FILE);
     std::vector<uint8_t> data;
     if (FILE *f = _wfopen(dashboard_xbe().c_str(), L"rb")) {
         fseek(f, 0, SEEK_END);

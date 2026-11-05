@@ -21,6 +21,9 @@ bool dash_dir_ensure(const std::wstring &image, const std::wstring &partition2, 
 // it is not there yet (through <name>.part). true when it is there.
 bool dash_file_ensure(const std::wstring &image, const std::wstring &partition2, const char *name);
 
+// C:\Audio (the main dashboard's sounds, played by the Xbox Live dashboard too) is there when it has this file
+inline constexpr const wchar_t *DASH_AUDIO_FILE = L"mainaudio\\Global A Button Select.wav";
+
 // The same three (C:\fonts, C:\xodash, C:\xboxdash.xbe) from a folder holding a copy of an Xbox's C: (taken off a real
 // Xbox by FTP, say) instead of an image. true when all three are in <partition2>.
 bool dash_from_folder(const std::wstring &root, const std::wstring &partition2);

@@ -351,6 +351,19 @@ bool dash_from_folder(const std::wstring &root, const std::wstring &partition2)
         if (!ok) DeleteFileW((xd + L".part").c_str());
         logf("dash: %s\\xboxdash.xbe %s", narrow(root).c_str(), ok ? "copied" : "NOT copied");
     }
+    // C:\Audio, the sounds: not needed to run (silent without them)
+    std::wstring au = partition2 + L"\\Audio", aupart = au + L".part";
+    if (ok && !host_exists(au + L"\\" + DASH_AUDIO_FILE) && host_exists(root + L"\\Audio")) {
+        remove_tree(aupart);
+        int files = 0;
+        bool a = copy_host_tree(root + L"\\Audio", aupart, 0, files) && host_exists(aupart + L"\\" + DASH_AUDIO_FILE);
+        if (a) {
+            remove_tree(au);
+            a = MoveFileW(aupart.c_str(), au.c_str()) != 0;
+        }
+        if (!a) remove_tree(aupart);
+        logf("dash: %s\\Audio %s (%d files)", narrow(root).c_str(), a ? "copied" : "NOT copied", files);
+    }
     return ok;
 }
 

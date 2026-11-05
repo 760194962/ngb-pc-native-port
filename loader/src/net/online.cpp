@@ -652,10 +652,13 @@ bool online_dash_from(const std::wstring &image, const std::wstring &out_path)
     // or from a folder: a copy of an Xbox's C: (taken off a real Xbox by FTP)
     std::wstring p2 = host_full_path(g_cfg.hdd_dir) + L"\\Partition2";
     DWORD at = GetFileAttributesW(image.c_str());
-    bool ok = at != INVALID_FILE_ATTRIBUTES && (at & FILE_ATTRIBUTE_DIRECTORY)
-                  ? dash_from_folder(image, p2)
-                  : dash_fonts_ensure(image, p2) && dash_dir_ensure(image, p2, "xodash", L"xonlinedash.xbe") &&
-                        dash_file_ensure(image, p2, "xboxdash.xbe");
+    const bool folder = at != INVALID_FILE_ATTRIBUTES && (at & FILE_ATTRIBUTE_DIRECTORY);
+    bool ok = folder ? dash_from_folder(image, p2)
+                     : dash_fonts_ensure(image, p2) && dash_dir_ensure(image, p2, "xodash", L"xonlinedash.xbe") &&
+                           dash_file_ensure(image, p2, "xboxdash.xbe");
+    // C:\Audio: the main dashboard's sounds, which the Xbox Live dashboard plays too (y:\Audio\mainaudio\Global A Button
+    // Select.wav and so on; without them it is silent). Not needed to run.
+    if (ok && !folder) dash_dir_ensure(image, p2, "Audio", DASH_AUDIO_FILE);
     std::string r = ok ? "dashboard = ok\n" : "dashboard = missing\n";
     if (FILE *f = _wfopen(out_path.c_str(), L"wb")) {
         fputs(r.c_str(), f);

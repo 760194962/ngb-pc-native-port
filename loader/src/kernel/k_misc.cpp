@@ -376,10 +376,13 @@ static bool dashboard_open()
     static XLAUNCH_DATA_PAGE page;
     memset(&page, 0, sizeof page);
     uint32_t *ld = (uint32_t *)&page;
-    ld[0] = 2;          // from the dashboard
-    ld[1] = 0xFFFE0000; // its title
+    // A title asking for the dashboard (LDT_LAUNCH_DASHBOARD, 1), as a game's own request is: B at the top menu then
+    // ends it, back to that title. From the main dashboard (type 2, title FFFE0000) B there would go back to the main
+    // dashboard, which the port does not run, so B did nothing (a player, 2026-11-05; r977)
+    ld[0] = 1;
+    ld[1] = g_cfg.profile->title_id;
     strcpy((char *)page.Header + 8, "\\Device\\Harddisk0\\Partition2\\XODash;xonlinedash.xbe");
-    ld[0x400 / 4] = 0xC; // the XBOX LIVE menu
+    ld[0x400 / 4] = 0xC; // reason: the XBOX LIVE menu
     logf("[k] the Xbox Live dashboard opens at its XBOX LIVE menu (back to %s when it is done)", narrow(back).c_str());
     return relaunch(dashboard_xbe(), true, &page, {L"--return-xbe", back});
 }

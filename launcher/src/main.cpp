@@ -979,13 +979,22 @@ void open_dashboard()
     }
     std::wstring hdd = ini_get(L"hdd", (g.dir + L"\\savedata").c_str());
     std::wstring xbe = hdd + L"\\Partition2\\xodash\\xonlinedash.xbe";
-    if (!exists(xbe)) {
+    // its sounds are the main dashboard's C:\Audio (silent without them; 2.2.0-2.2.2 did not take them): taken with the
+    // rest, or alone for a dashboard set up before. Asked for once then (an image again); not given, it runs silent.
+    const bool need_files = !exists(xbe);
+    const bool need_audio = !exists(hdd + L"\\Partition2\\Audio\\mainaudio\\Global A Button Select.wav") &&
+                            (need_files || black_ini("online_dash_audio_asked") != "1");
+    if (need_files || need_audio) {
         std::wstring image = from_utf8(black_ini("online_hdd"));
+        if (!need_files) black_ini_set("online_dash_audio_asked", "1");
         if (image.empty() || !exists(image)) {
             // an image, or in a copy of an Xbox's C: (FTP from a real Xbox) its xboxdash.xbe or xodash\xonlinedash.xbe:
             // the game program takes the three from that folder (net/dashfonts.cpp dash_from_folder)
             COMDLG_FILTERSPEC spec = {S(Str::DashFilter), L"*.qcow2;*.img;*.bin;*.raw;xboxdash.xbe;xonlinedash.xbe"};
-            if (!pick(false, &image, &spec)) return;
+            if (!pick(false, &image, &spec)) {
+                if (need_files) return;
+                image.clear(); // no sounds this time: open it silent
+            }
             size_t slash = image.find_last_of(L"\\/");
             std::wstring name = slash == std::wstring::npos ? image : image.substr(slash + 1);
             if (!_wcsicmp(name.c_str(), L"xboxdash.xbe")) image.resize(slash);
@@ -994,15 +1003,18 @@ void open_dashboard()
                 image.resize(image.find_last_of(L"\\/")); // ...: the copy of C:
             }
         }
-        auto r = online_tool((L"--online-dash-from \"" + image + L"\"").c_str(), L"online_dash.txt", 60000);
-        if (!r.count("dashboard") || r["dashboard"][0] != "ok" || !exists(xbe)) {
+        auto r = image.empty() ? decltype(online_tool(L"", L"", 0)){}
+                               : online_tool((L"--online-dash-from \"" + image + L"\"").c_str(), L"online_dash.txt", 120000);
+        if (need_files && (!r.count("dashboard") || r["dashboard"][0] != "ok" || !exists(xbe))) {
             g.local_result = S(Str::DashMissing);
             return;
         }
     }
-    // the launch data xboxdash.xbe gives it for its XBOX LIVE menu (loader kernel/k_misc.cpp dashboard_open)
+    // the launch data of a title asking for its XBOX LIVE menu (LDT_LAUNCH_DASHBOARD 1, reason 0xC; loader kernel/k_misc.cpp
+    // dashboard_open): B at that menu ends the dashboard, back here. With the main dashboard's (type 2, title FFFE0000)
+    // B there did nothing: it would go back to the main dashboard, which the port does not run (a player, 2026-11-05)
     std::vector<uint8_t> page(4096, 0);
-    uint32_t type = 2, title = 0xFFFE0000, menu = 0xC;
+    uint32_t type = 1, title = 0x5443000D, menu = 0xC; // the title: Ninja Gaiden Black's (any but the dashboard's)
     memcpy(&page[0], &type, 4);
     memcpy(&page[4], &title, 4);
     strcpy((char *)&page[8], "\\Device\\Harddisk0\\Partition2\\XODash;xonlinedash.xbe");
