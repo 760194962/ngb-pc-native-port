@@ -84,8 +84,9 @@ Each item's verdict and evidence are in `project/docs/06_功能验证矩阵.md` 
 - **Launched programs**: the arcade and SNES versions are playable from the main menu.
 - **Exit game**: the main menu has a last row, 退出游戏 (EXIT GAME on the English menus), that asks "Exit the game?" in
   the game's own confirmation box: Ⓐ yes returns to the desktop, Ⓑ no goes back to the menu.
-- **Online leaderboards (optional)**: with your own console and account registered with Insignia in xemu, the game's
-  Ranking menu signs in and shows the real leaderboards (tested). Off by default; see "Online" below.
+- **Online leaderboards (optional)**: with a console and account registered with Insignia, the game's Ranking menu signs
+  in and shows the real leaderboards (tested). The console can be imported from xemu, or made and registered in the port
+  without xemu (from 2.2.0). Off by default; see "Online" below.
 - **Saves**: saving, loading and loading back the same slot verified. Saves are in the standard Xbox format; copied
   into xRevive's save folder they load directly (tested). Saves are signed with the same console key whether online
   play is on or off, so switching it no longer shows Damaged Game. The launcher's Saves page re-signs saves from
@@ -115,8 +116,8 @@ These also happen on the Xbox; the port fixes them. Each fix can be switched bac
   unfixed (`project/docs/07_证据盘点.md`).
 - 3D sound and reverb approximate the Xbox's and have not been checked item by item (`project/docs/07_证据盘点.md`
   #9).
-- Choices in the Ranking / Master Ninja Tournament boxes that go to the Xbox dashboard (network settings, a new
-  account, recovering a gamertag): the PC has no dashboard, so Ⓐ closes the box as Ⓑ does.
+- Opening the Xbox Live dashboard from Ninja Gaiden 2004's Master Ninja Tournament and coming back to the game has not
+  been tested yet (Black's Ranking has).
 - Ninja Gaiden 2004's Xbox Live downloader has no sound.
 - Running `NinjaFCJ.xbe` directly, without launch data, crashes (players entering from the main menu never take this
   path).
@@ -246,23 +247,42 @@ The command `run.bat` runs (you can also type it yourself):
 
 **Online (Insignia leaderboards, optional)**
 
-The port has no account of its own: it borrows the "console" you already registered in xemu, and the game's own online
-code runs unchanged, as it does in xemu.
+The port keeps a "console" of its own in the save folder (`savedata\`): `online_eeprom.bin` is its identity and
+`online_accounts.bin` its network settings, machine account and gamer accounts. The game goes online with these two
+files only, not xemu's, and its own online code runs unchanged, as on a real Xbox. There are two ways to get a console
+that can go online, both on the launcher's Online page ("How to register" has the same steps):
 
-1. **Register with Insignia in xemu first** (once): follow Insignia's own instructions to register your console and
-   account with xemu, and check that you can sign in to Xbox Live there. Your EEPROM (`eeprom.bin`) and hard disk image
-   (`xbox_hdd.qcow2`) then hold the console's identity and the account. "How to register" on the launcher's Online
-   page (Signing in card) lists the steps, taken from Insignia's connection guide.
-2. **Close xemu**: one console cannot sign in twice, and the port stays offline while xemu runs.
-3. **The launcher's Online page**:
-   - Select On, then choose the two files with "Choose file…". Both files are only read.
-   - The Console row shows the check: whether the identity is valid, whether the console is registered, and which accounts it holds.
-   - Press Save.
+**A. Played online in xemu before: import from xemu** (the simplest)
 
-   The page writes `black.ini` next to the game program (`online = 1`, `online_eeprom = …`, `online_hdd = …`), which you
-   can also edit by hand.
-4. **In the game**: main menu → Ranking, pick your gamertag to sign in, and view the leaderboards. When it connects, the
-   picture's bottom-right corner says so.
+1. Close xemu.
+2. In the Import from xemu card, choose xemu's EEPROM (`eeprom.bin`) and hard disk image (`xbox_hdd.qcow2`) with
+   "Choose file…". Both files are only read.
+3. Press Import. The first time brings xemu's console over with its accounts; later imports add only the accounts not
+   here yet (A and D here, A, B and C in xemu: A, B, C and D after). Accounts from another console can be imported too:
+   they are encrypted again with this console's key.
+   Players who had online play on in an earlier version get one import automatically the first time 2.2.0 goes online.
+
+**B. Never used xemu: make and register a console in the port**
+
+You need Insignia's Setup Assistant, `Insignia-Setup.iso`, from Insignia's website, and an Xbox hard disk image with the
+dashboard on it (such as xemu's `xbox_hdd.qcow2`; the Xbox Live dashboard's files are read from it, nothing is changed).
+
+1. On the This console row, press New console: a new console (random serial number) is made in the save folder.
+2. Press Register and choose `Insignia-Setup.iso`. In the Setup Assistant choose Register Xbox, then Quit when it succeeds.
+3. Press Xbox Live (the first time it asks for the hard disk image above). In the dashboard, run the connection test in
+   NETWORK SETUP: once it passes, the console has its machine account and can sign in. With a proxy's TUN on this step
+   fails; see "If it cannot connect" below.
+4. Still in the dashboard, make a gamertag with NEW ACCOUNT (fill it in as Insignia's instructions say).
+
+**In the game**: select On, press Save. Main menu → Ranking, pick your gamertag to sign in, and view the leaderboards.
+When it connects, the picture's bottom-right corner says so. The Ranking choices that go to the Xbox dashboard (a new
+account, network settings, recovering a gamertag) open the same Xbox Live dashboard and come back to the game.
+
+The page writes `black.ini` next to the game program (`online = 1` and so on), which you can also edit by hand.
+
+**The accounts file's backup**: each run, before it first changes `online_accounts.bin`, the old one is kept as
+`online_accounts.bak`; a missing or damaged `online_accounts.bin` is read back from it. To back up, copy the whole
+`savedata` folder.
 
 **Do you need InsigniaDNS.exe?** Not by default. First, two things with nearly the same name:
 
@@ -293,10 +313,14 @@ no longer shown: the port sends every DNS lookup of the game to the address show
   To keep TUN on: **turn TUN off, start InsigniaDNS.exe, turn TUN back on**, then choose "Local InsigniaDNS.exe".
   InsigniaDNS.exe on a LAN address (`192.168.x.x`) is not captured by TUN. Or just turn TUN off and use Insignia's
   public DNS.
+- With TUN on and Insignia's public DNS, Register still succeeds (it goes over HTTPS, which reaches Insignia through the
+  proxy), but the dashboard's connection test fails and no machine account is made. So the launcher checks DNS before it
+  opens the dashboard and, when lookups are captured, says so instead; it also says so when the dashboard closes and
+  the console still has no machine account.
 - The game also shows why it cannot connect in the bottom-right corner: DNS captured, DNS not answering, xemu running,
   files not valid.
-- In the game's "cannot connect" / "repair gamertag" boxes, Ⓐ now cancels like Ⓑ. Their Ⓐ used to open the Xbox
-  dashboard, which the port does not have.
+- In the game's "cannot connect" / "repair gamertag" boxes, Ⓐ opens the Xbox Live dashboard; without the dashboard's
+  files (Xbox Live never pressed in the launcher and no xemu hard disk image chosen) Ⓐ cancels like Ⓑ.
 - In `black.log`, search for `online:` and `[net]` to see whether the identity was read and what DNS answered.
 
 **How online play works (in plain words)**
@@ -310,10 +334,11 @@ Live so that old games can go online again. To reach it, the port does four thin
 2. **A pretend network card.** A real Xbox has a network card; a PC port has none. The port imitates the Xbox's card in
    software: what the game sends to it, the port hands to Windows to send on the internet, and the servers' replies go
    back into the card for the game. The game posts letters in its own mailbox; the port is the postman.
-3. **The identity of a registered console.** Insignia only accepts registered Xboxes. The virtual Xbox you registered in
-   xemu keeps its identity card (console serial and keys) in the EEPROM file and your account on the hard disk image.
-   The port only reads the two files to sign in with that identity; it changes and uploads nothing. That is also why one
-   console cannot sign in from xemu and the port at the same time, as one ID card cannot be shown in two places at once.
+3. **The identity of a registered console.** Insignia only accepts registered Xboxes. The port keeps a virtual Xbox of
+   its own in the save folder: its identity card (console serial and keys) in `online_eeprom.bin`, the accounts in
+   `online_accounts.bin`. It can be brought over from the one you registered in xemu, or made new and registered with
+   Insignia's own Setup Assistant. A console brought from xemu cannot sign in from xemu and the port at the same time, as
+   one ID card cannot be shown in two places at once.
 4. **Another phone book (DNS).** The first step online is looking up where the Xbox Live servers are: DNS, a phone book.
    In an ordinary phone book, Xbox Live's numbers were disconnected long ago; Insignia's phone book points those names at
    Insignia's own servers. Whichever book the game asks, the port asks Insignia's instead: "Insignia public DNS" uses
@@ -323,8 +348,8 @@ Live so that old games can go online again. To reach it, the port does four thin
 So the game believes it reached the old Xbox Live, and Insignia believes a real Xbox (the one you registered) is calling;
 the two match, and you can sign in and see the leaderboards.
 
-In one sentence: the game stays as it is; the port gives it a network card, borrows your registered console's identity,
-and swaps the phone book for Insignia's.
+In one sentence: the game stays as it is; the port gives it a network card and a registered console's identity, and
+swaps the phone book for Insignia's.
 
 Details and evidence: `project/docs/09_联网_Insignia.md`.
 
