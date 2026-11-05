@@ -15,6 +15,7 @@
 #include "sha1.h"
 
 #include <bcrypt.h>
+#include <shlobj.h>
 #include <tlhelp32.h>
 
 #include <algorithm>
@@ -168,7 +169,7 @@ std::wstring local_eeprom_path() { return host_full_path(g_cfg.hdd_dir) + L"\\on
 bool write_atomic(const std::wstring &path, const void *a, size_t na, const void *b = nullptr, size_t nb = 0)
 {
     std::wstring tmp = path + L".tmp";
-    CreateDirectoryW(host_full_path(g_cfg.hdd_dir).c_str(), nullptr);
+    SHCreateDirectoryExW(nullptr, host_full_path(g_cfg.hdd_dir).c_str(), nullptr); // with any missing parents
     FILE *f = nullptr;
     if (_wfopen_s(&f, tmp.c_str(), L"wb") || !f) return false;
     bool ok = fwrite(a, 1, na, f) == na && (!nb || fwrite(b, 1, nb, f) == nb) && fflush(f) == 0;
