@@ -45,7 +45,12 @@ if ($icon -eq [IntPtr]::Zero) { throw "$game has no icon (built with PORT_ICON e
 # (Trojan:Win32/Bearfoos.A!ml) while a second build of the same source was clean. A flagged build is not shipped:
 # rebuild and pack again.
 $mp = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
-if (Test-Path $mp) {
+# Defender turned off (another antivirus, or by the user): MpCmdRun fails with "Product/Feature disabled", which is not
+# a finding; the scan is skipped with a warning (scan the zip with the antivirus in use instead)
+$av = Get-MpComputerStatus -ErrorAction SilentlyContinue
+if ((Test-Path $mp) -and $av -and -not $av.AntivirusEnabled) {
+    Write-Warning 'Windows Defender is turned off on this PC: the programs were not scanned'
+} elseif (Test-Path $mp) {
     foreach ($f in $launcher, $game, "$Bin\blackrt.dll") {
         $r = & $mp -Scan -ScanType 3 -File $f -DisableRemediation | Out-String
         if ($r -notmatch 'found no threats') { throw "Windows Defender flags ${f}: rebuild it and pack again`n$r" }
