@@ -286,6 +286,74 @@ bool dash_dir_ensure(const std::wstring &image, const std::wstring &partition2, 
     return false;
 }
 
+namespace {
+
+// Copies the host folder from into to, recursively; false on any failure
+bool copy_host_tree(const std::wstring &from, const std::wstring &to, int depth, int &files)
+{
+    if (depth > 8 || !CreateDirectoryW(to.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) return false;
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((from + L"\\*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    bool ok = true;
+    do {
+        if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
+        std::wstring s = from + L"\\" + fd.cFileName, d = to + L"\\" + fd.cFileName;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ok = copy_host_tree(s, d, depth + 1, files);
+        else if ((ok = CopyFileW(s.c_str(), d.c_str(), FALSE) != 0)) files++;
+        if (!ok) logf("dash: could not copy %s", narrow(s).c_str());
+    } while (ok && FindNextFileW(h, &fd));
+    FindClose(h);
+    return ok;
+}
+
+bool host_exists(const std::wstring &p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; }
+
+} // namespace
+
+bool dash_from_folder(const std::wstring &root, const std::wstring &partition2)
+{
+    CreateDirectoryW(partition2.c_str(), nullptr);
+    bool ok = true;
+    // C:\fonts: its .xtf files
+    std::wstring fonts = partition2 + L"\\fonts";
+    if (!has_xtf(fonts)) {
+        CreateDirectoryW(fonts.c_str(), nullptr);
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((root + L"\\fonts\\*.xtf").c_str(), &fd);
+        int copied = 0;
+        if (h != INVALID_HANDLE_VALUE) {
+            do copied += CopyFileW((root + L"\\fonts\\" + fd.cFileName).c_str(), (fonts + L"\\" + fd.cFileName).c_str(), FALSE) != 0;
+            while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+        logf("dash: %d font file(s) copied from %s\\fonts", copied, narrow(root).c_str());
+        ok = has_xtf(fonts);
+    }
+    // C:\xodash, whole (through xodash.part, as from an image)
+    std::wstring xo = partition2 + L"\\xodash", part = xo + L".part";
+    if (ok && !host_exists(xo + L"\\xonlinedash.xbe")) {
+        remove_tree(part);
+        int files = 0;
+        ok = copy_host_tree(root + L"\\xodash", part, 0, files) && host_exists(part + L"\\xonlinedash.xbe");
+        if (ok) {
+            remove_tree(xo);
+            ok = MoveFileW(part.c_str(), xo.c_str()) != 0;
+        }
+        if (!ok) remove_tree(part);
+        logf("dash: %s\\xodash %s (%d files)", narrow(root).c_str(), ok ? "copied" : "NOT copied", files);
+    }
+    // C:\xboxdash.xbe
+    std::wstring xd = partition2 + L"\\xboxdash.xbe";
+    if (ok && !host_exists(xd)) {
+        ok = CopyFileW((root + L"\\xboxdash.xbe").c_str(), (xd + L".part").c_str(), FALSE) &&
+             MoveFileExW((xd + L".part").c_str(), xd.c_str(), MOVEFILE_REPLACE_EXISTING);
+        if (!ok) DeleteFileW((xd + L".part").c_str());
+        logf("dash: %s\\xboxdash.xbe %s", narrow(root).c_str(), ok ? "copied" : "NOT copied");
+    }
+    return ok;
+}
+
 bool dash_file_ensure(const std::wstring &image, const std::wstring &partition2, const char *name)
 {
     std::wstring dest = partition2 + L"\\" + widen(name), part = dest + L".part";

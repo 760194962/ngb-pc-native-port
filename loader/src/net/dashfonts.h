@@ -21,6 +21,10 @@ bool dash_dir_ensure(const std::wstring &image, const std::wstring &partition2, 
 // it is not there yet (through <name>.part). true when it is there.
 bool dash_file_ensure(const std::wstring &image, const std::wstring &partition2, const char *name);
 
+// The same three (C:\fonts, C:\xodash, C:\xboxdash.xbe) from a folder holding a copy of an Xbox's C: (taken off a real
+// Xbox by FTP, say) instead of an image. true when all three are in <partition2>.
+bool dash_from_folder(const std::wstring &root, const std::wstring &partition2);
+
 // The signed copies of the disc's two programs in <cache>, and g_cfg.game_override pointed at it (when it is not set
 // already). false: the disc's files are not the known ones (nothing changed).
 bool updater_signed_sources(const std::wstring &game_dir, const std::wstring &cache);

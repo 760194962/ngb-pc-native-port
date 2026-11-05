@@ -221,12 +221,21 @@ Esc 为 Start……），在启动器的「控制」页可改，也可把手柄�
 
 **B. 没用过 xemu：在移植版里新建并注册一台主机**
 
-要准备：Insignia 官网的注册程序 `Insignia-Setup.iso`，以及一个装有 Xbox 仪表板的 Xbox 硬盘镜像（例如 xemu 的
-`xbox_hdd.qcow2`；只从里面读出 Xbox Live 仪表盘的文件，不修改它）。
+要准备：
+
+- Insignia 官网的注册程序 `Insignia-Setup.iso`。
+- 微软的 Xbox 仪表板（升级到 Insignia 要求的 5960 版）。移植版从中读出 Xbox Live 仪表盘的文件，只读、不修改。这是微软的文件，
+  移植版不能附带，下面三种来源任选一种：
+  - 装过官方仪表板的 xemu 硬盘镜像 `xbox_hdd.qcow2`（不必注册过 Insignia）；
+  - 从自己的 Xbox 导出的硬盘镜像（XboxHDM、FATXplorer 等工具做的）；
+  - 用 FTP 从改机 Xbox 拷出的整个 C 盘文件夹：选择文件时选其中的 `xboxdash.xbe`，移植版会取出同一文件夹里的 `xodash`、
+    `fonts` 和 `xboxdash.xbe`。
+
+  注意：xemu 官网提供的预制硬盘镜像里没有微软仪表板（装的是一个简易的替代品），不能用。
 
 1. 「本机主机」一行按「新建主机」：在存档文件夹里生成一台新主机（随机主机编号）。
 2. 按「注册主机」，选 `Insignia-Setup.iso`。注册程序打开后选 Register Xbox，成功后选 Quit 退出。
-3. 按「Xbox Live 仪表盘」（第一次会让你选上面的硬盘镜像）。在仪表盘里进 NETWORK SETUP 做一次联网测试：通过后本机才有
+3. 按「Xbox Live 仪表盘」（第一次会让你选上面的硬盘镜像或 `xboxdash.xbe`）。在仪表盘里进 NETWORK SETUP 做一次联网测试：通过后本机才有
    「主机账号」，才能登录。开着代理的 TUN 时这一步会失败，见下文「连不上时」。
 4. 还在仪表盘里，选 NEW ACCOUNT 新建玩家代号（按 Insignia 官网的说明填写）。
 

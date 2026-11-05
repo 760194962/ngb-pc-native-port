@@ -982,8 +982,17 @@ void open_dashboard()
     if (!exists(xbe)) {
         std::wstring image = from_utf8(black_ini("online_hdd"));
         if (image.empty() || !exists(image)) {
-            COMDLG_FILTERSPEC spec = {S(Str::DashFilter), L"*.qcow2;*.img;*.bin;*.raw"};
+            // an image, or in a copy of an Xbox's C: (FTP from a real Xbox) its xboxdash.xbe or xodash\xonlinedash.xbe:
+            // the game program takes the three from that folder (net/dashfonts.cpp dash_from_folder)
+            COMDLG_FILTERSPEC spec = {S(Str::DashFilter), L"*.qcow2;*.img;*.bin;*.raw;xboxdash.xbe;xonlinedash.xbe"};
             if (!pick(false, &image, &spec)) return;
+            size_t slash = image.find_last_of(L"\\/");
+            std::wstring name = slash == std::wstring::npos ? image : image.substr(slash + 1);
+            if (!_wcsicmp(name.c_str(), L"xboxdash.xbe")) image.resize(slash);
+            else if (!_wcsicmp(name.c_str(), L"xonlinedash.xbe")) {
+                image.resize(slash);                      // ...\xodash
+                image.resize(image.find_last_of(L"\\/")); // ...: the copy of C:
+            }
         }
         auto r = online_tool((L"--online-dash-from \"" + image + L"\"").c_str(), L"online_dash.txt", 60000);
         if (!r.count("dashboard") || r["dashboard"][0] != "ok" || !exists(xbe)) {

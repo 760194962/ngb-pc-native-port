@@ -470,10 +470,10 @@ const Pair kText[(int)Str::Count] = {
      L"2. 在「xemu EEPROM」「xemu 硬盘镜像」两行选 xemu 用的文件（如 eeprom.bin、xbox_hdd.qcow2，位置在 xemu 设置的「系统」页）。建议先备份这两个文件。\n"
      L"3. 点「从 xemu 导入」。「本机账号」一行显示已注册和你的玩家代号就完成了。以后在 xemu 里新建了账号，再导入一次就会补进来，本机已有的不受影响。\n\n"
      L"■ 方式二：不用 xemu，直接在移植版里注册\n"
-     L"要准备两样东西：Insignia 的注册程序 Insignia-Setup.iso（Insignia 官网免费下载）；一份装有 Xbox 仪表盘的 Xbox 硬盘镜像（如 xemu 用的 xbox_hdd.qcow2，不必注册过），移植版从里面取出仪表盘程序，它是微软的文件，移植版不能附带。\n"
+     L"要准备两样东西：Insignia 的注册程序 Insignia-Setup.iso（Insignia 官网免费下载）；以及微软的 Xbox 仪表盘（升级到 Insignia 要求的 5960 版），移植版从中取出 Xbox Live 仪表盘，它是微软的文件，移植版不能附带。仪表盘可以来自：装过官方仪表盘的 xemu 硬盘镜像（xbox_hdd.qcow2，不必注册过）；从自己的 Xbox 导出的硬盘镜像；或用 FTP 从改机 Xbox 拷出的整个 C 盘（选其中的 xboxdash.xbe）。xemu 官网的预制硬盘镜像没有微软仪表盘，不能用。\n"
      L"1. 点「新建主机」：生成一台新的 Xbox 主机，保存在存档目录里。\n"
      L"2. 点「注册主机」，第一次会让你选 Insignia-Setup.iso。注册程序打开后约 18 秒才能操作；选「Register Xbox」，看到 “Your Xbox was successfully registered” 后选「Quit Setup Assistant」退出。\n"
-     L"3. 点「Xbox Live 仪表盘」，第一次会让你选上面说的硬盘镜像。进入后选「NETWORK SETUP」做一次连接测试，主机账户在这一步建立。开着代理（Clash 等）的 TUN 时这一步会失败：DNS 改用「本地 InsigniaDNS.exe」或关掉 TUN。\n"
+     L"3. 点「Xbox Live 仪表盘」，第一次会让你选上面说的硬盘镜像（或拷出的 C 盘里的 xboxdash.xbe）。进入后选「NETWORK SETUP」做一次连接测试，主机账户在这一步建立。开着代理（Clash 等）的 TUN 时这一步会失败：DNS 改用「本地 InsigniaDNS.exe」或关掉 TUN。\n"
      L"4. 在 insignia.live 首页填邮箱申请订阅码，订阅码会发到邮箱。\n"
      L"5. 在仪表盘选「NEW ACCOUNT」：选国家、取玩家代号、填订阅码。服务免费；到信用卡一步按官网说明填测试卡号 4111 1111 1111 1111 和假资料，不要填真卡；账单邮箱要和申请订阅码时一样。最后设一个通行码。\n"
      L"6. 退出仪表盘（BACK 退到底，或直接关窗口）。「本机账号」一行显示你的玩家代号就完成了。\n\n"
@@ -484,10 +484,10 @@ const Pair kText[(int)Str::Count] = {
      L"2. Choose xemu\u2019s files in the xemu EEPROM and xemu hard disk rows (e.g. eeprom.bin and xbox_hdd.qcow2; xemu\u2019s System settings show where they are). Back them up first.\n"
      L"3. Press Import. The Accounts here row then shows registered and your gamertag. Accounts you make in xemu later come over with another Import; the ones here stay as they are.\n\n"
      L"\u25A0 2. Without xemu, in the port\n"
-     L"You need two things: Insignia\u2019s Setup Assistant, Insignia-Setup.iso (free on Insignia\u2019s website), and an Xbox hard disk image with the Xbox dashboard on it (e.g. xemu\u2019s xbox_hdd.qcow2, registered or not): the port takes the dashboard program from it, as it is Microsoft\u2019s and cannot come with the port.\n"
+     L"You need two things: Insignia's Setup Assistant, Insignia-Setup.iso (free on Insignia's website), and Microsoft's Xbox dashboard (updated to 5960, as Insignia asks): the port takes the Xbox Live dashboard from it, as it is Microsoft's and cannot come with the port. It can come from an xemu hard disk image with the official dashboard (xbox_hdd.qcow2, registered or not), an image of your own Xbox's disk, or a copy of a modded Xbox's whole C: taken by FTP (choose its xboxdash.xbe). The ready-made image on xemu's website has no Microsoft dashboard and does not work.\n"
      L"1. Press New console: the port makes a new Xbox console in the save folder.\n"
      L"2. Press Register; the first time it asks for Insignia-Setup.iso. The Setup Assistant takes about 18 seconds before it answers the pad; choose Register Xbox, and after \u201CYour Xbox was successfully registered\u201D choose Quit Setup Assistant.\n"
-     L"3. Press Xbox Live; the first time it asks for the hard disk image above. In the dashboard choose NETWORK SETUP and run the connection test: it makes the console\u2019s machine account. With a proxy\u2019s (Clash etc.) TUN on this step fails: use \u201cLocal InsigniaDNS.exe\u201d or turn TUN off.\n"
+     L"3. Press Xbox Live; the first time it asks for the hard disk image above (or the xboxdash.xbe in a copy of C:). In the dashboard choose NETWORK SETUP and run the connection test: it makes the console\u2019s machine account. With a proxy\u2019s (Clash etc.) TUN on this step fails: use \u201cLocal InsigniaDNS.exe\u201d or turn TUN off.\n"
      L"4. Enter your email on insignia.live to get a subscription code; it is emailed to you.\n"
      L"5. In the dashboard choose NEW ACCOUNT: country, gamertag, the code. The service is free: at the card step use the test card 4111 1111 1111 1111 and made-up details as the site says, never a real card; the billing email must be the one you got the code with. Last, set a pass code.\n"
      L"6. Leave the dashboard (BACK all the way, or close its window). The Accounts here row then shows your gamertag.\n\n"
@@ -638,10 +638,10 @@ const Pair kText[(int)Str::Count] = {
      L"Xbox Live"},
     {L"\u4eea\u8868\u76d8\u6b63\u5728\u8fd0\u884c\uff1a\u505a\u5b8c\u540e BACK \u9000\u51fa\uff0c\u6216\u5173\u6389\u5b83\u7684\u7a97\u53e3",
      L"The dashboard is running: when done, BACK out of it or close its window"},
-    {L"Xbox \u786c\u76d8\u955c\u50cf\uff08\u542b\u4eea\u8868\u76d8\uff0c\u5982 xbox_hdd.qcow2\uff09",
-     L"Xbox hard disk image with the dashboard (e.g. xbox_hdd.qcow2)"},
-    {L"\u8fd9\u4e2a\u955c\u50cf\u91cc\u6ca1\u6709\u79fb\u690d\u7248\u80fd\u7528\u7684\u4eea\u8868\u76d8\uff08\u8981 C:\\xodash \u91cc\u7684 5971 \u7248 xonlinedash.xbe\uff09",
-     L"No dashboard the port can run in that image (it needs C:\\xodash with xonlinedash.xbe 5971)"},
+    {L"Xbox 硬盘镜像（含仪表盘，如 xbox_hdd.qcow2），或从 Xbox 拷出的 C 盘里的 xboxdash.xbe",
+     L"Xbox hard disk image with the dashboard (e.g. xbox_hdd.qcow2), or xboxdash.xbe in a copy of an Xbox\u2019s C:"},
+    {L"选的镜像或文件夹里\u6ca1\u6709\u79fb\u690d\u7248\u80fd\u7528\u7684\u4eea\u8868\u76d8（要 C:\\xodash 里的 5971 版 xonlinedash.xbe；拷出的 C 盘要有 xodash、fonts 和 xboxdash.xbe）",
+     L"No dashboard the port can run there (it needs C:\\xodash with xonlinedash.xbe 5971; a copy of C: needs xodash, fonts and xboxdash.xbe)"},
     {L"本机账号",
      L"Accounts"},
     {L"还没有玩家代号：在「Xbox Live 仪表盘」里选 NEW ACCOUNT 新建",

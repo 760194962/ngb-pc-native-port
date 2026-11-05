@@ -649,9 +649,13 @@ bool online_dash_from(const std::wstring &image, const std::wstring &out_path)
 {
     // The Xbox Live dashboard's files (C:\xodash, C:\fonts, C:\xboxdash.xbe) from any Xbox hard disk image the player has
     // (only read; it need not be a registered console's), into the hard disk folder: for a console of the port's own
+    // or from a folder: a copy of an Xbox's C: (taken off a real Xbox by FTP)
     std::wstring p2 = host_full_path(g_cfg.hdd_dir) + L"\\Partition2";
-    bool ok = dash_fonts_ensure(image, p2) && dash_dir_ensure(image, p2, "xodash", L"xonlinedash.xbe") &&
-              dash_file_ensure(image, p2, "xboxdash.xbe");
+    DWORD at = GetFileAttributesW(image.c_str());
+    bool ok = at != INVALID_FILE_ATTRIBUTES && (at & FILE_ATTRIBUTE_DIRECTORY)
+                  ? dash_from_folder(image, p2)
+                  : dash_fonts_ensure(image, p2) && dash_dir_ensure(image, p2, "xodash", L"xonlinedash.xbe") &&
+                        dash_file_ensure(image, p2, "xboxdash.xbe");
     std::string r = ok ? "dashboard = ok\n" : "dashboard = missing\n";
     if (FILE *f = _wfopen(out_path.c_str(), L"wb")) {
         fputs(r.c_str(), f);

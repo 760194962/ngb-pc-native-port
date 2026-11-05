@@ -264,12 +264,21 @@ that can go online, both on the launcher's Online page ("How to register" has th
 
 **B. Never used xemu: make and register a console in the port**
 
-You need Insignia's Setup Assistant, `Insignia-Setup.iso`, from Insignia's website, and an Xbox hard disk image with the
-dashboard on it (such as xemu's `xbox_hdd.qcow2`; the Xbox Live dashboard's files are read from it, nothing is changed).
+You need:
+
+- Insignia's Setup Assistant, `Insignia-Setup.iso`, from Insignia's website.
+- Microsoft's Xbox dashboard (updated to 5960, as Insignia asks). The port reads the Xbox Live dashboard's files from it
+  and changes nothing. It is Microsoft's and cannot come with the port; any one of these will do:
+  - an xemu hard disk image with the official dashboard, `xbox_hdd.qcow2` (registered with Insignia or not);
+  - an image of your own Xbox's hard disk (made with XboxHDM, FATXplorer and the like);
+  - a modded Xbox's whole C: copied off by FTP: choose its `xboxdash.xbe` when asked, and the port takes `xodash`,
+    `fonts` and `xboxdash.xbe` from that folder.
+
+  The ready-made image on xemu's website has no Microsoft dashboard (it has a simple stand-in) and does not work.
 
 1. On the This console row, press New console: a new console (random serial number) is made in the save folder.
 2. Press Register and choose `Insignia-Setup.iso`. In the Setup Assistant choose Register Xbox, then Quit when it succeeds.
-3. Press Xbox Live (the first time it asks for the hard disk image above). In the dashboard, run the connection test in
+3. Press Xbox Live (the first time it asks for the hard disk image or `xboxdash.xbe` above). In the dashboard, run the connection test in
    NETWORK SETUP: once it passes, the console has its machine account and can sign in. With a proxy's TUN on this step
    fails; see "If it cannot connect" below.
 4. Still in the dashboard, make a gamertag with NEW ACCOUNT (fill it in as Insignia's instructions say).
