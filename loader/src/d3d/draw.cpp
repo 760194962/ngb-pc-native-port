@@ -2124,7 +2124,7 @@ void quad_snap_shader(const QuadSnap &q, const RhwTexScale *ts, int nts)
         size[s][0] = (float)desc.Width, size[s][1] = (float)desc.Height, size[s][2] = 1.0f / desc.Width, size[s][3] = 1.0f / desc.Height;
         stages |= 1u << s;
         // linear filtering as apply_texture_stages sets it from the Xbox stage (MAGFILTER 3, MINFILTER 4: 2 or over 3)
-        if (tss[3] == 2 || tss[3] > 3 || tss[4] == 2 || tss[4] > 3) weighted |= 1u << s;
+        if (g_cfg.quad_weight && (tss[3] == 2 || tss[3] > 3 || tss[4] == 2 || tss[4] > 3)) weighted |= 1u << s;
     }
     if (!stages || g_st.pixel_shader || g_cfg.host_ffp) return;
     g_ffp_quad_stages = stages;
