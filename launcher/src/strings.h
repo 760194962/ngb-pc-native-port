@@ -394,6 +394,8 @@ enum class Str {
     OnlineNoGamertag,
     OnlineXemuCard,
     OnlineDamaged, // an account that did not check out with its console's key (left out of an import)
+    DashNoDns, // the dashboard not opened: the DNS check failed (its network test could not make the machine account)
+    DashNoMachine, // the dashboard closed and the console still has no machine account
     Count
 };
 

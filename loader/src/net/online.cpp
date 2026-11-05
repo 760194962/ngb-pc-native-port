@@ -179,16 +179,18 @@ bool write_atomic(const std::wstring &path, const void *a, size_t na, const void
     return ok;
 }
 
-// The store into c (CONFIG_AREA bytes; sectors 0-7 zero) and its console's serial number. 0 none, -1 not a store, 1 ok
-int store_load(std::vector<uint8_t> &c, uint8_t serial[12])
+// The store as it was before this run first changed it (store_save): read back when the store is gone or damaged
+std::wstring store_backup_path() { return host_full_path(g_cfg.hdd_dir) + L"\\online_accounts.bak"; }
+
+int store_read(const std::wstring &path, std::vector<uint8_t> &c, uint8_t serial[12])
 {
     std::vector<uint8_t> s(STORE_HEAD + CONFIG_AREA - OVERLAY_START);
     FILE *f = nullptr;
-    if (_wfopen_s(&f, store_path().c_str(), L"rb") || !f) return 0;
+    if (_wfopen_s(&f, path.c_str(), L"rb") || !f) return 0;
     size_t n = fread(s.data(), 1, s.size(), f);
     fclose(f);
     if (n != s.size() || memcmp(s.data(), STORE_MAGIC, 8)) {
-        logf("online: the account store %s is not one (%zu bytes)", narrow(store_path()).c_str(), n);
+        logf("online: the account store %s is not one (%zu bytes)", narrow(path).c_str(), n);
         return -1;
     }
     memcpy(serial, s.data() + 8, 12);
@@ -198,8 +200,26 @@ int store_load(std::vector<uint8_t> &c, uint8_t serial[12])
     return 1;
 }
 
+// The store into c (CONFIG_AREA bytes; sectors 0-7 zero) and its console's serial number. 0 none, -1 not a store, 1 ok.
+// A store gone or damaged comes back from its backup (the next save writes it again).
+int store_load(std::vector<uint8_t> &c, uint8_t serial[12])
+{
+    int st = store_read(store_path(), c, serial);
+    if (st == 1 || store_read(store_backup_path(), c, serial) != 1) return st;
+    logf("online: the account store %s, read from its backup online_accounts.bak", st ? "is damaged" : "is missing");
+    return 1;
+}
+
 bool store_save(const std::vector<uint8_t> &c, const uint8_t serial[12])
 {
+    static bool backed_up; // once a run: the backup is the store before this run's changes
+    if (!backed_up) {
+        std::vector<uint8_t> old;
+        uint8_t old_serial[12];
+        if (store_read(store_path(), old, old_serial) == 1) CopyFileW(store_path().c_str(), store_backup_path().c_str(), FALSE);
+        SecureZeroMemory(old.data(), old.size());
+        backed_up = true;
+    }
     uint8_t head[STORE_HEAD] = {};
     memcpy(head, STORE_MAGIC, 8);
     memcpy(head + 8, serial, 12);
@@ -592,10 +612,11 @@ bool online_new_console(const std::wstring &out_path)
     uint8_t e[256];
     std::vector<uint8_t> c;
     uint8_t serial[12];
-    if (read_file(local_eeprom_path(), 0, e, sizeof e) || store_load(c, serial) != 0) {
+    if (read_file(local_eeprom_path(), 0, e, sizeof e) || store_read(store_path(), c, serial) != 0) {
         r = "error = " + narrow(L"本机已经有主机了") + "\n";
         return finish(false);
     }
+    DeleteFileW(store_backup_path().c_str()); // an earlier console's, left behind: not to come back over this one
     if (!kcrypto_selftest() || !make_eeprom(e)) {
         r = "error = " + narrow(L"生成主机失败（请回报）") + "\n";
         return finish(false);

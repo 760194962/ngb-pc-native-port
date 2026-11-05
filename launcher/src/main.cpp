@@ -948,10 +948,23 @@ void register_console()
 // "Xbox Live": the Xbox Live dashboard on the port's own console, online, at its XBOX LIVE menu (NETWORK SETUP's
 // connection test makes the machine account; NEW ACCOUNT, ACCOUNT MANAGEMENT). Its files come once from an Xbox hard
 // disk image: xemu's chosen here, else one the player picks (the game program's --online-dash-from checks the build).
+std::string dns_server(bool *pc);
+bool dns_ask(const std::string &server, bool pc, std::wstring *result);
+
 void open_dashboard()
 {
     if (g.setup_proc || game_running()) return;
     g.local_result.clear();
+    // Its network test needs the DNS to give Insignia's servers: with a proxy's TUN on, Insignia's public DNS is
+    // captured and the test makes no machine account, though registering worked (HTTPS goes through the proxy)
+    {
+        bool pc = false;
+        std::wstring why;
+        if (dns_ask(dns_server(&pc), pc, &why)) {
+            g.local_result = std::wstring(S(Str::DashNoDns)) + why;
+            return;
+        }
+    }
     std::wstring hdd = ini_get(L"hdd", (g.dir + L"\\savedata").c_str());
     std::wstring xbe = hdd + L"\\Partition2\\xodash\\xonlinedash.xbe";
     if (!exists(xbe)) {
@@ -1107,8 +1120,11 @@ void dns_edit_end(bool keep)
     }
 }
 
-// Check network: asks that server for AS.XBOXLIVE.COM (the game's first lookup) on a thread of its own; the answer
-// tells a working DNS, a proxy's fake address (198.18.0.0/15, TUN mode), or no answer
+// Asks server for AS.XBOXLIVE.COM (the game's first lookup), 3 s at most: what to show, and whether it is a problem
+// (no answer, no address, or a proxy's fake address: 198.18.0.0/15, TUN mode)
+bool dns_ask(const std::string &server, bool pc, std::wstring *result);
+
+// Check network: dns_ask on a thread of its own
 void net_check()
 {
     if (g.net_busy) return;
@@ -1121,6 +1137,21 @@ void net_check()
         g.net_bad = false;
     }
     std::thread([server, pc] {
+        std::wstring result;
+        bool bad = dns_ask(server, pc, &result);
+        {
+            std::lock_guard<std::mutex> l(g.net_lock);
+            g.net_result = result;
+            g.net_bad = bad;
+        }
+        g.net_busy = false;
+        InvalidateRect(g.hwnd, nullptr, FALSE);
+    }).detach();
+}
+
+bool dns_ask(const std::string &server, bool pc, std::wstring *out)
+{
+    {
         WSADATA wd;
         WSAStartup(MAKEWORD(2, 2), &wd);
         uint8_t q[64] = {0x4E, 0x47, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0}; // id "NG", recursion desired, one question
@@ -1181,14 +1212,9 @@ void net_check()
             result = S(Str::NetOk) + w_addr + L"  (" + w_server + L")";
             bad = false;
         }
-        {
-            std::lock_guard<std::mutex> l(g.net_lock);
-            g.net_result = result;
-            g.net_bad = bad;
-        }
-        g.net_busy = false;
-        InvalidateRect(g.hwnd, nullptr, FALSE);
-    }).detach();
+        *out = result;
+        return bad;
+    }
 }
 
 // --- resources --------------------------------------------------------------------------------------------------
@@ -3238,6 +3264,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             g.setup_proc = nullptr;
             KillTimer(h, kTimerSetup);
             g.online_for.clear();
+            online_check();
+            // the dashboard closed and the console still has no machine account: its network test did not get through
+            if (g.setup_is_dash && online_value("local") == "ok" && online_value("local_registered") != "1")
+                g.local_result = S(Str::DashNoMachine);
         }
         InvalidateRect(h, nullptr, FALSE);
         return 0;
@@ -3395,6 +3425,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
     check_game();
     for (int i = 1; i < argc; i++)
         if (!wcscmp(argv[i], L"--import-now")) online_import(); // with --snap, before it on the line: the Import button pressed
+        else if (!wcscmp(argv[i], L"--dash-now")) open_dashboard(); // the same, the Xbox Live button
         else if (!wcscmp(argv[i], L"--snap") && i + 1 < argc)
             return snap(argv[i + 1], i + 2 < argc && argv[i + 2][0] != L'-' ? _wtoi(argv[i + 2]) : 0);
 
