@@ -156,6 +156,7 @@ struct Config {
                                // does (d3d/nv2a_psh.cpp); 2 over the Xbox map's texels, 1 over the host map's, 0 one
                                // sample as before; black.ini shadowsoft = 1 / 0 (2 / 0); press-file "cfg:shadowpcf:N"
     bool quad_snap = true;     // press-file "cfg:quadsnap:0": 2D quads above 1x drawn as before (d3d/draw.cpp quad_snap)
+    bool resolve = true;       // press-file "cfg:resolve:0": the frame to the window by the old chain (seam fill, ramp and FXAA at the frame's size, then a bilinear scale; d3d/device.cpp present_backbuffer)
     bool rhw_offset = true;    // press-file "cfg:rhwoffset:0": XYZRHW positions ignore the screen-space offset (comparison)
     bool zview8 = false;       // press-file "cfg:zview8:1": depth views back to A8R8G8B8 (8-bit depth) for comparison
     bool api_count = false;    // --api-count (diagnosis): Direct3D 9 calls by kind per frame (d3d/apicount.cpp)

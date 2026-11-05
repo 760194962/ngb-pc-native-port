@@ -334,7 +334,7 @@ IDirect3DPixelShader9 *compile_ps(const char *src, const char *name, const char 
 // scaling), else point-sample.
 void fullscreen_pass(IDirect3DPixelShader9 *ps, IDirect3DBaseTexture9 *src, IDirect3DSurface9 *color, IDirect3DSurface9 *depth,
                      uint32_t w, uint32_t h, bool write_depth, const float *c0 = nullptr, bool linear = false,
-                     const RECT *dst = nullptr, IDirect3DBaseTexture9 *src2 = nullptr)
+                     const RECT *dst = nullptr, IDirect3DBaseTexture9 *src2 = nullptr, const float *c1 = nullptr)
 {
     IDirect3DDevice9 *d = host3d::dev();
     IDirect3DStateBlock9 *sb = nullptr;
@@ -347,6 +347,7 @@ void fullscreen_pass(IDirect3DPixelShader9 *ps, IDirect3DBaseTexture9 *src, IDir
     d->SetVertexShader(nullptr);
     d->SetPixelShader(ps);
     if (c0) d->SetPixelShaderConstantF(0, c0, 1);
+    if (c1) d->SetPixelShaderConstantF(1, c1, 1);
     d->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
     d->SetTexture(0, src);
     d->SetSamplerState(0, D3DSAMP_MINFILTER, linear ? D3DTEXF_LINEAR : D3DTEXF_POINT);
@@ -592,6 +593,71 @@ IDirect3DTexture9 *aa_target(int i, uint32_t w, uint32_t h)
     return g_aa_tex[i];
 }
 
+// The resolve: the frame (Xbox size x render scale) into the window's picture in one pass, each picture pixel the
+// average of the frame pixels it covers. RN x RN bilinear taps spread evenly over the pixel's footprint (fp, in the
+// frame's uv), each the mean of the 2x2 frame pixels around it: RN = half the footprint's width in frame pixels,
+// rounded up, so every frame pixel counts (a plain bilinear scale reads 2x2 of them, about a quarter of a 10x frame on
+// a 1920x1200 window). RN 1 is the plain bilinear scale. Each tap goes through the game's gamma ramp (and the user's
+// gain and gamma) before the averaging: the light of the finer pixels averaged, as an Xbox drawing more pixels would
+// show, and the look of 3x and below (the ramp doubles the framebuffer and clips highlights; averaged first, they
+// dimmed by up to 16 of 255 at 6x).
+const char kResolvePS[] = "sampler2D f : register(s0);\n"
+                          "sampler2D ramp : register(s1);\n"
+                          "float4 g : register(c0);\n"  // x = 1/gamma, y = gain
+                          "float4 fp : register(c1);\n" // xy: a picture pixel's footprint in the frame's uv
+                          "float3 shown(float3 v) {\n"
+                          "  float3 i = saturate(v) * (255.0 / 256.0) + 0.5 / 256.0;\n"
+                          "  float3 c = float3(tex2D(ramp, float2(i.r, 0.5)).r, tex2D(ramp, float2(i.g, 0.5)).g, tex2D(ramp, float2(i.b, 0.5)).b);\n"
+                          "  return pow(saturate(c * g.y), g.xxx);\n"
+                          "}\n"
+                          "float4 main(float2 uv : TEXCOORD0) : COLOR0 {\n"
+                          "  float3 s = 0;\n"
+                          "  [unroll] for (int y = 0; y < RN; y++)\n"
+                          "    [unroll] for (int x = 0; x < RN; x++)\n"
+                          "      s += shown(tex2D(f, uv + fp.xy * ((float2(x, y) + 0.5) / RN - 0.5)).rgb);\n"
+                          "  return float4(s / (RN * RN), 1);\n"
+                          "}\n";
+// Taps per axis at most: a footprint of 8 frame pixels, every one counted (10x on a 1280x720 window: 6.4); a smaller
+// window reads 4x4 spread over it. 5x5 does not fit ps_2_a's 512 instruction slots with the ramp at each tap.
+constexpr int kResolveMax = 4;
+IDirect3DPixelShader9 *g_resolve_ps[kResolveMax + 1];
+bool g_resolve_tried[kResolveMax + 1];
+
+// The variant for n x n taps, or the largest smaller one that compiles; *got: its n
+IDirect3DPixelShader9 *resolve_ps(int n, int *got)
+{
+    for (; n >= 1; n--) { // a variant that does not compile: the next smaller one
+        if (!g_resolve_ps[n] && !g_resolve_tried[n]) {
+            g_resolve_tried[n] = true;
+            std::string src = "#define RN " + std::to_string(n) + "\n" + kResolvePS;
+            g_resolve_ps[n] = compile_ps(src.c_str(), "resolve", n > 2 ? "ps_2_a" : "ps_2_0");
+        }
+        if (g_resolve_ps[n]) {
+            *got = n;
+            return g_resolve_ps[n];
+        }
+    }
+    return nullptr;
+}
+
+// The picture's size, for the anti-aliasing filter after the resolve (made again when the window's size changes)
+IDirect3DTexture9 *g_pic_tex;
+uint32_t g_pic_w, g_pic_h;
+
+IDirect3DTexture9 *picture_target(uint32_t w, uint32_t h)
+{
+    if (g_pic_tex && (g_pic_w != w || g_pic_h != h)) {
+        g_pic_tex->Release();
+        g_pic_tex = nullptr;
+    }
+    if (!g_pic_tex && SUCCEEDED(host3d::dev()->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
+                                                              &g_pic_tex, nullptr))) {
+        g_pic_w = w;
+        g_pic_h = h;
+    }
+    return g_pic_tex;
+}
+
 // Seam fill: destructible walls are built from chunks with their own matrices; where they meet, hairline gaps
 // (sub-pixel at the Xbox's 640x480, so rarely visible there) show the background along the whole seam at 3-4x
 // the size, flickering as the view moves. A pixel whose depth is well behind both of its neighbours 1 or 2
@@ -691,12 +757,27 @@ void present_backbuffer()
     host3d::frame_layout(&frame, &pic);
     if (pic.left > 0 || pic.top > 0 || pic.right < frame.right || pic.bottom < frame.bottom)
         host3d::dev()->ColorFill(g_host_backbuffer, &frame, 0);
-    if (g_cfg.aa && !g_fxaa_ps) {
+    // What each step costs follows the picture, not the frame: at 10x a frame is 8192x4800 (39 million pixels) for a
+    // 1920x1200 window, and the old chain (seam fill, then the ramp and FXAA each into a frame-sized target, then a
+    // bilinear scale) read some 1.8 billion texels a frame and held three more frame-sized targets: 63 of 66 ms of the
+    // title screen on Iris Xe (2026-11-05, a player: "the main menu keeps the GPU busy at 10x").
+    const uint32_t pw = (uint32_t)std::max<LONG>(1, pic.right - pic.left), ph = (uint32_t)std::max<LONG>(1, pic.bottom - pic.top);
+    const float fx = (float)bb.w / pw, fy = (float)bb.h / ph; // frame pixels per picture pixel
+    const float foot = std::max(fx, fy);
+    // The old chain where the frame is no larger than the picture (1x, render = native): FXAA on the smaller frame,
+    // then the bilinear scale up, is both cheaper and better there. Press-file "cfg:resolve:0": always, for comparison.
+    const bool legacy = !g_cfg.resolve || foot <= 1.0f;
+    // FXAA only where the frame is about the picture's size: from 2 frame pixels per picture pixel the resolve's
+    // averaging is the anti-aliasing (supersampling), and it runs on the picture, after the resolve
+    const bool want_aa = g_cfg.aa && (legacy || foot < 2.0f);
+    if (want_aa && !g_fxaa_ps) {
         g_fxaa_ps = compile_ps(kFxaaPS, "fxaa", "ps_2_a");
         if (!g_fxaa_ps) g_cfg.aa = false;
     }
     IDirect3DTexture9 *src = bb.tex; // the frame, with seams filled when that is on
-    if (g_cfg.seam_fill && g_main_z) {
+    // Seam fill on the frame, where a seam (one frame pixel wide) can still show: below 3 frame pixels per picture
+    // pixel. From there the resolve averages it with the pixels around it (a third at most).
+    if (g_cfg.seam_fill && g_main_z && (legacy || foot < 3.0f)) {
         if (!g_seam_ps && !g_seam_tried) {
             g_seam_tried = true;
             g_seam_ps = compile_ps(kSeamPS, "seamfill", "ps_2_a");
@@ -724,9 +805,35 @@ void present_backbuffer()
             src = out;
         }
     }
-    IDirect3DTexture9 *aa0 = g_cfg.aa ? aa_target(0, bb.w, bb.h) : nullptr, *aa1 = g_cfg.aa ? aa_target(1, bb.w, bb.h) : nullptr;
-    if (g_gamma_ps && ramp && aa0 && aa1) {
-        // ramp + gamma 1:1 into aa0, anti-alias 1:1 into aa1, then filter into the window
+    // The resolve (kResolvePS): into the picture directly, or with FXAA into a picture-sized target first
+    int taps = std::clamp((int)ceilf(foot / 2.0f - 0.01f), 1, kResolveMax);
+    IDirect3DPixelShader9 *resolve = ramp && !legacy ? resolve_ps(taps, &taps) : nullptr;
+    IDirect3DTexture9 *aa0 = legacy && want_aa && g_fxaa_ps ? aa_target(0, bb.w, bb.h) : nullptr,
+                      *aa1 = legacy && want_aa && g_fxaa_ps ? aa_target(1, bb.w, bb.h) : nullptr;
+    IDirect3DTexture9 *pic_tex = resolve && want_aa && g_fxaa_ps ? picture_target(pw, ph) : nullptr;
+    static int shown_taps = -1;
+    if (resolve && shown_taps != taps) {
+        shown_taps = taps;
+        logf("[d3d] resolve: frame %ux%u into the picture %ux%u (%.2f x %.2f frame pixels each): %dx%d taps, %s", bb.w, bb.h, pw, ph,
+             fx, fy, taps, taps, pic_tex ? "FXAA after it" : want_aa ? "FXAA not available" : "no FXAA (the averaging is the anti-aliasing)");
+    }
+    if (resolve) {
+        float c[4] = {1.0f / g_cfg.gamma, g_cfg.gain, 0, 0};
+        float f[4] = {1.0f / pw, 1.0f / ph, 0, 0}; // a picture pixel's footprint in the frame's uv
+        if (pic_tex) {
+            IDirect3DSurface9 *sp = nullptr;
+            pic_tex->GetSurfaceLevel(0, &sp);
+            fullscreen_pass(resolve, src, sp, nullptr, pw, ph, false, c, true, nullptr, ramp, f);
+            float r[4] = {1.0f / pw, 1.0f / ph, 0, 0};
+            fullscreen_pass(g_fxaa_ps, pic_tex, g_host_backbuffer, nullptr, (uint32_t)frame.right, (uint32_t)frame.bottom, false, r,
+                            true, &pic);
+            sp->Release();
+        } else {
+            fullscreen_pass(resolve, src, g_host_backbuffer, nullptr, (uint32_t)frame.right, (uint32_t)frame.bottom, false, c, true,
+                            &pic, ramp, f);
+        }
+    } else if (g_gamma_ps && ramp && aa0 && aa1) {
+        // the old chain: ramp + gamma 1:1 into aa0, anti-alias 1:1 into aa1, then a bilinear scale into the window
         float c[4] = {1.0f / g_cfg.gamma, g_cfg.gain, 0, 0};
         IDirect3DSurface9 *s0 = nullptr, *s1 = nullptr;
         aa0->GetSurfaceLevel(0, &s0);
@@ -1696,6 +1803,10 @@ void release_host_targets()
             t->Release();
             t = nullptr;
         }
+    if (g_pic_tex) {
+        g_pic_tex->Release();
+        g_pic_tex = nullptr;
+    }
     g_cur_rt = nullptr;
 }
 
@@ -1778,6 +1889,11 @@ void release_loader_shaders()
             *ps = nullptr;
         }
     g_seam_tried = g_box_tried = g_soft_tried = false;
+    for (int n = 0; n <= kResolveMax; n++) {
+        if (g_resolve_ps[n]) g_resolve_ps[n]->Release();
+        g_resolve_ps[n] = nullptr;
+        g_resolve_tried[n] = false;
+    }
 }
 
 // What the game set that the device keeps (a Reset or a new device forgets it), sent again: the draws forget what they
