@@ -179,6 +179,16 @@ bool write_atomic(const std::wstring &path, const void *a, size_t na, const void
     return ok;
 }
 
+// The Setup Assistant got Insignia's yes for this console: "serial = <its 12 digits>" (online_setup_print)
+std::wstring registered_path() { return host_full_path(g_cfg.hdd_dir) + L"\\online_registered.txt"; }
+
+// Whether online_registered.txt names the console with this EEPROM (an older console's file says nothing)
+bool registered_here(const uint8_t eeprom[256])
+{
+    char b[21];
+    return read_file(registered_path(), 0, b, sizeof b) && !memcmp(b, "serial = ", 9) && !memcmp(b + 9, eeprom + 0x34, 12);
+}
+
 // The store as it was before this run first changed it (store_save): read back when the store is gone or damaged
 std::wstring store_backup_path() { return host_full_path(g_cfg.hdd_dir) + L"\\online_accounts.bak"; }
 
@@ -657,6 +667,25 @@ bool online_whole_eeprom(uint8_t out[256])
     return true;
 }
 
+void online_setup_print(const char *msg)
+{
+    // Register Xbox prints its request ("Request: POST /api/v1/xbox"), then the server's answer: "Headers:" with the
+    // status line (HTTP/1.1 200 when it registered), or for a console Insignia already has, 422 with "Your Xbox is
+    // already registered" (2026-11-05, both builds of the Setup Assistant). Registering writes nothing on the console.
+    static bool asked;
+    if (!g_enabled) return;
+    if (strstr(msg, "POST /api/v1/xbox")) {
+        asked = true;
+        return;
+    }
+    if (!asked || !(strstr(msg, "HTTP/1.1 200") || strstr(msg, "already registered"))) return;
+    asked = false;
+    std::string s = "serial = " + std::string((const char *)g_eeprom + 0x34, 12) + "\n";
+    bool ok = write_atomic(registered_path(), s.data(), s.size());
+    logf("online: Insignia knows this console (the Setup Assistant's answer to Register Xbox)%s",
+         ok ? "" : ": COULD NOT write online_registered.txt");
+}
+
 bool online_import(const std::wstring &out_path)
 {
     std::string r;
@@ -689,6 +718,7 @@ bool online_check(const std::wstring &out_path)
         put("local", local_ok ? "ok" : valid ? "other" : "invalid");
         if (local_ok) {
             put("local_registered", sector_signed(loc, 9) ? "1" : "0");
+            put("local_insignia", registered_here(mine) ? "1" : "0"); // Register Xbox got Insignia's yes
             for (int i = 0; i < SLOTS; i++)
                 if (slot_used(loc, i)) put("local_account", slot_name(loc, i));
         }
@@ -754,9 +784,10 @@ bool online_init()
         g_off_reason = std::wstring(L"联网未开启：") + player;
         return false;
     };
-    // One console identity must not be on Xbox Live twice: xemu with the same EEPROM would be logged off by this
-    if (process_running(L"xemu.exe"))
-        return fail("xemu is running; close it first (the same console must not sign in twice)", L"xemu 正在运行，请先关掉它再启动游戏");
+    // One console identity must not be on Xbox Live twice: xemu running the same console (the one the port's was
+    // imported from) would be logged off by this, or log this off. A console made in the port is not xemu's.
+    const bool xemu_runs = process_running(L"xemu.exe");
+    const wchar_t *xemu_msg = L"xemu 正在运行，请先关掉它再启动游戏";
     if (!kcrypto_selftest()) return fail("crypto self-test failed", L"加密自检失败（请回报）");
     // The port's own console (hard disk folder). Not there yet but xemu's files chosen (players from before 2.2, or a
     // new save folder): imported from them once, as the launcher's import does.
@@ -764,6 +795,7 @@ bool online_init()
     if (GetFileAttributesW(local_eeprom_path().c_str()) == INVALID_FILE_ATTRIBUTES || store_load(g_config, serial) != 1) {
         if (g_cfg.online_eeprom.empty() || g_cfg.online_hdd.empty())
             return fail("no console of the port's own and no xemu files to import it from", L"还没有主机：在启动器「联网」页从 xemu 导入");
+        if (xemu_runs) return fail("xemu is running; close it first (its disk image is read to import the console)", xemu_msg);
         std::string r;
         if (!import_xemu(r)) {
             size_t at = r.find("error = ");
@@ -774,6 +806,13 @@ bool online_init()
     }
     if (!read_file(local_eeprom_path(), 0, g_eeprom, sizeof g_eeprom))
         return fail("cannot read " + narrow(local_eeprom_path()), L"读不到本地的主机 EEPROM");
+    if (xemu_runs) {
+        uint8_t x[256];
+        bool same = !g_cfg.online_eeprom.empty() && read_file(g_cfg.online_eeprom, 0, x, sizeof x) && !memcmp(x, g_eeprom, sizeof x);
+        SecureZeroMemory(x, sizeof x);
+        if (same) return fail("xemu is running the same console; close it first (one console must not sign in twice)", xemu_msg);
+        logc("online: xemu is running, with another console than the port's: both may go online");
+    }
     uint8_t dec[28];
     const char *ver = decrypt_eeprom(g_eeprom, dec);
     if (!ver) return fail("online_eeprom.bin: the security section does not verify", L"本地的主机 EEPROM 无效");

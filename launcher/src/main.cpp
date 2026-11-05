@@ -134,7 +134,7 @@ struct App {
     bool dns_note_bad = false;
 };
 enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete, kAskReset, kAskUnsavedStart, kAskUnsavedClose, kAskRestore, kAskImport,
-       kAskExport, kAskResign, kAskUninstall, kAskNewConsole };
+       kAskExport, kAskResign, kAskUninstall, kAskNewConsole, kAskRebuildConsole };
 App g;
 
 // Hit ids: 0..kPageCount-1 the navigation, then these
@@ -147,7 +147,7 @@ enum {
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
-    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitNewConsole, kHitRegister, kHitDashboard, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
+    kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitNewConsole, kHitRegister, kHitDashboard, kHitRebuildConsole, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
     kHitModule = 580, // + 0 Black, 1 Ninja Gaiden 2004
     kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc, kHitExportDlc,
     kHitResign = 590,
@@ -882,6 +882,18 @@ void new_console()
     g.local_result.clear();
     if (!r.count("created")) g.local_result = std::wstring(S(Str::NewConsoleFailed)) + (r.count("error") ? from_utf8(r["error"][0]) : S(Str::OnlineCheckFailed));
     g.online_for.clear();
+}
+
+// "Rebuild": the console's files damaged or not matching (no import can mend that without xemu): they are kept as
+// *.old in the save folder (an earlier *.old replaced) and a new console is made, to be registered again
+void rebuild_console()
+{
+    std::wstring hdd = ini_get(L"hdd", (g.dir + L"\\savedata").c_str());
+    for (const wchar_t *f : {L"online_eeprom.bin", L"online_accounts.bin", L"online_accounts.bak", L"online_registered.txt"}) {
+        std::wstring p = hdd + L"\\" + f;
+        if (exists(p)) MoveFileExW(p.c_str(), (p + L".old").c_str(), MOVEFILE_REPLACE_EXISTING);
+    }
+    new_console();
 }
 
 // The Insignia Setup Assistant the player gave (cache\insignia\default.xbe, taken from Insignia-Setup.iso): its title ID
@@ -1648,6 +1660,7 @@ struct Painter {
         if (g.ask == kAskResign) title = Str::AskResignTitle, body = Str::AskResign;
         if (g.ask == kAskUninstall) title = Str::AskUninstallTitle, body = Str::AskUninstall;
         if (g.ask == kAskNewConsole) title = Str::AskNewConsoleTitle, body = Str::AskNewConsole;
+        if (g.ask == kAskRebuildConsole) title = Str::AskRebuildTitle, body = Str::AskRebuild;
         std::wstring body_text = S(body);
         if (g.ask == kAskUninstall) {
             wchar_t b[1024];
@@ -2496,25 +2509,36 @@ struct Painter {
             else if (local == "none" || local.empty()) st = S(Str::OnlineLocalNone);
             else if (local == "other") st = S(Str::OnlineLocalOther);
             else if (local != "ok") st = S(Str::OnlineLocalBad);
-            else if (online_value("local_registered") != "1") st = S(Str::OnlineLocalNotReg);
+            else if (online_value("local_registered") != "1")
+                st = S(online_value("local_insignia") == "1" ? Str::OnlineLocalRegistered : Str::OnlineLocalNotReg);
             else st = S(Str::OnlineLocalOk), good = true;
-            bool xemu_runs = online_value("xemu") == "1";
+            // xemu running matters only for the console that came from it (one console must not sign in twice)
+            bool xemu_runs = online_value("xemu") == "1" && online_value("same_console") == "1";
             if (good && xemu_runs) st = S(Str::OnlineXemu), good = false;
-            // its buttons: New console when there is none; with one, Register while it has no machine account (the
-            // registration steps: the Setup Assistant, then the dashboard's network test) and the Xbox Live dashboard
+            // None yet but xemu's registered console chosen below (a player from before 2.2): the game imports it at its
+            // first online start, so no New console here (a new one would stop that and need registering)
+            bool will_import = online_value("eeprom") == "ok" && online_value("hdd") == "ok" && online_value("registered") == "1";
+            // its buttons: New console when there is none; with one, Register while Insignia has not said yes (the
+            // registration steps: the Setup Assistant, then the dashboard's network test) and the Xbox Live dashboard;
+            // Rebuild for a console whose files are damaged or do not match
             bool none = !g.online.empty() && (local == "none" || local.empty()), ok = local == "ok";
+            bool broken = !g.online.empty() && !none && !ok;
+            if (none && will_import) st = S(Str::OnlineLocalWillImport);
             bool unreg = ok && online_value("local_registered") != "1";
+            bool show_register = unreg && online_value("local_insignia") != "1";
             const float dw = 140; // the dashboard's button
-            float text_right = none ? right - bw - 12 : ok ? right - dw - 12 - (unreg ? bw + 10 : 0) : right;
+            bool show_new = none && !will_import;
+            float text_right = show_new || broken ? right - bw - 12 : ok ? right - dw - 12 - (show_register ? bw + 10 : 0) : right;
             bool busy = g.setup_proc != nullptr;
             if (busy) st = S(g.setup_is_dash ? Str::DashRunning : Str::RegisterRunning), good = true;
             if (!g.local_result.empty()) st = g.local_result, good = false;
             text(st, {cx, y, text_right, y + 30}, 13, good ? kGold : !g.local_result.empty() ? kBlood : none ? kAsh : unreg ? kBone : kBlood,
                  1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
             bool can = !busy && !xemu_runs && !game_running();
-            if (none) button(kHitNewConsole, {right - bw, y, right, y + 30}, S(Str::NewConsole), false, can);
+            if (show_new) button(kHitNewConsole, {right - bw, y, right, y + 30}, S(Str::NewConsole), false, can);
+            if (broken) button(kHitRebuildConsole, {right - bw, y, right, y + 30}, S(Str::RebuildConsole), false, can);
             if (ok) {
-                if (unreg) button(kHitRegister, {right - dw - 10 - bw, y, right - dw - 10, y + 30}, S(Str::RegisterConsole), can, can);
+                if (show_register) button(kHitRegister, {right - dw - 10 - bw, y, right - dw - 10, y + 30}, S(Str::RegisterConsole), can, can);
                 button(kHitDashboard, {right - dw, y, right, y + 30}, S(Str::OpenDashboard), false, can);
             }
         }
@@ -3130,6 +3154,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 else if (ask == kAskReset) reset_page(g.page);
                 else if (ask == kAskUninstall) uninstall_now();
                 else if (ask == kAskNewConsole) new_console();
+                else if (ask == kAskRebuildConsole) rebuild_console();
                 else start_install();
             }
             InvalidateRect(h, nullptr, FALSE);
@@ -3237,6 +3262,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
         else if (id == kHitNetCheck) net_check();
         else if (id == kHitNewConsole) g.ask = kAskNewConsole;
+        else if (id == kHitRebuildConsole) g.ask = kAskRebuildConsole;
         else if (id == kHitRegister) register_console();
         else if (id == kHitDashboard) open_dashboard();
         else if (id == kHitImportXemu) {
@@ -3426,6 +3452,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
     for (int i = 1; i < argc; i++)
         if (!wcscmp(argv[i], L"--import-now")) online_import(); // with --snap, before it on the line: the Import button pressed
         else if (!wcscmp(argv[i], L"--dash-now")) open_dashboard(); // the same, the Xbox Live button
+        else if (!wcscmp(argv[i], L"--rebuild-now")) rebuild_console(); // the same, Rebuild (confirmed)
         else if (!wcscmp(argv[i], L"--snap") && i + 1 < argc)
             return snap(argv[i + 1], i + 2 < argc && argv[i + 2][0] != L'-' ? _wtoi(argv[i + 2]) : 0);
 

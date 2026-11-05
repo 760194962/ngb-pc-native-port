@@ -282,7 +282,11 @@ The page writes `black.ini` next to the game program (`online = 1` and so on), w
 
 **The accounts file's backup**: each run, before it first changes `online_accounts.bin`, the old one is kept as
 `online_accounts.bak`; a missing or damaged `online_accounts.bin` is read back from it. To back up, copy the whole
-`savedata` folder.
+`savedata` folder. When the console's files are damaged beyond that, the This console row offers Rebuild: the old files
+are kept as `.old` and a new console is made, to be registered again.
+
+**With xemu running**: a console imported from xemu is the same console as xemu's, so the game stays offline while xemu
+runs (one console cannot sign in twice); a console made in the port is not affected.
 
 **Do you need InsigniaDNS.exe?** Not by default. First, two things with nearly the same name:
 

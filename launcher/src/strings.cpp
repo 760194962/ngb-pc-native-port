@@ -588,10 +588,10 @@ const Pair kText[(int)Str::Count] = {
      L"✓ Ready to play online"},
     {L"还没有：点「新建主机」，或用下面的「从 xemu 导入」",
      L"None yet: press New console, or import from xemu below"},
-    {L"存档目录里的主机文件损坏或不配套：请重新导入",
-     L"The console files in the save folder are damaged or do not match: import again"},
-    {L"存档目录里的账号属于另一台主机：请重新导入",
-     L"The accounts in the save folder are another console\u2019s: import again"},
+    {L"存档目录里的主机文件损坏或不配套：从 xemu 重新导入，或按「重建主机」",
+     L"The console files in the save folder are damaged or do not match: import from xemu again, or Rebuild"},
+    {L"存档目录里的账号属于另一台主机：从 xemu 重新导入，或按「重建主机」",
+     L"The accounts in the save folder are another console\u2019s: import from xemu again, or Rebuild"},
     {L"还不能联网：按「注册步骤」先注册",
      L"Not ready to play online yet: register first (How to register)"},
     {L"导入账号时才用到；不选也能用本机账号联网。",
@@ -654,6 +654,20 @@ const Pair kText[(int)Str::Count] = {
      L"Dashboard not opened: "},
     {L"仪表盘的联网测试没有通过，本机主机还不能联网：在仪表盘 NETWORK SETUP 里再测一次；开着代理的 TUN 时，DNS 改用「本地 InsigniaDNS.exe」或关掉 TUN（DNS 旁的「?」）",
      L"The dashboard’s network test did not get through, so the console cannot go online yet: test again in NETWORK SETUP; with a proxy’s TUN on, use “Local InsigniaDNS.exe” or turn TUN off (the “?” by DNS)"},
+    {L"主机已注册。下一步：在仪表盘里做联网测试",
+     L"Registered. Next: the connection test in the dashboard"},
+    {L"开始游戏时会自动从下面选好的 xemu 文件导入以前的主机；也可以现在按「从 xemu 导入」",
+     L"Your earlier console is imported from the xemu files below when the game starts; or press Import now"},
+    {L"重建主机",
+     L"Rebuild"},
+    {L"重建主机",
+     L"Rebuild the console"},
+    {L"本机主机的文件坏了或不配套，没法再用。\n\n"
+     L"重建会把旧文件改名为 .old 留在存档文件夹里，再新建一台主机。新主机要重新注册（「注册主机」和仪表盘的联网测试），以前的玩家代号要在仪表盘里按 Insignia 官网的说明找回。\n\n"
+     L"以前在 xemu 里联网玩过的，用下面的「从 xemu 导入」更简单，不用重建。",
+     L"This console’s files are damaged or do not match and cannot be used.\n\n"
+     L"Rebuild renames the old files to .old in the save folder and makes a new console. It has to be registered again (Register, then the dashboard’s connection test); earlier gamertags are recovered in the dashboard as Insignia’s website explains.\n\n"
+     L"Played online in xemu before? Import from xemu below is simpler, with no rebuild."},
 };
 
 } // namespace

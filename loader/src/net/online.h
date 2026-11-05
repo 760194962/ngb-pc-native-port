@@ -19,6 +19,10 @@ bool online_import(const std::wstring &out_path);
 // --online-new-console: a console of the port's own (a new EEPROM, an empty config area) in the hard disk folder when it
 // has none; to be registered with Insignia by the Setup Assistant. "created = 1" or "error = why" to out_path.
 bool online_new_console(const std::wstring &out_path);
+// What the Insignia Setup Assistant prints (DbgPrint): its registration answer from the server (200, or 422 "already
+// registered") is kept in the hard disk folder (online_registered.txt), so the launcher can tell the console is
+// registered before the dashboard's network test makes the machine account
+void online_setup_print(const char *msg);
 // The console's whole EEPROM (256 bytes) when online play is on, for ExQueryNonVolatileSetting(0xFFFF)
 bool online_whole_eeprom(uint8_t out[256]);
 // --online-dash-from IMAGE: the Xbox Live dashboard's files copied from that Xbox hard disk image into the hard disk

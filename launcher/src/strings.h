@@ -396,6 +396,11 @@ enum class Str {
     OnlineDamaged, // an account that did not check out with its console's key (left out of an import)
     DashNoDns, // the dashboard not opened: the DNS check failed (its network test could not make the machine account)
     DashNoMachine, // the dashboard closed and the console still has no machine account
+    OnlineLocalRegistered, // the Setup Assistant got Insignia's yes; the dashboard's network test is next
+    OnlineLocalWillImport, // no console yet, xemu's registered one chosen: the game imports it at its first online start
+    RebuildConsole, // the button, for a console whose files are damaged or do not match
+    AskRebuildTitle,
+    AskRebuild,
     Count
 };
 

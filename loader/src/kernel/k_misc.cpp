@@ -127,6 +127,7 @@ uint32_t __cdecl DbgPrint(const char *Format, ...)
         } else i = j > i ? j : i + 1;
     }
     logf("[DbgPrint] %s", msg);
+    if (!g_cfg.profile) online_setup_print(msg); // the Insignia Setup Assistant's answer to Register Xbox
     return 0;
 }
 
