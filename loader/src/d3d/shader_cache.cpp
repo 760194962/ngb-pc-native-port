@@ -45,6 +45,41 @@ std::wstring entry_path(const std::string &hlsl, const char *profile, UINT flags
     return cache_dir() + name;
 }
 
+// A cache entry's generator epoch, in a sidecar file: "*.gen" holds one uint32. Entries whose sidecar is older were
+// made by a different HLSL generator; they stay on disk (never deleted by age) but are not prewarmed. An entry made
+// before this sidecar existed has no file: it is migrated to the current epoch once, so the first run of this build
+// does not turn the whole existing cache into runtime work. A cache hit also marks the entry current, for a downgrade
+// or a sidecar lost in a crash.
+constexpr uint32_t kShaderEpoch = 1;
+
+std::wstring epoch_path(const std::wstring &entry) { return entry + L".gen"; }
+
+uint32_t read_epoch(const std::wstring &entry)
+{
+    uint32_t e = 0;
+    if (FILE *f = _wfopen(epoch_path(entry).c_str(), L"rb")) {
+        if (fread(&e, sizeof e, 1, f) != 1) e = 0;
+        fclose(f);
+    }
+    return e;
+}
+
+void write_epoch(const std::wstring &entry, uint32_t epoch)
+{
+    std::wstring tmp = epoch_path(entry) + L".tmp";
+    if (FILE *f = _wfopen(tmp.c_str(), L"wb")) {
+        bool ok = fwrite(&epoch, sizeof epoch, 1, f) == 1 && !ferror(f);
+        fclose(f);
+        if (!ok || !MoveFileExW(tmp.c_str(), epoch_path(entry).c_str(), MOVEFILE_REPLACE_EXISTING))
+            DeleteFileW(tmp.c_str());
+    }
+}
+
+void mark_epoch(const std::wstring &entry)
+{
+    if (read_epoch(entry) != kShaderEpoch) write_epoch(entry, kShaderEpoch);
+}
+
 bool parse_file(const std::wstring &path, Entry *e)
 {
     FILE *f = _wfopen(path.c_str(), L"rb");
@@ -118,7 +153,11 @@ void write_entry(const std::wstring &path, const std::string &hlsl, const char *
     if (code) fwrite(code->GetBufferPointer(), 1, code->GetBufferSize(), f);
     bool ok = !ferror(f);
     fclose(f);
-    if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
+    if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        DeleteFileW(tmp.c_str());
+        return;
+    }
+    write_epoch(path, kShaderEpoch);
 }
 
 // Shader objects made at start from the cache (prewarm_shaders), keyed by their bytecode, until a draw asks for them.
@@ -165,6 +204,7 @@ HRESULT cached_compile(const std::string &hlsl, const char *name, const char *pr
         hr = D3DCompile(hlsl.data(), hlsl.size(), name, nullptr, nullptr, "main", profile, flags, 0, code, errors);
         write_entry(path, hlsl, profile, flags, SUCCEEDED(hr) ? *code : nullptr);
     }
+    mark_epoch(path); // a legacy entry used in play becomes a current one for the next start
     QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
     perf::add_shader_build((double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart, cached != 0);
@@ -178,13 +218,23 @@ void prewarm_shaders(IDirect3DDevice9 *d)
     QueryPerformanceCounter(&t0);
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW((cache_dir() + L"\\*.bin").c_str(), &fd);
-    unsigned nv = 0, np = 0, bad = 0, failed = 0;
+    unsigned nv = 0, np = 0, bad = 0, failed = 0, old = 0, migrated = 0;
     if (h != INVALID_HANDLE_VALUE) {
         do {
             std::wstring path = cache_dir() + L"\\" + fd.cFileName;
+            const uint32_t epoch = read_epoch(path);
+            if (epoch && epoch != kShaderEpoch) { // another generator: keep it, but do not make it now
+                old++;
+                continue;
+            }
+            if (!epoch) { // before the sidecar existed: migrate it once, so this build's first start stays warm
+                write_epoch(path, kShaderEpoch);
+                migrated++;
+            }
             Entry e;
             if (!parse_file(path, &e)) { // another format, or a truncated file: nothing can use it
                 DeleteFileW(path.c_str());
+                DeleteFileW(epoch_path(path).c_str());
                 g_mem.erase(path);
                 bad++;
                 continue;
@@ -207,9 +257,10 @@ void prewarm_shaders(IDirect3DDevice9 *d)
     }
     QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
-    logf("[shader cache] read %zu entries, made %u vertex and %u pixel shaders from %s in %.0f ms; %u unreadable deleted%s",
+    logf("[shader cache] read %zu entries, made %u vertex and %u pixel shaders from %s in %.0f ms; %u old-generator kept, "
+         "%u legacy marked, %u unreadable deleted%s",
          g_mem.size(), nv, np, narrow(cache_dir()).c_str(),
-         (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart, bad,
+         (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart, old, migrated, bad,
          failed ? " (the device refused some)" : "");
 }
 
