@@ -1,8 +1,8 @@
 #pragma once
-// Performance overlay (black.ini perfhud = 1): frame rate, the graphics card and processor with their use, memory and
-// disk, in the top-right corner of the picture. Off: nothing runs. On: the figures are read and drawn into a bitmap once
-// a second on a low-priority thread of its own; the render thread only uploads that bitmap when it changed and draws
-// one small quad a frame.
+// Performance overlay (black.ini perfhud = 1): frame rate, latency (the average frame interval), the graphics card and
+// processor with their use, memory and disk, in the top-right corner of the picture. Off: nothing runs. On: the figures
+// are read and drawn into a bitmap once a second on a low-priority thread of its own; the render thread only uploads
+// that bitmap when it changed and draws one small quad a frame.
 #include <d3d9.h>
 
 #include <string>
