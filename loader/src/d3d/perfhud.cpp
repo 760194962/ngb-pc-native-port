@@ -182,16 +182,18 @@ DWORD WINAPI stats_thread(void *)
         double read_mb = (io1.ReadTransferCount - io0.ReadTransferCount) / secs / (1024.0 * 1024.0);
 
         const double gb = 1024.0 * 1024.0 * 1024.0;
-        wchar_t l[5][256];
+        wchar_t l[6][256];
         swprintf(l[0], 256, L"FPS   %.0f", fps);
-        if (gpu_use >= 0) swprintf(l[1], 256, L"GPU   %3.0f%%   %hs", std::min(100.0, gpu_use), g_gpu.c_str());
-        else swprintf(l[1], 256, L"GPU     -    %hs", g_gpu.c_str());
-        swprintf(l[2], 256, L"CPU   %3.0f%%   (game %.0f%%)   %hs", cpu, mine, g_cpu.c_str());
-        swprintf(l[3], 256, L"RAM   %3lu%%   %.1f / %.1f GB   (game %.2f GB)", ms.dwMemoryLoad,
+        if (fps > 0.0) swprintf(l[1], 256, L"Latency %5.1f ms", 1000.0 / fps);
+        else swprintf(l[1], 256, L"Latency     -");
+        if (gpu_use >= 0) swprintf(l[2], 256, L"GPU   %3.0f%%   %hs", std::min(100.0, gpu_use), g_gpu.c_str());
+        else swprintf(l[2], 256, L"GPU     -    %hs", g_gpu.c_str());
+        swprintf(l[3], 256, L"CPU   %3.0f%%   (game %.0f%%)   %hs", cpu, mine, g_cpu.c_str());
+        swprintf(l[4], 256, L"RAM   %3lu%%   %.1f / %.1f GB   (game %.2f GB)", ms.dwMemoryLoad,
                  (ms.ullTotalPhys - ms.ullAvailPhys) / gb, ms.ullTotalPhys / gb, pm.PrivateUsage / gb);
-        if (disk_use >= 0) swprintf(l[4], 256, L"Disk  %3.0f%%   (game reads %.1f MB/s)", std::clamp(disk_use, 0.0, 100.0), read_mb);
-        else swprintf(l[4], 256, L"Disk    -    (game reads %.1f MB/s)", read_mb);
-        render({l[0], l[1], l[2], l[3], l[4]}, g_hud);
+        if (disk_use >= 0) swprintf(l[5], 256, L"Disk  %3.0f%%   (game reads %.1f MB/s)", std::clamp(disk_use, 0.0, 100.0), read_mb);
+        else swprintf(l[5], 256, L"Disk    -    (game reads %.1f MB/s)", read_mb);
+        render({l[0], l[1], l[2], l[3], l[4], l[5]}, g_hud);
         static int updates;
         static ULONGLONG busy;
         busy += GetTickCount64() - t1;
