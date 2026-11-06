@@ -3,7 +3,6 @@
 #include "common.h"
 #include "perf.h"
 
-#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -75,101 +74,13 @@ bool parse_file(const std::wstring &path, Entry *e)
     return true;
 }
 
-// Use across runs (cache\shaders\use.txt): "run N" (this program's starts so far), then "<entry> <run>" lines, the
-// last run an entry was looked up or written (the latest line of an entry counts). An entry no source asks for any
-// more (the generator changed, as QuadSnap's reads did in 2.2.5) was otherwise read and made into a shader object at
-// every start, for ever. At the first prewarm of a run (index_start): entries unused for kPruneRuns runs are deleted,
-// those unused for more than kWarmRuns runs stay on disk but are not made at start, and the file is written again
-// with only the entries kept. While the program runs, an entry's first use appends its line (index_use).
-constexpr uint32_t kPruneRuns = 30; // generous: a player of Black only, then Ninja Gaiden 2004, keeps the other's
-constexpr uint32_t kWarmRuns = 3;
-uint32_t g_run;                                    // this run's number; 0 until index_start
-std::unordered_map<std::wstring, uint32_t> g_last; // entry file name -> the last run it was used
-std::unordered_map<std::wstring, bool> g_used;     // entry file names used this run (their line appended)
-
-std::wstring index_path() { return cache_dir() + L"\\use.txt"; }
-std::wstring file_name(const std::wstring &path) { return path.substr(path.find_last_of(L'\\') + 1); }
-
-void index_start()
-{
-    g_last.clear();
-    uint32_t last_run = 0;
-    if (FILE *f = _wfopen(index_path().c_str(), L"r")) {
-        char line[128];
-        while (fgets(line, sizeof line, f)) {
-            char name[64];
-            unsigned run = 0;
-            if (sscanf(line, "run %u", &run) == 1) last_run = std::max<uint32_t>(last_run, run);
-            else if (sscanf(line, "%63s %u", name, &run) == 2) {
-                std::wstring n(name, name + strlen(name));
-                uint32_t &l = g_last[n];
-                l = std::max<uint32_t>(l, run);
-            }
-        }
-        fclose(f);
-    }
-    g_run = last_run + 1;
-}
-
-// The run an entry was last used: one with no line (made before this index existed, or by a run that ended before
-// writing it) counts as used now, so nothing is dropped the first time
-uint32_t last_use(const std::wstring &name)
-{
-    auto it = g_last.find(name);
-    return it == g_last.end() ? g_run : it->second;
-}
-
-// The index written again (through a temporary file): this run's number and the entries kept
-void index_write(const std::vector<std::wstring> &kept)
-{
-    std::wstring tmp = index_path() + L".tmp";
-    FILE *f = _wfopen(tmp.c_str(), L"w");
-    if (!f) return;
-    fprintf(f, "run %u\n", g_run);
-    for (const std::wstring &n : kept) fprintf(f, "%ls %u\n", n.c_str(), last_use(n));
-    bool ok = !ferror(f);
-    fclose(f);
-    if (!ok || !MoveFileExW(tmp.c_str(), index_path().c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
-}
-
-// An entry looked up or written this run: remembered once a run (under g_lock), its line appended by index_flusher on
-// a thread of its own every 10 s. No file is opened on the render thread: opening one cost about 0.9 ms (the reason
-// the entries are read into memory at start), and a new scene meets dozens of entries at once. A run stopped within
-// those 10 s loses the last lines: those entries then count as unused for a run, which at most leaves them unmade at
-// the next start (kWarmRuns), never deletes one in use.
-std::vector<std::wstring> g_pending; // names to append
-
-void index_use(const std::wstring &path)
-{
-    if (!g_run) return; // before the first prewarm (no device yet): nothing to record against
-    std::wstring n = file_name(path);
-    if (g_used[n]) return;
-    g_used[n] = true;
-    g_last[n] = g_run;
-    g_pending.push_back(n);
-}
-
-void index_flusher()
-{
-    for (;;) {
-        Sleep(10000);
-        std::vector<std::wstring> take;
-        uint32_t run;
-        {
-            std::lock_guard<std::mutex> g(g_lock);
-            take.swap(g_pending);
-            run = g_run;
-        }
-        if (take.empty()) continue;
-        if (FILE *f = _wfopen(index_path().c_str(), L"a")) {
-            for (const std::wstring &n : take) fprintf(f, "%ls %u\n", n.c_str(), run);
-            fclose(f);
-        }
-    }
-}
-
 // The entries read at start (prewarm_shaders), by file path: a lookup in play then reads no file. Opening one took about
 // 0.9 ms (19 entries, 16 ms in the opening cutscene's frame on the RTX 3060, perf 2026-10-22_07-24-25).
+// Every readable entry is made into its shader object at start: a cache entry first used in play may not create a
+// shader on the render thread. The idle-based "cold" entries and the run-count pruning were removed: they could
+// compile or create a shader during a scene (a hitch) just because the player had not visited it for a few runs, and
+// the last 10 s of a short run's use index could be lost. Unreadable files are still deleted; valid entries are kept
+// (a few hundred files, a few MB) because being unused is not proof that no source will ask for it again.
 std::unordered_map<std::wstring, Entry> g_mem;
 
 // 1: the bytecode is in *code; -1: known not to compile; 0: not in the cache
@@ -254,7 +165,6 @@ HRESULT cached_compile(const std::string &hlsl, const char *name, const char *pr
         hr = D3DCompile(hlsl.data(), hlsl.size(), name, nullptr, nullptr, "main", profile, flags, 0, code, errors);
         write_entry(path, hlsl, profile, flags, SUCCEEDED(hr) ? *code : nullptr);
     }
-    index_use(path); // looked up or written: in use
     QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
     perf::add_shader_build((double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart, cached != 0);
@@ -266,30 +176,21 @@ void prewarm_shaders(IDirect3DDevice9 *d)
     std::lock_guard<std::mutex> g(g_lock);
     LARGE_INTEGER t0, t1, f;
     QueryPerformanceCounter(&t0);
-    const bool first = !g_run; // the first device of this run: the index is read, pruned and written once
-    if (first) index_start();
-    std::vector<std::wstring> kept_names;
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW((cache_dir() + L"\\*.bin").c_str(), &fd);
-    unsigned nv = 0, np = 0, bad = 0, pruned = 0, cold = 0, failed = 0;
+    unsigned nv = 0, np = 0, bad = 0, failed = 0;
     if (h != INVALID_HANDLE_VALUE) {
         do {
-            std::wstring name = fd.cFileName, path = cache_dir() + L"\\" + name;
-            const uint32_t idle = g_run - std::min(g_run, last_use(name)); // runs since it was last used
+            std::wstring path = cache_dir() + L"\\" + fd.cFileName;
             Entry e;
-            if (idle >= kPruneRuns || !parse_file(path, &e)) { // no longer asked for, or unreadable (another format)
+            if (!parse_file(path, &e)) { // another format, or a truncated file: nothing can use it
                 DeleteFileW(path.c_str());
                 g_mem.erase(path);
-                (idle >= kPruneRuns ? pruned : bad)++;
+                bad++;
                 continue;
             }
-            kept_names.push_back(name);
             Entry &kept = g_mem[path] = e;
-            if (e.code.empty()) continue; // a source that does not compile
-            if (idle > kWarmRuns) { // kept on disk (and read when asked for), not made now
-                cold++;
-                continue;
-            }
+            if (e.code.empty()) continue; // a source this profile does not compile
             bool vertex = e.profile.compare(0, 3, "vs_") == 0;
             IUnknown *obj = nullptr;
             HRESULT hr = vertex ? d->CreateVertexShader((const DWORD *)e.code.data(), (IDirect3DVertexShader9 **)&obj)
@@ -304,20 +205,12 @@ void prewarm_shaders(IDirect3DDevice9 *d)
         } while (FindNextFileW(h, &fd));
         FindClose(h);
     }
-    if (first) {
-        index_write(kept_names);
-        // the appender, below normal priority (a dozen lines every 10 s at most); it runs until the program ends
-        if (HANDLE th = CreateThread(nullptr, 0, [](void *) -> DWORD { index_flusher(); return 0; }, nullptr, 0, nullptr)) {
-            SetThreadPriority(th, THREAD_PRIORITY_BELOW_NORMAL);
-            CloseHandle(th);
-        }
-    }
     QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
-    logf("[shader cache] run %u: read %zu entries, made %u vertex and %u pixel shaders from %s in %.0f ms; %u not made (unused "
-         "for over %u runs), %u deleted (unused for %u runs), %u unreadable deleted%s",
-         g_run, g_mem.size(), nv, np, narrow(cache_dir()).c_str(), (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart,
-         cold, kWarmRuns, pruned, kPruneRuns, bad, failed ? " (the device refused some)" : "");
+    logf("[shader cache] read %zu entries, made %u vertex and %u pixel shaders from %s in %.0f ms; %u unreadable deleted%s",
+         g_mem.size(), nv, np, narrow(cache_dir()).c_str(),
+         (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart, bad,
+         failed ? " (the device refused some)" : "");
 }
 
 void warm_drop_all()
