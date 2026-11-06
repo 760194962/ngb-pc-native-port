@@ -103,7 +103,7 @@ target_include_directories(blackrt PRIVATE src)
 target_compile_definitions(blackrt PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE
   BLACK_VERSION="${NGB_VERSION_STRING}")
 target_compile_options(blackrt PRIVATE /W3 /utf-8 /EHsc)
-target_link_libraries(blackrt PRIVATE ntdll bcrypt d3d9 d3dcompiler windowscodecs ole32 user32 gdi32 winmm dbghelp advapi32 shell32 pdh dxgi psapi ws2_32)
+target_link_libraries(blackrt PRIVATE ntdll bcrypt d3d9 d3dcompiler windowscodecs ole32 user32 gdi32 winmm dbghelp advapi32 shell32 pdh dxgi psapi ws2_32 iphlpapi)
 
 # SDL3 (zlib licence), linked statically, only its gamepad side: the controllers XInput does not see (DualShock 3/4,
 # DualSense, Switch Pro and Joy-Con, DirectInput pads and adapters; input/sdlpad.cpp). NGB_SDL3_DIR: an unpacked
