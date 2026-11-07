@@ -11,6 +11,7 @@
 #include <pdh.h>
 #include <pdhmsg.h>
 #include <psapi.h>
+#include <tlhelp32.h>
 
 #include <algorithm>
 #include <atomic>
@@ -43,6 +44,18 @@ uint64_t g_input_samples[kLatencySamples];
 int g_input_next, g_input_count;
 uint64_t g_frame_last;
 uint64_t g_last_present_us;
+
+// Frame-to-frame intervals, timestamped like the recomp's flip counter. The render thread writes them at Swap; the
+// stats thread reads the last window once a second. 256 entries cover several seconds at 60/120 fps.
+struct FrameSample {
+    uint64_t at_us;
+    uint64_t interval_us;
+};
+std::mutex g_frame_lock;
+constexpr int kFrameSamples = 256;
+FrameSample g_frame_samples[kFrameSamples];
+int g_frame_next, g_frame_count;
+uint64_t g_frame_last_us;
 
 uint64_t now_us()
 {
@@ -197,6 +210,107 @@ std::string drive_type()
     return kind;
 }
 
+struct CorePerf {
+    uint64_t idle, kernel, user;
+};
+
+bool query_core_times(std::vector<CorePerf> &out)
+{
+    struct Raw {
+        LARGE_INTEGER idle, kernel, user, dpc, interrupt;
+        ULONG count;
+    };
+    using NtQuerySystemInformationFn = LONG(NTAPI *)(ULONG, PVOID, ULONG, PULONG);
+    static NtQuerySystemInformationFn query = [] {
+        return (NtQuerySystemInformationFn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQuerySystemInformation");
+    }();
+    if (!query) return false;
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    std::vector<Raw> raw(si.dwNumberOfProcessors);
+    ULONG got = 0;
+    if (query(8 /* SystemProcessorPerformanceInformation */, raw.data(), (ULONG)(raw.size() * sizeof(Raw)), &got) < 0) return false;
+    out.resize(raw.size());
+    for (size_t i = 0; i < raw.size(); i++) {
+        out[i].idle = (uint64_t)raw[i].idle.QuadPart;
+        out[i].kernel = (uint64_t)raw[i].kernel.QuadPart;
+        out[i].user = (uint64_t)raw[i].user.QuadPart;
+    }
+    return true;
+}
+
+// The busiest thread of this process, as a share of one logical core. A single game thread can be at 100% while the
+// whole process looks low when its time is divided by all processors.
+double game_max_thread_cpu(double secs, int core_count, std::vector<double> &game_core, std::vector<uint8_t> &game_core_seen,
+                           bool &core_known)
+{
+    static std::map<DWORD, uint64_t> previous;
+    std::map<DWORD, uint64_t> current;
+    double best = 0;
+    core_known = false;
+    game_core.assign(core_count, 0.0);
+    game_core_seen.assign(core_count, 0);
+    auto account = [&](HANDLE th) {
+        FILETIME c, e, k, u;
+        if (!GetThreadTimes(th, &c, &e, &k, &u)) return;
+        DWORD tid = GetThreadId(th);
+        uint64_t t = ft(k) + ft(u);
+        int core = -1;
+        GROUP_AFFINITY ga = {};
+        if (GetThreadGroupAffinity(th, &ga) && ga.Mask && !(ga.Mask & (ga.Mask - 1))) {
+            int bit = 0;
+            while (bit < 64 && !(ga.Mask & ((KAFFINITY)1 << bit))) bit++;
+            core = (int)ga.Group * 64 + bit;
+            if (core < core_count) core_known = true;
+            else core = -1;
+        }
+        auto it = previous.find(tid);
+        if (it != previous.end() && t >= it->second) {
+            double pct = 100.0 * (t - it->second) / (secs * 1e7);
+            best = std::max(best, pct);
+            if (core >= 0) {
+                game_core[core] += pct;
+                game_core_seen[core] = 1;
+            }
+        }
+        current[tid] = t;
+    };
+    // NtGetNextThread walks only this process's threads; CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD) snapshots every
+    // thread on the system and took 70 ms on this machine.
+    using NtGetNextThreadFn = LONG(NTAPI *)(HANDLE, HANDLE, ACCESS_MASK, ULONG, ULONG, PHANDLE);
+    static NtGetNextThreadFn next_thread = [] {
+        return (NtGetNextThreadFn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtGetNextThread");
+    }();
+    if (next_thread) {
+        HANDLE th = nullptr;
+        for (;;) {
+            HANDLE next = nullptr;
+            LONG status = next_thread(GetCurrentProcess(), th, THREAD_QUERY_INFORMATION, 0, 0, &next);
+            if (th) CloseHandle(th);
+            th = next;
+            if (status < 0 || !th) break;
+            account(th);
+        }
+        if (th) CloseHandle(th);
+    } else {
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snap == INVALID_HANDLE_VALUE) return 0;
+        THREADENTRY32 te = {sizeof te};
+        if (Thread32First(snap, &te)) {
+            do {
+                if (te.th32OwnerProcessID != GetCurrentProcessId()) continue;
+                HANDLE th = OpenThread(THREAD_QUERY_INFORMATION, FALSE, te.th32ThreadID);
+                if (!th) continue;
+                account(th);
+                CloseHandle(th);
+            } while (Thread32Next(snap, &te));
+        }
+        CloseHandle(snap);
+    }
+    previous.swap(current);
+    return best;
+}
+
 // White text over a translucent dark panel, drawn with GDI into a 32-bit DIB: the text is drawn white on black and
 // its brightness becomes both colour and opacity (premultiplied), the panel 60% black.
 void render(const std::vector<std::wstring> &lines, Panel &panel, bool mono = false)
@@ -262,7 +376,7 @@ DWORD WINAPI stats_thread(void *)
     IO_COUNTERS io0 = {};
     GetProcessIoCounters(GetCurrentProcess(), &io0);
     uint32_t frames0 = g_frames;
-    ULONGLONG t0 = GetTickCount64();
+    uint64_t t0 = now_us();
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     std::vector<uint8_t> buf;
@@ -270,8 +384,8 @@ DWORD WINAPI stats_thread(void *)
          gpu ? "yes" : "no", disk ? "yes" : "no");
     for (;;) {
         Sleep(1000);
-        ULONGLONG t1 = GetTickCount64();
-        double secs = std::max(0.001, (t1 - t0) / 1000.0);
+        uint64_t t1 = now_us();
+        double secs = std::max(0.001, (t1 - t0) / 1e6);
         uint32_t frames1 = g_frames;
         double fps = (frames1 - frames0) / secs;
         // processor: the whole system from its idle time, and this program from its own times
@@ -281,6 +395,32 @@ DWORD WINAPI stats_thread(void *)
         double all = (double)(ft(kern1) - ft(kern0) + ft(user1) - ft(user0)), idle = (double)(ft(idle1) - ft(idle0));
         double cpu = all > 0 ? 100.0 * (all - idle) / all : 0;
         double mine = 100.0 * (ft(pk1) - ft(pk0) + ft(pu1) - ft(pu0)) / (secs * 1e7 * si.dwNumberOfProcessors);
+        std::vector<double> game_core;
+        std::vector<uint8_t> game_core_seen;
+        bool core_known = false;
+        double max_thread_cpu = game_max_thread_cpu(secs, si.dwNumberOfProcessors, game_core, game_core_seen, core_known);
+        static std::vector<CorePerf> previous_cores;
+        std::vector<CorePerf> current_cores;
+        int max_core = -1;
+        double max_core_total = 0, max_core_game = -1;
+        if (query_core_times(current_cores)) {
+            if (previous_cores.size() == current_cores.size()) {
+                for (size_t i = 0; i < current_cores.size(); i++) {
+                    uint64_t all = (current_cores[i].kernel + current_cores[i].user) -
+                                   (previous_cores[i].kernel + previous_cores[i].user);
+                    uint64_t idle = current_cores[i].idle - previous_cores[i].idle;
+                    if (!all) continue;
+                    double use = 100.0 * (all - std::min(all, idle)) / all;
+                    if (use > max_core_total) {
+                        max_core_total = use;
+                        max_core = (int)i;
+                    }
+                }
+                if (max_core >= 0 && core_known && (size_t)max_core < game_core.size() && game_core_seen[max_core])
+                    max_core_game = std::min(100.0, game_core[max_core]);
+            }
+            previous_cores = current_cores;
+        }
         // graphics card: the 3D engines of this card. The GPU Engine instances carry the process id, so the
         // game's own share can be summed; if the driver does not expose per-process instances, show the card total.
         double gpu_use = -1, gpu_game_use = -1, disk_use = -1;
@@ -363,6 +503,15 @@ DWORD WINAPI stats_thread(void *)
             }
             frame_last = g_frame_last / 1000.0;
         }
+        double frame_max_ms = 0;
+        {
+            std::lock_guard<std::mutex> lk(g_frame_lock);
+            uint64_t cutoff = t1 > 500000 ? t1 - 500000 : 0;
+            for (int i = 0; i < g_frame_count; i++) {
+                const FrameSample &s = g_frame_samples[i];
+                if (s.at_us >= cutoff) frame_max_ms = std::max(frame_max_ms, s.interval_us / 1000.0);
+            }
+        }
         auto row = [](std::wstring a, const std::wstring &b) {
             const size_t col = 27;
             if (a.size() < col) a.append(col - a.size(), L' ');
@@ -372,7 +521,8 @@ DWORD WINAPI stats_thread(void *)
         std::vector<std::wstring> lines;
         if (fps > 0.0) {
             swprintf(a, 128, L"FPS %.0f", fps);
-            swprintf(b, 128, L"Frame %.1f ms", 1000.0 / fps);
+            if (frame_max_ms > 0) swprintf(b, 128, L"Frame %.1f ms  max %.1f ms", 1000.0 / fps, frame_max_ms);
+            else swprintf(b, 128, L"Frame %.1f ms", 1000.0 / fps);
         } else {
             swprintf(a, 128, L"FPS 0");
             swprintf(b, 128, L"Frame -");
@@ -401,9 +551,21 @@ DWORD WINAPI stats_thread(void *)
         }()));
         lines.push_back(row(L"CPU " + widen(short_cpu(g_cpu)), [&] {
             wchar_t s[128];
-            swprintf(s, 128, L"%.0f%% total (game %.0f%%)", cpu, mine);
+            if (max_thread_cpu > 0) swprintf(s, 128, L"%.0f%% total (game %.0f%%, max thread %.0f%%)", cpu, mine, std::min(100.0, max_thread_cpu));
+            else swprintf(s, 128, L"%.0f%% total (game %.0f%%)", cpu, mine);
             return std::wstring(s);
         }()));
+        if (max_core >= 0) {
+            wchar_t label[64];
+            swprintf(label, 64, L"CPU max core #%d", max_core);
+            lines.push_back(row(label, [&] {
+                wchar_t s[128];
+                if (max_core_game >= 0)
+                    swprintf(s, 128, L"%.0f%% total (game %.0f%%)", std::min(100.0, max_core_total), max_core_game);
+                else swprintf(s, 128, L"%.0f%% total (game n/a)", std::min(100.0, max_core_total));
+                return std::wstring(s);
+            }()));
+        }
         std::wstring ram_type = widen(g_ram_type), disk_type = widen(g_disk_type);
         wchar_t ram_label[128];
         swprintf(ram_label, 128, L"RAM %ls %.1f/%.1f GB", ram_type.c_str(),
@@ -422,8 +584,8 @@ DWORD WINAPI stats_thread(void *)
         render(lines, g_hud, true);
         static int updates;
         static ULONGLONG busy;
-        busy += GetTickCount64() - t1;
-        if (++updates == 20) logf("[perfhud] the overlay thread: %.1f ms per update (read and draw, once a second)", busy / 20.0);
+        busy += (now_us() - t1) / 1000;
+        if (++updates == 20) logf("[perfhud] the overlay thread: %.1f ms per update; CPU %.1f%% total, game %.1f%%, max thread %.1f%%, max core #%d %.1f%% (game %.1f%%)", busy / 20.0, cpu, mine, max_thread_cpu, max_core, max_core_total, max_core_game);
 
         idle0 = idle1, kern0 = kern1, user0 = user1, pk0 = pk1, pu0 = pu1, io0 = io1;
         frames0 = frames1;
@@ -469,7 +631,18 @@ void start_thread()
 
 void frame()
 {
-    if (g_cfg.perfhud) g_frames++;
+    if (!g_cfg.perfhud) return;
+    uint64_t now = now_us();
+    {
+        std::lock_guard<std::mutex> lk(g_frame_lock);
+        if (g_frame_last_us && now >= g_frame_last_us) {
+            g_frame_samples[g_frame_next] = {now, now - g_frame_last_us};
+            g_frame_next = (g_frame_next + 1) % kFrameSamples;
+            if (g_frame_count < kFrameSamples) g_frame_count++;
+        }
+        g_frame_last_us = now;
+    }
+    g_frames++;
 }
 
 void input_changed()
