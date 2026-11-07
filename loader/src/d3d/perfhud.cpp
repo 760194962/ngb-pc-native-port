@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <map>
 #include <mutex>
@@ -24,9 +25,26 @@ namespace {
 
 std::atomic<uint32_t> g_frames;   // Swaps since start
 std::atomic<uint64_t> g_thread_us; // the thread's time for its last 20 updates (its cost, logged once)
+std::atomic<uint64_t> g_input_change_us; // a controller/key change and no present since
 std::atomic<int> g_pic_h{720};    // the picture's height: the text is sized from it
 std::string g_gpu, g_cpu;         // names
 wchar_t g_luid[64];               // "luid_0x%08X_0x%08X" of the card, as in the GPU Engine counters' instance names
+
+// Input-to-present samples from the last 64 input changes, and the last poll/frame to present times. The render
+// thread writes them at each Swap; the stats thread reads them once a second.
+std::mutex g_latency_lock;
+constexpr int kLatencySamples = 64;
+uint64_t g_input_samples[kLatencySamples];
+int g_input_next, g_input_count;
+uint64_t g_frame_last;
+uint64_t g_last_present_us;
+
+uint64_t now_us()
+{
+    return (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
 
 // A text panel: the bitmap drawn for it, waiting for the render thread (premultiplied BGRA, top-down), and its texture
 struct Panel {
@@ -182,18 +200,39 @@ DWORD WINAPI stats_thread(void *)
         double read_mb = (io1.ReadTransferCount - io0.ReadTransferCount) / secs / (1024.0 * 1024.0);
 
         const double gb = 1024.0 * 1024.0 * 1024.0;
-        wchar_t l[6][256];
+        wchar_t l[8][256];
         swprintf(l[0], 256, L"FPS   %.0f", fps);
-        if (fps > 0.0) swprintf(l[1], 256, L"Latency %5.1f ms", 1000.0 / fps);
-        else swprintf(l[1], 256, L"Latency     -");
-        if (gpu_use >= 0) swprintf(l[2], 256, L"GPU   %3.0f%%   %hs", std::min(100.0, gpu_use), g_gpu.c_str());
-        else swprintf(l[2], 256, L"GPU     -    %hs", g_gpu.c_str());
-        swprintf(l[3], 256, L"CPU   %3.0f%%   (game %.0f%%)   %hs", cpu, mine, g_cpu.c_str());
-        swprintf(l[4], 256, L"RAM   %3lu%%   %.1f / %.1f GB   (game %.2f GB)", ms.dwMemoryLoad,
+        if (fps > 0.0) swprintf(l[1], 256, L"Frame  %5.1f ms", 1000.0 / fps);
+        else swprintf(l[1], 256, L"Frame       -");
+        double in_avg = 0, in_max = 0, in_last = 0, frame_last = 0;
+        int input_count = 0;
+        {
+            std::lock_guard<std::mutex> lk(g_latency_lock);
+            input_count = g_input_count;
+            for (int i = 0; i < input_count; i++) {
+                double v = g_input_samples[i] / 1000.0;
+                in_avg += v;
+                if (v > in_max) in_max = v;
+            }
+            if (input_count) in_avg /= input_count;
+            if (input_count) {
+                int last = (g_input_next + kLatencySamples - 1) % kLatencySamples;
+                in_last = g_input_samples[last] / 1000.0;
+            }
+            frame_last = g_frame_last / 1000.0;
+        }
+        if (input_count) swprintf(l[2], 256, L"In %5.1f/%5.1f ms", in_avg, in_max);
+        else swprintf(l[2], 256, L"In     -/    - ms");
+        if (in_last) swprintf(l[3], 256, L"Poll %5.1f Frm %5.1f", in_last, frame_last);
+        else swprintf(l[3], 256, L"Poll     - Frm %5.1f", frame_last);
+        if (gpu_use >= 0) swprintf(l[4], 256, L"GPU   %3.0f%%   %hs", std::min(100.0, gpu_use), g_gpu.c_str());
+        else swprintf(l[4], 256, L"GPU     -    %hs", g_gpu.c_str());
+        swprintf(l[5], 256, L"CPU   %3.0f%%   (game %.0f%%)   %hs", cpu, mine, g_cpu.c_str());
+        swprintf(l[6], 256, L"RAM   %3lu%%   %.1f / %.1f GB   (game %.2f GB)", ms.dwMemoryLoad,
                  (ms.ullTotalPhys - ms.ullAvailPhys) / gb, ms.ullTotalPhys / gb, pm.PrivateUsage / gb);
-        if (disk_use >= 0) swprintf(l[5], 256, L"Disk  %3.0f%%   (game reads %.1f MB/s)", std::clamp(disk_use, 0.0, 100.0), read_mb);
-        else swprintf(l[5], 256, L"Disk    -    (game reads %.1f MB/s)", read_mb);
-        render({l[0], l[1], l[2], l[3], l[4], l[5]}, g_hud);
+        if (disk_use >= 0) swprintf(l[7], 256, L"Disk  %3.0f%%   (game reads %.1f MB/s)", std::clamp(disk_use, 0.0, 100.0), read_mb);
+        else swprintf(l[7], 256, L"Disk    -    (game reads %.1f MB/s)", read_mb);
+        render({l[0], l[1], l[2], l[3], l[4], l[5], l[6], l[7]}, g_hud);
         static int updates;
         static ULONGLONG busy;
         busy += GetTickCount64() - t1;
@@ -240,6 +279,25 @@ void start_thread()
 void frame()
 {
     if (g_cfg.perfhud) g_frames++;
+}
+
+void input_changed()
+{
+    if (g_cfg.perfhud) g_input_change_us.store(now_us(), std::memory_order_relaxed);
+}
+
+void input_presented()
+{
+    if (!g_cfg.perfhud) return;
+    uint64_t now = now_us();
+    std::lock_guard<std::mutex> lk(g_latency_lock);
+    if (g_last_present_us && now >= g_last_present_us) g_frame_last = now - g_last_present_us;
+    g_last_present_us = now;
+    uint64_t t = g_input_change_us.exchange(0, std::memory_order_relaxed);
+    if (!t || now < t || now - t >= 500000) return; // no input, or a stale change from a paused frame
+    g_input_samples[g_input_next] = now - t;
+    g_input_next = (g_input_next + 1) % kLatencySamples;
+    if (g_input_count < kLatencySamples) g_input_count++;
 }
 
 bool active() { return g_cfg.perfhud || g_note_until.load(std::memory_order_relaxed); }

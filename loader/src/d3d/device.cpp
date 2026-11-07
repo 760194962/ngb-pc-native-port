@@ -2150,6 +2150,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
         logf("[d3d] tests: a visibility test made; its occlusion query lives on");
     }
     HRESULT presented = host3d::present();
+    perfhud::input_presented();
     static HRESULT last_presented = D3D_OK; // a changed result (S_PRESENT_OCCLUDED minimised, S_PRESENT_MODE_CHANGED...)
     if (presented != last_presented) {
         static int noted;

@@ -203,7 +203,7 @@ More commands under "Diagnostics".
 
 **Graphics settings** (the launcher's Graphics page, or `black.ini`): `shadow` scales the shadow map (1 = the Xbox's
 128x128, default 4 = 512x512, up to 16); `vsync = 1` waits for the display's refresh in exclusive fullscreen (no
-tearing; a window or borderless fullscreen never tears anyway; measured at almost no cost; off by default); `perfhud = 1` shows frame rate, GPU, CPU, memory and disk use in the picture's top-right
+tearing; a window or borderless fullscreen never tears anyway; measured at almost no cost; off by default); `perfhud = 1` shows frame rate, average frame interval, input-to-present latency, GPU, CPU, memory and disk use in the picture's top-right
 corner (off by default); `aniso` anisotropic texture filtering (1 = off, 2-16). On the command line: `--vsync`,
 `--perfhud`, `--aniso N`; command-line values hold for that run only and are not written back to `black.ini`.
 
@@ -232,7 +232,7 @@ plugged in at once and all drive the same character. `--no-sdl-pads` keeps to XI
 
 **Shader cache**: the first time the program meets a shader it compiles it on the spot, which can stutter; the result
 is kept in `cache\shaders\` next to the program and read into memory at the next start, so it stutters no more.
-Deleting the folder does no harm; the shaders are just compiled again.
+The Graphics page's "Clear shader cache" button removes it after a confirmation; deleting the folder by hand is also safe.
 
 The command `run.bat` runs (you can also type it yourself):
 

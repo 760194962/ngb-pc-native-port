@@ -236,6 +236,12 @@ const Pair kText[(int)Str::Count] = {
      L"The exceptions are the launcher\u2019s background art, taken from the author\u2019s own website (its Ryu Hayabusa key art is "
      L"Koei Tecmo\u2019s), and the programs\u2019 icon, the game\u2019s Dragon Sword texture, used only as the interface of this "
      L"non-commercial fan port."},
+    {L"缓存", L"Cache"},
+    {L"清理着色器缓存", L"Clear shader cache"},
+    {L"删除着色器缓存。下次启动游戏会重新编译，可能需要多等一会儿。", L"Delete the shader cache. The next start will compile the shaders again and may take a little longer."},
+    {L"删除启动器目录下的着色器缓存？下次启动游戏会重新编译着色器，可能需要多等一会儿。", L"Delete the shader cache in the launcher folder? The next start will compile the shaders again and may take a little longer."},
+    {L"已清理着色器缓存", L"Shader cache cleared"},
+    {L"清理失败：有文件正被游戏占用，请先关闭游戏。", L"Could not clear the cache: a file is in use; close the game first."},
     {L"纹理过滤", L"Texture filtering"},
     {L"关", L"Off"},
     {L"各向异性", L"Anisotropic"},

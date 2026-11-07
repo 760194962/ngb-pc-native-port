@@ -34,11 +34,11 @@ constexpr int MTU = 1500;
 uint8_t g_guest_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 uint32_t g_dns_server;  // host byte order
 bool g_dns_pc;          // g_dns_server is the InsigniaDNS of online_dns_mode = insigniadns (not Insignia's instead)
-uint32_t g_dns_system;  // host DNS for names Insignia's DNS does not serve (insignia.live during registration)
 WSAEVENT g_sock_event;
 
 bool xbox_dns_name(const std::string &name);
-std::vector<uint32_t> dns_order(const std::string &name, uint32_t asked);
+std::vector<uint32_t> dns_order(const std::string &name, uint32_t asked, bool refresh_system = false);
+void invalidate_system_dns();
 
 struct Flow {
     SOCKET s = INVALID_SOCKET;
@@ -47,6 +47,9 @@ struct Flow {
     uint32_t dns_server = 0;
     std::vector<uint32_t> dns_servers; // host servers to try, in order (registration vs Xbox Live, fallback)
     std::vector<uint8_t> dns_query;    // the query, to send again to the next server after a timeout
+    std::string dns_name;              // the queried name, for a refresh after every server timed out
+    bool dns_system = false;            // this name uses the host's DNS servers (not Insignia's)
+    bool dns_refreshed = false;        // the host DNS list was already rebuilt once for this query
     size_t dns_try = 0;
     uint64_t last_use = 0;
     uint64_t asked = 0; // a DNS query sent and not answered yet: when (kclock_ms)
@@ -278,6 +281,9 @@ void udp(uint32_t src, uint32_t dst, const uint8_t *u, size_t len)
     uint32_t server;
     if (dns) {
         f->dns_server = dst;
+        f->dns_name = name;
+        f->dns_system = !g_cfg.online_dns_console && !g_dns_pc && !xbox_dns_name(name);
+        f->dns_refreshed = false;
         f->dns_servers = dns_order(name, dst);
         f->dns_try = 0;
         f->dns_query.assign(data, data + n);
@@ -366,6 +372,22 @@ void expire()
             uint32_t old = f.dns_servers[f.dns_try++];
             uint32_t next = f.dns_servers[f.dns_try];
             logf("[net] DNS: no answer from %s in 4 s; trying %s", ip_str(old).c_str(), ip_str(next).c_str());
+            sockaddr_in to = {};
+            to.sin_family = AF_INET;
+            to.sin_addr.s_addr = htonl(next);
+            to.sin_port = htons(53);
+            sendto(f.s, (const char *)f.dns_query.data(), (int)f.dns_query.size(), 0, (sockaddr *)&to, sizeof to);
+            f.asked = now;
+            f.last_use = now;
+            continue;
+        }
+        if (f.dns_system && !f.dns_refreshed && !f.dns_query.empty()) {
+            f.dns_refreshed = true;
+            invalidate_system_dns();
+            f.dns_servers = dns_order(f.dns_name, f.dns_server, true);
+            f.dns_try = 0;
+            uint32_t next = f.dns_servers.front();
+            logf("[net] DNS: all servers timed out; host list refreshed, retrying %s", ip_str(next).c_str());
             sockaddr_in to = {};
             to.sin_family = AF_INET;
             to.sin_addr.s_addr = htonl(next);
@@ -701,9 +723,15 @@ void ip(const uint8_t *p, size_t len)
 }
 
 // The host's own DNS servers, in adapter order: used for names Insignia's DNS does not serve (the Setup Assistant's
-// insignia.live). Asked again for each name, so a VPN/TUN that comes up later is included; 8.8.8.8 is only a last resort.
-std::vector<uint32_t> system_dns_servers()
+// insignia.live). Cached for 30 s: rebuilding the adapter list on every query was a needless network-thread cost, and
+// a VPN/TUN that comes up later is still picked up on the next refresh.
+std::vector<uint32_t> g_system_dns_cache;
+ULONGLONG g_system_dns_at;
+
+std::vector<uint32_t> system_dns_servers(bool refresh = false)
 {
+    ULONGLONG now = GetTickCount64();
+    if (!refresh && !g_system_dns_cache.empty() && now - g_system_dns_at < 30000) return g_system_dns_cache;
     std::vector<uint32_t> out;
     ULONG size = 0;
     DWORD rc = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST, nullptr, nullptr, &size);
@@ -722,9 +750,20 @@ std::vector<uint32_t> system_dns_servers()
             }
         }
     }
-    if (out.empty()) out.push_back(0x08080808);
-    return out;
+    if (out.empty()) {
+        static bool noted;
+        if (!noted) {
+            noted = true;
+            logf("[net] no DNS server on an active adapter; using 8.8.8.8 as a last resort");
+        }
+        out.push_back(0x08080808);
+    }
+    g_system_dns_cache = out;
+    g_system_dns_at = now;
+    return g_system_dns_cache;
 }
+
+void invalidate_system_dns() { g_system_dns_at = 0; } // the next dns_order() enumerates the adapters again
 
 // Xbox Live names Insignia's public DNS is for. insignia.live (registration) is deliberately not one of them.
 bool xbox_dns_name(const std::string &name)
@@ -740,7 +779,7 @@ bool xbox_dns_name(const std::string &name)
     return n == "xboxlive.com" || ends(".xboxlive.com") || n == "xbox.com" || ends(".xbox.com");
 }
 
-std::vector<uint32_t> dns_order(const std::string &name, uint32_t asked)
+std::vector<uint32_t> dns_order(const std::string &name, uint32_t asked, bool refresh_system)
 {
     std::vector<uint32_t> out;
     auto add = [&](uint32_t ip) {
@@ -751,7 +790,7 @@ std::vector<uint32_t> dns_order(const std::string &name, uint32_t asked)
     } else if (xbox_dns_name(name)) {
         add(g_dns_server); // Insignia's public DNS; do not send Xbox Live names to the host's DNS
     } else {
-        for (uint32_t ip : system_dns_servers()) add(ip); // registration API and other non-Live names
+        for (uint32_t ip : system_dns_servers(refresh_system)) add(ip); // registration API and other non-Live names
     }
     if (out.empty()) add(asked ? asked : 0x08080808);
     return out;
@@ -774,13 +813,13 @@ void vnet_start()
         logf("[net] online_insigniadns \"%s\" is not an IPv4 address: DNS goes to Insignia's", dns.c_str());
         tell(TELL_DNS_SILENT, L"联网：InsigniaDNS.exe 的地址无效，改用 Insignia 公网 DNS");
     }
-    g_dns_system = system_dns_servers().front();
+    uint32_t sys_dns = system_dns_servers().front();
     logf("[net] virtual network up: Xbox 10.0.2.15, gateway 10.0.2.2, DNS relay to %s (%s; system DNS %s for other names)",
          ip_str(g_dns_server).c_str(),
          g_cfg.online_dns_console ? "10.0.2.3 only; other servers as the console's settings name them"
          : g_dns_pc              ? "every DNS query, to InsigniaDNS"
                                  : "Xbox Live names to Insignia, others to the system DNS",
-         ip_str(g_dns_system).c_str());
+         ip_str(sys_dns).c_str());
 }
 
 // The first frames each way, by header only (evidence of the exchange; no payload bytes)

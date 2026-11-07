@@ -12,6 +12,7 @@
 #include "d3d/device.h"
 #include "d3d/draw.h"
 #include "d3d/host.h"
+#include "d3d/perfhud.h"
 #include "input/bindings.h"
 #include "input/padkeys.h"
 #include "input/mouselook.h"
@@ -419,6 +420,16 @@ void read_pad(uint32_t port, XGamepad &g)
 {
     memset(&g, 0, sizeof g);
     if (port != 0) return;
+    static XGamepad last;
+    static bool have_last;
+    auto note_input = [&]() {
+        bool changed = !have_last || g.wButtons != last.wButtons || memcmp(g.bAnalogButtons, last.bAnalogButtons, 8) != 0 ||
+                       std::abs((int)g.sThumbLX - last.sThumbLX) > 384 || std::abs((int)g.sThumbLY - last.sThumbLY) > 384 ||
+                       std::abs((int)g.sThumbRX - last.sThumbRX) > 384 || std::abs((int)g.sThumbRY - last.sThumbRY) > 384;
+        if (changed) perfhud::input_changed();
+        last = g;
+        have_last = true;
+    };
     static uint32_t polls, absent[4]; // absent: the poll count when a slot was last found empty
     polls++;
     for (DWORD i = 0; g_pc_get && i < 4; i++) {
@@ -465,6 +476,7 @@ void read_pad(uint32_t port, XGamepad &g)
         g.wButtons = p.buttons;
         memcpy(g.bAnalogButtons, p.analog, 8);
         g.sThumbLX = p.lx, g.sThumbLY = p.ly, g.sThumbRX = p.rx, g.sThumbRY = p.ry;
+        note_input();
         return;
     }
     bool focus = GetForegroundWindow() == host3d::window();
@@ -474,6 +486,7 @@ void read_pad(uint32_t port, XGamepad &g)
     if (!bindings::capture_poll(focus, raw_wheel)) // while the key bindings page waits for a key, keys bind instead
         bindings::apply(g.wButtons, g.bAnalogButtons, g.sThumbLX, g.sThumbLY, g.sThumbRX, g.sThumbRY, focus, live, wheel);
     movies_poll(g.wButtons, g.bAnalogButtons, bindings::menu_select_held());
+    note_input();
 }
 
 } // namespace

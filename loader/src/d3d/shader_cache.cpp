@@ -80,6 +80,26 @@ void mark_epoch(const std::wstring &entry)
     if (read_epoch(entry) != kShaderEpoch) write_epoch(entry, kShaderEpoch);
 }
 
+// A .bin is usable only if it belongs to this generator and was not overwritten after its sidecar was written. The
+// second check catches a downgrade in the same folder: an older build writes .bin without knowing about .gen, so a
+// current-looking sidecar next to a newer .bin would otherwise prewarm (or read) that older bytecode.
+bool cache_entry_current(const std::wstring &path)
+{
+    uint32_t epoch = read_epoch(path);
+    if (epoch && epoch != kShaderEpoch) return false;
+    if (!epoch) return true; // before the sidecar existed: prewarm migrates it once
+    WIN32_FILE_ATTRIBUTE_DATA bin = {}, gen = {};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &bin) ||
+        !GetFileAttributesExW(epoch_path(path).c_str(), GetFileExInfoStandard, &gen))
+        return true; // a missing timestamp is not proof; parse_file still validates the file
+    ULARGE_INTEGER bt, gt;
+    bt.LowPart = bin.ftLastWriteTime.dwLowDateTime;
+    bt.HighPart = bin.ftLastWriteTime.dwHighDateTime;
+    gt.LowPart = gen.ftLastWriteTime.dwLowDateTime;
+    gt.HighPart = gen.ftLastWriteTime.dwHighDateTime;
+    return bt.QuadPart <= gt.QuadPart; // .gen is written after .bin; a newer .bin came from another build
+}
+
 bool parse_file(const std::wstring &path, Entry *e)
 {
     FILE *f = _wfopen(path.c_str(), L"rb");
@@ -124,8 +144,16 @@ int read_entry(const std::wstring &path, const std::string &hlsl, const char *pr
     Entry file;
     const Entry *e = nullptr;
     auto it = g_mem.find(path);
-    if (it != g_mem.end()) e = &it->second;
-    else if (parse_file(path, &file)) e = &file;
+    if (it != g_mem.end()) {
+        e = &it->second; // prewarmed and validated at start
+    } else {
+        if (!cache_entry_current(path)) {
+            static int noted;
+            if (noted++ < 4) logf("[shader cache] old .bin ignored (recompiling): %ls", path.c_str());
+            return 0; // another generator, or .bin overwritten after its .gen
+        }
+        if (parse_file(path, &file)) e = &file;
+    }
     if (!e || e->flags != flags || e->profile != profile || e->hlsl != hlsl) return 0; // not cached, or another source
     if (e->code.empty()) return -1;
     if (FAILED(D3DCreateBlob(e->code.size(), code))) return 0;
@@ -224,6 +252,10 @@ void prewarm_shaders(IDirect3DDevice9 *d)
             std::wstring path = cache_dir() + L"\\" + fd.cFileName;
             const uint32_t epoch = read_epoch(path);
             if (epoch && epoch != kShaderEpoch) { // another generator: keep it, but do not make it now
+                old++;
+                continue;
+            }
+            if (epoch && !cache_entry_current(path)) { // .bin rewritten after its .gen (a downgrade): not this build's
                 old++;
                 continue;
             }

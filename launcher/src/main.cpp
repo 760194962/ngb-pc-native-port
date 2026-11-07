@@ -146,7 +146,7 @@ enum {
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
-    kHitWebsite = 490, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
+    kHitWebsite = 490, kHitOpenSaves = 500, kHitClearCache = 495, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitNewConsole, kHitRegister, kHitDashboard, kHitRebuildConsole, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
     kHitModule = 580, // + 0 Black, 1 Ninja Gaiden 2004
     kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc, kHitExportDlc,
@@ -689,6 +689,27 @@ void delete_image()
         g.iso.clear();
         g.iso_need = 0;
     }
+}
+
+// About: the shader cache can grow over upgrades; deleting it is safe (the next start compiles again).
+void clear_shader_cache()
+{
+    std::wstring dir = g.dir + L"\\cache\\shaders";
+    if (GetFileAttributesW(dir.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        MessageBoxW(g.hwnd, S(Str::ClearCacheDone), S(Str::ClearCache), MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (MessageBoxW(g.hwnd, S(Str::ClearCacheConfirm), S(Str::ClearCache), MB_YESNO | MB_ICONWARNING) != IDYES) return;
+    std::wstring from = dir;
+    from.push_back(L'\0');
+    SHFILEOPSTRUCTW op = {};
+    op.hwnd = g.hwnd;
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.c_str();
+    op.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    bool ok = SHFileOperationW(&op) == 0 && !op.fAnyOperationsAborted;
+    MessageBoxW(g.hwnd, ok ? S(Str::ClearCacheDone) : S(Str::ClearCacheFailed), S(Str::ClearCache),
+                MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONWARNING));
 }
 
 // The game folder ("Change"): where an install goes and where the game starts from
@@ -2144,6 +2165,11 @@ struct Painter {
         D2D1_RECT_F c2 = {c.left, c.bottom + 14, c.right, c.bottom + 14 + 92};
         float y2 = card(c2, S(Str::GpuCard), help_id(Str::GpuCard));
         gpu_list(cx, y2, c2.right - 26);
+
+        D2D1_RECT_F c3 = {c.left, c2.bottom + 14, c.right, c2.bottom + 14 + 100};
+        float y3 = card(c3, S(Str::ClearCache));
+        text(S(Str::ClearCacheNote), {lx, y3, c3.right - 280, y3 + 48}, 12.5f, kAsh, 0.8f);
+        button(kHitClearCache, {c3.right - 246, y3, c3.right - 26, y3 + 32}, S(Str::ClearCacheButton), false);
     }
 
     // Texture filtering: off (as the game sets: linear) or anisotropic 2x-16x (black.ini aniso)
@@ -3216,6 +3242,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             g.list_scroll = g.list_scroll_max = 0;
         }
         else if (id == kHitOpenSaves) open_folder(save_hdd());
+        else if (id == kHitClearCache) clear_shader_cache();
         else if (id >= kHitWebsite && id < kHitWebsite + 5) ShellExecuteW(h, L"open", kLinks[id - kHitWebsite], nullptr, nullptr, SW_SHOWNORMAL);
         else if (id == kHitOpenBackups) {
             CreateDirectoryW(backup_root().c_str(), nullptr);
