@@ -709,8 +709,6 @@ void draw(IDirect3DDevice9 *d, const RECT &pic)
 
 void draw_quad(IDirect3DDevice9 *d, const RECT &pic, Panel &panel, bool bottom)
 {
-    RECT client = {};
-    GetClientRect(host3d::window(), &client);
     {
         std::lock_guard<std::mutex> lk(g_lock);
         if (panel.fresh) { // a new bitmap (the figures once a second, a message once): into the texture
@@ -771,18 +769,12 @@ void draw_quad(IDirect3DDevice9 *d, const RECT &pic, Panel &panel, bool bottom)
     d->SetRenderTarget(0, bb);
     d->SetDepthStencilSurface(nullptr);
     set_states();
-    LONG right = client.right > 0 ? client.right : pic.right;
-    LONG bottom_edge = client.bottom > 0 ? client.bottom : pic.bottom;
-    float m = std::max(4.0f, right / 100.0f);
-    // Fixed share of the window width, so the panel keeps the same visual size relative to the picture at any
-    // window size; the texture itself is not re-rendered while the window is dragged.
-    float scale = (right * 0.30f) / std::max(1, panel.tex.w);
-    if (panel.tex.h * scale > bottom_edge * 0.35f) scale = bottom_edge * 0.35f / std::max(1, panel.tex.h);
-    float pw = panel.tex.w * scale, ph = panel.tex.h * scale;
-    float x0 = std::max((float)pic.left + m, (float)right - m - pw) - 0.5f;
-    float y0 = (bottom ? bottom_edge - m - ph : pic.top + m) - 0.5f;
-    if (y0 + ph > bottom_edge - m) y0 = bottom_edge - m - ph - 0.5f;
-    float x1 = x0 + pw, y1 = y0 + ph;
+    // 2.2.7 interaction: one panel at a fixed pixel size at the picture's top-right. Nothing here asks the window
+    // for its size, so dragging/resizing it cannot call user32 from the render thread.
+    float m = (float)std::max(4L, (pic.bottom - pic.top) / 60);
+    float x0 = pic.right - m - panel.tex.w - 0.5f;
+    float y0 = (bottom ? pic.bottom - m - panel.tex.h : pic.top + m) - 0.5f;
+    float x1 = x0 + panel.tex.w, y1 = y0 + panel.tex.h;
     struct V {
         float x, y, z, rhw, u, v;
     } q[4] = {{x0, y0, 0, 1, 0, 0}, {x1, y0, 0, 1, 1, 0}, {x0, y1, 0, 1, 0, 1}, {x1, y1, 0, 1, 1, 1}};
