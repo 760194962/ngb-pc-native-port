@@ -48,8 +48,8 @@ std::wstring entry_path(const std::string &hlsl, const char *profile, UINT flags
 // A cache entry's generator epoch, in a sidecar file: "*.gen" holds one uint32. Entries whose sidecar is older were
 // made by a different HLSL generator; they stay on disk (never deleted by age) but are not prewarmed. An entry made
 // before this sidecar existed has no file: it is migrated to the current epoch once, so the first run of this build
-// does not turn the whole existing cache into runtime work. A cache hit also marks the entry current, for a downgrade
-// or a sidecar lost in a crash.
+// does not turn the whole existing cache into runtime work. A hit read from the file in play (not prewarmed) marks the
+// entry current, for a downgrade or a sidecar lost in a crash; a prewarmed hit touches no file.
 constexpr uint32_t kShaderEpoch = 1;
 
 std::wstring epoch_path(const std::wstring &entry) { return entry + L".gen"; }
@@ -125,7 +125,10 @@ int read_entry(const std::wstring &path, const std::string &hlsl, const char *pr
     const Entry *e = nullptr;
     auto it = g_mem.find(path);
     if (it != g_mem.end()) e = &it->second;
-    else if (parse_file(path, &file)) e = &file;
+    else if (parse_file(path, &file)) {
+        e = &file;
+        mark_epoch(path); // an entry used in play from its file: current for the next start
+    }
     if (!e || e->flags != flags || e->profile != profile || e->hlsl != hlsl) return 0; // not cached, or another source
     if (e->code.empty()) return -1;
     if (FAILED(D3DCreateBlob(e->code.size(), code))) return 0;
@@ -204,7 +207,6 @@ HRESULT cached_compile(const std::string &hlsl, const char *name, const char *pr
         hr = D3DCompile(hlsl.data(), hlsl.size(), name, nullptr, nullptr, "main", profile, flags, 0, code, errors);
         write_entry(path, hlsl, profile, flags, SUCCEEDED(hr) ? *code : nullptr);
     }
-    mark_epoch(path); // a legacy entry used in play becomes a current one for the next start
     QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
     perf::add_shader_build((double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart, cached != 0);
