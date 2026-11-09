@@ -938,6 +938,8 @@ void ms_note_draw()
 {
     if (g_ms_bound) g_ms_bound->ms_drawn = true;
 }
+
+bool ms_drawing() { return g_ms_bound != nullptr; }
 namespace {
 
 // The surfaces to draw into for a frame-sized target (null when MSAA is off or the card refused them)

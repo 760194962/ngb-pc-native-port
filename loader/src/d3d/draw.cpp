@@ -1677,6 +1677,8 @@ void forget_sent_state()
 
 namespace {
 
+int g_ms_aa_sent = -1; // D3DRS_MULTISAMPLEANTIALIAS as last sent (-1: unknown, a new device)
+
 bool begin_draw(DrawCtx &ctx)
 {
     IDirect3DDevice9 *d = host3d::dev();
@@ -1785,6 +1787,16 @@ bool begin_draw(DrawCtx &ctx)
     }
     if (g_cfg.widescreen && g_cfg.aspect_w * 9 != g_cfg.aspect_h * 16 && g_st.render_target && is_backbuffer(g_st.render_target))
         wide_hud_count(!(ctx.path == Path::Fvf && (ctx.fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW));
+    if (ms_drawing()) {
+        // MSAA: the 3D multisampled, the game's screen-space 2D (HUD, menus, text, screen copies) not: drawn as without
+        // MSAA, its quads and 1-pixel rules covering whole pixels. A menu rule (a line primitive) sampled between pixel
+        // centres bled half a pixel into the row beside it (pause menu, 4:3 1x MSAA 8x: (74,11,9) -> (114,77,75)).
+        bool ms = !(ctx.path == Path::Fvf && (ctx.fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
+        if (g_ms_aa_sent != (int)ms) {
+            d->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, ms);
+            g_ms_aa_sent = ms;
+        }
+    }
     ms_note_draw();
     g_st.draws++;
     return true;
@@ -3014,6 +3026,7 @@ void release_draw_buffers()
 
 void draw_drop_all()
 {
+    g_ms_aa_sent = -1;
     release_draw_buffers();
     g_ring_failed = false; // tried again on the new device
     for (auto &kv : g_decls)
