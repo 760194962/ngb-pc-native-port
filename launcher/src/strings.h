@@ -186,6 +186,7 @@ enum class Str {
     AaFxaaRow,
     AaMsaaRow,
     AaNote,
+    AaHeavy,
     CpuSingle,
     CpuAuto,
     CpuNote,

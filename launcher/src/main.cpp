@@ -2157,6 +2157,15 @@ struct Painter {
         y += 40;
         label(Str::AntiAlias);
         aa_list(cx, y - 2);
+        {
+            // MSAA 4x / 8x with a render scale of 3x or more: measured on the iGPU (chapter 1) 4x 9.8-15 ms and 8x 24 ms
+            // a frame against 5.7 off, the game slowing down; at 1x-2x it costs at most 0.8 ms (docs/04 3.28)
+            std::string rd = black_ini("render"), sc = black_ini("scale");
+            int msaa = atoi(black_ini("msaa").c_str());
+            double scale = sc.empty() ? 3.0 : atof(sc.c_str());
+            if (msaa >= 4 && (rd.empty() || rd == "scale") && scale >= 3.0)
+                text(S(Str::AaHeavy), {cx + 212, y, c.right - 20, y + 30}, 12, kGold, 0.95f);
+        }
         y += 40;
         label(Str::VSync); // black.ini vsync: off by default (frames paced by the Xbox vblank alone)
         segmented(kHitVsync, cx, y, {S(Str::On), S(Str::Off)}, black_ini("vsync") == "1" ? 0 : 1, 72);

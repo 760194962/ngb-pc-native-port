@@ -241,6 +241,7 @@ const Pair kText[(int)Str::Count] = {
     {L"按窗口大小柔化边缘，几乎不耗性能", L"edges smoothed at the window\u2019s size, almost free"},
     {L"多重采样，倍数越高越平滑、越耗显卡", L"multisampling: higher is smoother and costs more"},
     {L"MSAA 最高 8×：Direct3D 9 下显卡提供的就是 2×、4×、8×。", L"MSAA up to 8\u00D7: the counts graphics cards offer under Direct3D 9 are 2\u00D7, 4\u00D7 and 8\u00D7."},
+    {L"渲染 3× 以上再开 MSAA 4×/8×，集显可能掉帧；建议降低渲染倍数或用 MSAA 2×", L"MSAA 4\u00D7/8\u00D7 at a 3\u00D7 render scale or more may drop frames on an integrated GPU; lower the render scale or use 2\u00D7"},
     {L"单核（默认）", L"One core (default)"},
     {L"自动分配（实验性）", L"Automatic (experimental)"},
     {L"单核最接近 Xbox，也最稳定。自动分配让 Windows 把游戏线程分到多个核心上，可能更流畅，也可能出现原版没有的问题；遇到异常请改回单核。下次启动游戏时生效。",
