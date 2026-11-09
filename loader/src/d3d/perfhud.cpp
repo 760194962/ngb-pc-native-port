@@ -69,10 +69,11 @@ struct Panel {
     std::vector<uint32_t> pixels;
     int bw = 0, bh = 0;
     bool fresh = false;
+    bool grow = false;      // the texture keeps its largest size: no new texture when a figure gains a digit
     host3d::CpuTexture tex; // tex.w x tex.h: the size it was made at
 };
 std::mutex g_lock;
-Panel g_hud;  // the figures, top-right
+Panel g_hud{{}, 0, 0, false, true}; // the figures, top-right
 Panel g_note; // a short message (notice()), bottom-right
 
 // notice(): the text waiting to be drawn and until when it shows (GetTickCount64)
@@ -714,10 +715,20 @@ void draw_quad(IDirect3DDevice9 *d, const RECT &pic, Panel &panel, bool bottom)
         if (panel.fresh) { // a new bitmap (the figures once a second, a message once): into the texture
             panel.fresh = false;
             int pitch;
-            void *px = panel.tex.make(panel.bw, panel.bh) ? panel.tex.lock(&pitch) : nullptr;
+            // The figures' width changes with their digits (656 <-> 666 px on the iGPU: 40 new textures in 110 updates,
+            // 0.3-1.0 ms each on the render thread, and the panel jumped sideways). A growing panel keeps its largest
+            // size; the extra columns/rows get the panel's own background.
+            int w = panel.grow ? std::max(panel.bw, panel.tex.w) : panel.bw;
+            int h = panel.grow ? std::max(panel.bh, panel.tex.h) : panel.bh;
+            void *px = panel.tex.make(w, h) ? panel.tex.lock(&pitch) : nullptr;
             if (px) {
-                for (int y = 0; y < panel.tex.h; y++)
-                    memcpy((uint8_t *)px + y * pitch, &panel.pixels[(size_t)y * panel.tex.w], panel.tex.w * 4);
+                const uint32_t bg = 150u << 24; // render(): 60% black where there is no text
+                for (int y = 0; y < panel.tex.h; y++) {
+                    uint32_t *row = (uint32_t *)((uint8_t *)px + y * pitch);
+                    int copy = y < panel.bh ? std::min(panel.bw, panel.tex.w) : 0;
+                    if (copy) memcpy(row, &panel.pixels[(size_t)y * panel.bw], copy * 4);
+                    std::fill(row + copy, row + panel.tex.w, bg);
+                }
                 panel.tex.unlock();
             }
         }

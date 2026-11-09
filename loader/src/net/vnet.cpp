@@ -19,6 +19,7 @@
 #include <cctype>
 #include <cstring>
 #include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -34,10 +35,10 @@ constexpr int MTU = 1500;
 uint8_t g_guest_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 uint32_t g_dns_server;  // host byte order
 bool g_dns_pc;          // g_dns_server is the InsigniaDNS of online_dns_mode = insigniadns (not Insignia's instead)
-uint32_t g_dns_system;  // host DNS for names Insignia's DNS does not serve (insignia.live during registration)
 WSAEVENT g_sock_event;
 
 bool xbox_dns_name(const std::string &name);
+DWORD WINAPI refresh_after_silence(void *);
 std::vector<uint32_t> dns_order(const std::string &name, uint32_t asked);
 
 struct Flow {
@@ -377,6 +378,7 @@ void expire()
         }
         uint32_t server = f.dns_servers.empty() ? g_dns_server : f.dns_servers[f.dns_try];
         logf("[net] DNS: no answer from %s in 4 s", ip_str(server).c_str());
+        if (server != g_dns_server) QueueUserWorkItem(refresh_after_silence, nullptr, WT_EXECUTEDEFAULT);
         std::wstring text = (g_cfg.online_dns_console && server != g_dns_server) || g_dns_pc
             ? L"联网：DNS " + widen(ip_str(server)) + L" 没有回应（那台电脑上 InsigniaDNS.exe 开着吗？）"
             : server == g_dns_server ? L"联网：Insignia 公网 DNS 没有回应，请检查网络"
@@ -702,8 +704,10 @@ void ip(const uint8_t *p, size_t len)
 }
 
 // The host's own DNS servers, in adapter order: used for names Insignia's DNS does not serve (the Setup Assistant's
-// insignia.live). Asked again for each name, so a VPN/TUN that comes up later is included; 8.8.8.8 is only a last resort.
-std::vector<uint32_t> system_dns_servers()
+// insignia.live). 8.8.8.8 is only a last resort. GetAdaptersAddresses took 11 ms on average (16 ms max, 19 ms the
+// first time) on the development PC, so it is never called on the network thread: that thread is pinned to the game's
+// core (xthread), where every call would cost the game about a frame.
+std::vector<uint32_t> query_system_dns()
 {
     std::vector<uint32_t> out;
     ULONG size = 0;
@@ -725,6 +729,47 @@ std::vector<uint32_t> system_dns_servers()
     }
     if (out.empty()) out.push_back(0x08080808);
     return out;
+}
+
+// The list, read once at start and again when Windows reports an interface change (a VPN/TUN up or down, another
+// network) or when every server of it went silent; Windows' own threads do the reading. A query takes the copy.
+std::mutex g_sys_dns_lock;
+std::vector<uint32_t> g_sys_dns;
+HANDLE g_ifc_notify;
+
+void refresh_system_dns(const char *why)
+{
+    std::vector<uint32_t> list = query_system_dns();
+    std::lock_guard<std::mutex> g(g_sys_dns_lock);
+    if (list == g_sys_dns) return;
+    std::string s;
+    for (uint32_t ip : list) s += (s.empty() ? "" : ", ") + ip_str(ip);
+    logf("[net] system DNS (%s): %s", why, s.c_str());
+    g_sys_dns.swap(list);
+}
+
+void CALLBACK interface_changed(void *, MIB_IPINTERFACE_ROW *, MIB_NOTIFICATION_TYPE)
+{
+    refresh_system_dns("the network changed");
+}
+
+DWORD WINAPI refresh_at_start(void *)
+{
+    refresh_system_dns("at start");
+    return 0;
+}
+
+DWORD WINAPI refresh_after_silence(void *)
+{
+    refresh_system_dns("its servers went silent");
+    return 0;
+}
+
+std::vector<uint32_t> system_dns_servers()
+{
+    std::lock_guard<std::mutex> g(g_sys_dns_lock);
+    if (!g_sys_dns.empty()) return g_sys_dns;
+    return {0x08080808}; // not read yet (the first notification is a few ms after start)
 }
 
 // Xbox Live names Insignia's public DNS is for. insignia.live (registration) is deliberately not one of them.
@@ -777,13 +822,17 @@ void vnet_start()
         logf("[net] online_insigniadns \"%s\" is not an IPv4 address: DNS goes to Insignia's", dns.c_str());
         tell(TELL_DNS_SILENT, L"联网：InsigniaDNS.exe 的地址无效，改用 Insignia 公网 DNS");
     }
-    g_dns_system = system_dns_servers().front();
-    logf("[net] virtual network up: Xbox 10.0.2.15, gateway 10.0.2.2, DNS relay to %s (%s; system DNS %s for other names)",
-         ip_str(g_dns_server).c_str(),
+    if (!g_cfg.online_dns_console && !g_dns_pc) {
+        // The system DNS list: read on a thread-pool thread now and on Windows' notification thread after each
+        // change. No initial notification: Windows makes that call on this (pinned) thread before returning (26 ms).
+        QueueUserWorkItem(refresh_at_start, nullptr, WT_EXECUTEDEFAULT);
+        DWORD rc = NotifyIpInterfaceChange(AF_INET, interface_changed, nullptr, FALSE, &g_ifc_notify);
+        if (rc != NO_ERROR) logf("[net] NotifyIpInterfaceChange failed (%lu): the system DNS list is read at start only", rc);
+    }
+    logf("[net] virtual network up: Xbox 10.0.2.15, gateway 10.0.2.2, DNS relay to %s (%s)", ip_str(g_dns_server).c_str(),
          g_cfg.online_dns_console ? "10.0.2.3 only; other servers as the console's settings name them"
          : g_dns_pc              ? "every DNS query, to InsigniaDNS"
-                                 : "Xbox Live names to Insignia, others to the system DNS",
-         ip_str(g_dns_system).c_str());
+                                 : "Xbox Live names to Insignia, others to the system DNS");
 }
 
 // The first frames each way, by header only (evidence of the exchange; no payload bytes)
