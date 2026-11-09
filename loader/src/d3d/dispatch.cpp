@@ -208,9 +208,21 @@ void *make_thunk(const xd3d::Hle &h, bool span)
         if (params[i] == "s") stack_index[i] = stack_args++;
         else if (reg_code(params[i]) < 0) return nullptr;
     }
-    uint8_t buf[256];
+    uint8_t buf[384];
     int n = 0;
     int saved = 0;
+    // XMM0-7 kept across the call: the game is built with the D3D library's link-time code generation, which knows
+    // the library's own functions leave the SSE registers alone, so it keeps values in them across those calls; this
+    // C++ does not (a 16-byte memcpy alone is a movups through xmm0). Ninja Gaiden Black's FUN_0019e150 builds a
+    // vertex constant from xmm0/xmm2 after three SetVertexShaderConstant1 calls: clobbered, the cloth's light floor
+    // c40 came out (2,1,2,2) and the streamers on the chapter-1 fences drew white instead of dark grey (the user,
+    // 2026-11-09; run/play: [c40probe], watch on 0x3D8EF8).
+    buf[n++] = 0x81; buf[n++] = 0xEC; // sub esp, 128
+    { uint32_t k = 128; memcpy(buf + n, &k, 4); n += 4; }
+    for (int x = 0; x < 8; x++) { // movups [esp + 16x], xmmX
+        buf[n++] = 0x0F; buf[n++] = 0x11; buf[n++] = (uint8_t)(0x44 | (x << 3)); buf[n++] = 0x24; buf[n++] = (uint8_t)(16 * x);
+    }
+    const int xmm_area = 128;
     if (span) n += emit_call_ptr(buf + n, &g_span_enter);
     buf[n++] = 0x51; // push ecx
     buf[n++] = 0x52; // push edx
@@ -222,7 +234,7 @@ void *make_thunk(const xd3d::Hle &h, bool span)
     int pushed = 0;
     for (int i = (int)params.size() - 1; i >= 0; i--) {
         if (stack_index[i] >= 0) {
-            int off = 4 + 4 * stack_index[i] + 4 * (saved + pushed);
+            int off = 4 + 4 * stack_index[i] + 4 * (saved + pushed) + xmm_area;
             if (off < 128) {
                 buf[n++] = 0xFF; buf[n++] = 0x74; buf[n++] = 0x24; buf[n++] = (uint8_t)off; // push [esp+off8]
             } else {
@@ -244,6 +256,11 @@ void *make_thunk(const xd3d::Hle &h, bool span)
     if (!h.returns) buf[n++] = 0x58; // pop eax
     buf[n++] = 0x5A; // pop edx
     buf[n++] = 0x59; // pop ecx
+    for (int x = 0; x < 8; x++) { // movups xmmX, [esp + 16x]
+        buf[n++] = 0x0F; buf[n++] = 0x10; buf[n++] = (uint8_t)(0x44 | (x << 3)); buf[n++] = 0x24; buf[n++] = (uint8_t)(16 * x);
+    }
+    buf[n++] = 0x81; buf[n++] = 0xC4; // add esp, 128
+    { uint32_t k = 128; memcpy(buf + n, &k, 4); n += 4; }
     if (stack_args) {
         buf[n++] = 0xC2; // ret imm16
         uint16_t r = (uint16_t)(stack_args * 4);
