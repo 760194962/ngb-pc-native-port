@@ -506,7 +506,7 @@ DWORD WINAPI stats_thread(void *)
         double frame_max_ms = 0;
         {
             std::lock_guard<std::mutex> lk(g_frame_lock);
-            uint64_t cutoff = t1 > 500000 ? t1 - 500000 : 0;
+            uint64_t cutoff = t0; // every frame since the last update (once a second)
             for (int i = 0; i < g_frame_count; i++) {
                 const FrameSample &s = g_frame_samples[i];
                 if (s.at_us >= cutoff) frame_max_ms = std::max(frame_max_ms, s.interval_us / 1000.0);

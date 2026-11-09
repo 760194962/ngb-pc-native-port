@@ -379,7 +379,8 @@ void expire()
         logf("[net] DNS: no answer from %s in 4 s", ip_str(server).c_str());
         std::wstring text = (g_cfg.online_dns_console && server != g_dns_server) || g_dns_pc
             ? L"联网：DNS " + widen(ip_str(server)) + L" 没有回应（那台电脑上 InsigniaDNS.exe 开着吗？）"
-            : L"联网：Insignia 公网 DNS 没有回应，请检查网络";
+            : server == g_dns_server ? L"联网：Insignia 公网 DNS 没有回应，请检查网络"
+                                     : L"联网：本机 DNS " + widen(ip_str(server)) + L" 没有回应，请检查网络";
         tell(TELL_DNS_SILENT, text.c_str());
         f.asked = 0;
     }
@@ -746,7 +747,9 @@ std::vector<uint32_t> dns_order(const std::string &name, uint32_t asked)
     auto add = [&](uint32_t ip) {
         if (ip && std::find(out.begin(), out.end(), ip) == out.end()) out.push_back(ip);
     };
-    if (g_cfg.online_dns_console || g_dns_pc) {
+    if (g_cfg.online_dns_console) {
+        add(asked == DNS_IP ? g_dns_server : asked); // 10.0.2.3: the relay's server; another: the one the console names
+    } else if (g_dns_pc) {
         add(g_dns_server);
     } else if (xbox_dns_name(name)) {
         add(g_dns_server); // Insignia's public DNS; do not send Xbox Live names to the host's DNS
