@@ -163,6 +163,9 @@ struct Config {
                                // sample as before; black.ini shadowsoft = 1 / 0 (2 / 0); press-file "cfg:shadowpcf:N"
     bool quad_snap = true;     // press-file "cfg:quadsnap:0": 2D quads above 1x drawn as before (d3d/draw.cpp quad_snap)
     bool quad_weight = true;   // press-file "cfg:quadweight:0": QuadSnap without the alpha-weighted four-texel read (diagnosis)
+    int msaa = 0;              // black.ini msaa: 0 off, 2 / 4 / 8 samples for the frame's targets (d3d/device.cpp)
+    bool hud_centre = false;   // black.ini hud_centre = 1 / press-file "cfg:hudcentre:1": on a 21:9 or 16:10 screen the whole HUD
+                               // about the middle 16:9, as before 2.2.12 (d3d/draw.cpp wide_hud_place)
     bool quad_grad = false;    // press-file "cfg:quadgrad:1": QuadSnap's four texel reads with explicit gradients, as before 2.2.5 (comparison; d3d/ffp_ps.cpp)
     bool resolve = true;       // press-file "cfg:resolve:0": the frame to the window by the old chain (seam fill, ramp and FXAA at the frame's size, then a bilinear scale; d3d/device.cpp present_backbuffer)
     bool rhw_offset = true;    // press-file "cfg:rhwoffset:0": XYZRHW positions ignore the screen-space offset (comparison)

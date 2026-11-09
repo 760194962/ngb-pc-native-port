@@ -1783,6 +1783,9 @@ bool begin_draw(DrawCtx &ctx)
         d->SetRenderState(D3DRS_FOGTABLEMODE, fog_table);
         g_fog_table_sent = fog_table;
     }
+    if (g_cfg.widescreen && g_cfg.aspect_w * 9 != g_cfg.aspect_h * 16 && g_st.render_target && is_backbuffer(g_st.render_target))
+        wide_hud_count(!(ctx.path == Path::Fvf && (ctx.fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW));
+    ms_note_draw();
     g_st.draws++;
     return true;
 }
@@ -2004,6 +2007,207 @@ void apply_rhw_tex_scales(uint8_t *verts, uint32_t count, uint32_t stride, const
         }
 }
 
+// The HUD in play on a screen not 16:9 (players' request, 2026-11-09; the idea from ngbrecomp's renderer, docs/TECHNICAL
+// "HudPlace"/"HudGroup", written anew here). The game draws one 16:9 layout; squeeze_169 keeps its shape. Menus,
+// the title, chapter cards and movies stay whole about the middle, as before. In play (a frame with 3D drawn into the
+// back buffer before its 2D) each HUD element instead keeps to its own side: the health bar and karma to the top-left
+// corner, prompts and the right-hand gauges to the right, what is about the middle to the middle. An element is a
+// group of pieces drawn within a few pixels of each other (a gauge, its caps and the words under it; a line of text),
+// found at each frame's end and used for the next frame's pieces; a piece no element of the frame before holds goes by
+// its own box (along the top) or to the middle until then. Positions: Xbox pixels of the 720x480 buffer.
+struct WideHud {
+    struct Box {
+        float x0, x1, y0, y1;
+        uint32_t at; // its draw's number in the frame
+    };
+    struct Elem {
+        float x0, x1, y0, y1, ax, ay; // its box and the point it is squeezed about (0, w/2, w; 0, h/2, h)
+        uint32_t seen;
+        bool gauge;
+    };
+    uint32_t draws = 0, threed = 0, last3d = 0; // this frame's draws into the back buffer; the 3D ones; the last 3D one
+    bool covered = false;                       // this frame drew an opaque colour over the whole screen (an item's screen)
+    std::vector<Box> boxes, gauge_boxes;        // this frame's HUD pieces; the frame before's pieces of tall gauges
+    std::vector<Elem> elems, memory;            // the frame before's elements; those of the last half minute
+    bool panel = false;                         // a screen of panels over the game (a chapter clear) is up
+    int panel_count = 0;
+    Box panel_box{}, panel_seen{};
+    uint32_t frame = 0;
+};
+WideHud g_wh;
+
+void wide_hud_count(bool threed)
+{
+    g_wh.draws++;
+    if (threed) {
+        g_wh.threed++;
+        g_wh.last3d = g_wh.draws;
+    }
+}
+
+// The side an element (or a lone piece) keeps to: the middle when it is about the middle, else the nearer side; the
+// top when it starts in the top quarter, the bottom when it ends in the bottom quarter.
+void hud_side(float x0, float x1, float y0, float y1, float w, float h, float &ax, float &ay)
+{
+    float cx = (x0 + x1) * 0.5f;
+    ax = fabsf(cx - w * 0.5f) < w * 0.12f ? w * 0.5f : cx < w * 0.5f ? 0.0f : w;
+    bool top = y0 < h * 0.25f, bottom = y1 > h * 0.75f;
+    ay = top && !bottom ? 0.0f : bottom && !top ? h : h * 0.5f;
+}
+
+// A tall narrow gauge (the breath meter under water), or a piece inside a gauge's column (its caps, its fill): kept
+// apart from the windows drawn across it, which would otherwise join it into one element as tall as the screen.
+bool hud_gauge(float x0, float x1, float y0, float y1, float w, float h, const WideHud::Elem *g = nullptr)
+{
+    if (y1 - y0 > h * 0.15f && x1 - x0 < w * 0.1f) return true;
+    return g && x0 >= g->x0 - 4 && x1 <= g->x1 + 4 && y0 >= g->y0 - 14 && y1 <= g->y1 + 14;
+}
+
+void wide_hud_place(float x0, float x1, float y0, float y1, float w, float h, float &ax, float &ay)
+{
+    ax = w * 0.5f, ay = h * 0.5f;
+    float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
+    if (g_wh.covered) return; // over an opaque cover: the screen's own art, whole about the middle
+    if (g_wh.panel && cx >= g_wh.panel_box.x0 - 8 && cx <= g_wh.panel_box.x1 + 8 && cy >= g_wh.panel_box.y0 - 8 &&
+        cy <= g_wh.panel_box.y1 + 8)
+        return; // inside a chapter clear's panel: with the panel
+    bool gauge = hud_gauge(x0, x1, y0, y1, w, h);
+    for (const WideHud::Box &b : g_wh.gauge_boxes)
+        if (!gauge && fabsf(b.x0 - x0) <= 3 && fabsf(b.x1 - x1) <= 3 && fabsf(b.y0 - y0) <= 3 && fabsf(b.y1 - y1) <= 3)
+            gauge = true;
+    if (!gauge) {
+        bool in_column = false, in_other = false;
+        for (const WideHud::Elem &e : g_wh.elems) {
+            if (e.gauge && hud_gauge(x0, x1, y0, y1, w, h, &e)) in_column = true;
+            if (!e.gauge && cx >= e.x0 - 2 && cx <= e.x1 + 2 && cy >= e.y0 - 2 && cy <= e.y1 + 2) in_other = true;
+        }
+        gauge = in_column && !in_other;
+    }
+    const WideHud::Elem *hit = nullptr;
+    float best = 1e30f;
+    for (const auto *list : {&g_wh.elems, &g_wh.memory}) {
+        for (const WideHud::Elem &e : *list) {
+            if (e.gauge != gauge || cx < e.x0 - 2 || cx > e.x1 + 2 || cy < e.y0 - 2 || cy > e.y1 + 2) continue;
+            float area = (e.x1 - e.x0) * (e.y1 - e.y0);
+            if (area < best) best = area, hit = &e;
+        }
+        if (hit) break; // the frame before's elements first; one seen again within the last half minute after
+    }
+    if (hit) {
+        ax = hit->ax, ay = hit->ay;
+        return;
+    }
+    hud_side(x0, x1, y0, y1, w, h, ax, ay);
+    if (y1 >= h * 0.3f) ax = w * 0.5f; // a new piece below the top: the middle until it is grouped
+}
+
+// Each frame's end (Swap): this frame's HUD pieces drawn after its last 3D draw, grouped into elements.
+void wide_hud_frame_end()
+{
+    WideHud &s = g_wh;
+    s.frame++;
+    float w = (float)backbuffer_width(), h = (float)backbuffer_height();
+    std::vector<WideHud::Box> &b = s.boxes;
+    if (s.last3d) b.erase(std::remove_if(b.begin(), b.end(), [&](const WideHud::Box &x) { return x.at < s.last3d; }), b.end());
+    size_t n = b.size();
+    std::vector<int> up(n);
+    for (size_t i = 0; i < n; i++) up[i] = (int)i;
+    auto root = [&](int i) {
+        while (up[i] != i) i = up[i] = up[up[i]];
+        return i;
+    };
+    std::vector<char> gauge(n, 0);
+    for (size_t i = 0; i < n; i++) gauge[i] = hud_gauge(b[i].x0, b[i].x1, b[i].y0, b[i].y1, w, h);
+    for (size_t i = 0; i < n; i++) // pieces in a tall gauge's column, drawn a few draws from it, are the gauge's
+        for (size_t j = 0; j < n && !gauge[i]; j++) {
+            const WideHud::Box &g = b[j];
+            WideHud::Elem col = {g.x0, g.x1, g.y0, g.y1, 0, 0, 0, true};
+            if (j != i && g.y1 - g.y0 > h * 0.15f && g.x1 - g.x0 < w * 0.1f && b[i].at + 6 >= g.at && g.at + 6 >= b[i].at &&
+                hud_gauge(b[i].x0, b[i].x1, b[i].y0, b[i].y1, w, h, &col))
+                gauge[i] = 1;
+        }
+    s.gauge_boxes.clear();
+    for (size_t i = 0; i < n; i++)
+        if (gauge[i]) s.gauge_boxes.push_back(b[i]);
+    for (size_t i = 0; i < n; i++)
+        for (size_t j = i + 1; j < n; j++) {
+            const WideHud::Box &p = b[i], &q = b[j];
+            // a line of text: words of one height join across a gap of up to 0.6 letter heights
+            float gx = fabsf(p.y0 - q.y0) <= 2 && fabsf(p.y1 - q.y1) <= 2 ? std::max(10.0f, (p.y1 - p.y0) * 0.6f) : 10.0f;
+            if (gauge[i] == gauge[j] && p.x0 - gx <= q.x1 && q.x0 - gx <= p.x1 && p.y0 - 14 <= q.y1 && q.y0 - 14 <= p.y1)
+                up[root((int)i)] = root((int)j);
+        }
+    std::vector<WideHud::Elem> elems;
+    std::vector<int> slot(n, -1);
+    for (size_t i = 0; i < n; i++) {
+        int r = root((int)i);
+        if (slot[r] < 0) {
+            slot[r] = (int)elems.size();
+            elems.push_back({b[i].x0, b[i].x1, b[i].y0, b[i].y1, 0, 0, s.frame, gauge[i] != 0});
+        } else {
+            WideHud::Elem &e = elems[slot[r]];
+            e.x0 = std::min(e.x0, b[i].x0), e.x1 = std::max(e.x1, b[i].x1);
+            e.y0 = std::min(e.y0, b[i].y0), e.y1 = std::max(e.y1, b[i].y1);
+        }
+    }
+    bool panel = false;
+    WideHud::Box pb = {1e30f, -1e30f, 1e30f, -1e30f, 0};
+    for (WideHud::Elem &e : elems) {
+        hud_side(e.x0, e.x1, e.y0, e.y1, w, h, e.ax, e.ay);
+        // a panel: wide, tall, across the middle (a chapter clear); an area's name in a band is not one
+        float ew = std::min(e.x1, w) - std::max(e.x0, 0.0f), eh = std::min(e.y1, h) - std::max(e.y0, 0.0f);
+        if (ew > w * 0.35f && eh > h * 0.45f && e.y0 < h * 0.35f && e.y1 > h * 0.65f &&
+            fabsf((std::max(e.x0, 0.0f) + std::min(e.x1, w)) * 0.5f - w * 0.5f) < w * 0.12f) {
+            panel = true;
+            pb.x0 = std::min(pb.x0, e.x0), pb.x1 = std::max(pb.x1, e.x1), pb.y0 = std::min(pb.y0, e.y0), pb.y1 = std::max(pb.y1, e.y1);
+        }
+    }
+    if (panel) { // its reach while it is seen (it slides and grows in)
+        if (!s.panel && !s.panel_count) s.panel_seen = pb;
+        s.panel_seen.x0 = std::min(s.panel_seen.x0, pb.x0), s.panel_seen.x1 = std::max(s.panel_seen.x1, pb.x1);
+        s.panel_seen.y0 = std::min(s.panel_seen.y0, pb.y0), s.panel_seen.y1 = std::max(s.panel_seen.y1, pb.y1);
+        s.panel_box = s.panel_seen;
+    }
+    if (panel != s.panel) { // on after 4 frames running, off after 8 without
+        if (++s.panel_count >= (panel ? 4 : 8)) s.panel = panel, s.panel_count = 0;
+    } else
+        s.panel_count = 0;
+    if (!s.panel) {
+        for (const WideHud::Elem &e : elems) {
+            s.memory.erase(std::remove_if(s.memory.begin(), s.memory.end(), [&](const WideHud::Elem &m) {
+                               return m.gauge == e.gauge && m.x0 < e.x1 && e.x0 < m.x1 && m.y0 < e.y1 && e.y0 < m.y1;
+                           }),
+                           s.memory.end());
+            s.memory.push_back(e);
+        }
+        s.memory.erase(std::remove_if(s.memory.begin(), s.memory.end(), [&](const WideHud::Elem &m) { return s.frame - m.seen > 1800; }),
+                       s.memory.end());
+        if (s.memory.size() > 64) s.memory.erase(s.memory.begin(), s.memory.end() - 64);
+    }
+    // evidence: the elements whenever their sides change (a few dozen times a run at most)
+    static int logged;
+    static std::string last;
+    if (logged < 60 && s.threed >= 30) {
+        std::string sig;
+        for (const WideHud::Elem &e : elems) {
+            char t[64];
+            snprintf(t, sizeof t, " [%.0f-%.0f,%.0f-%.0f %c%c%s]", e.x0, e.x1, e.y0, e.y1, e.ax == 0 ? 'L' : e.ax == w ? 'R' : 'M',
+                     e.ay == 0 ? 'T' : e.ay == h ? 'B' : 'C', e.gauge ? "g" : "");
+            sig += t;
+        }
+        if (s.panel) sig += " PANEL";
+        if (sig != last) {
+            logged++;
+            logf("[hud] frame %u: %zu pieces, 3D draws %u:%s", g_frame_count.load(), n, s.threed, sig.c_str());
+            last = sig;
+        }
+    }
+    s.elems.swap(elems);
+    s.boxes.clear();
+    s.draws = s.threed = s.last3d = 0;
+    s.covered = false;
+}
+
 // 16:10 / 21:9 (ngb_aspect.cpp): the game lays its 2D out for 16:9 over the 720-wide buffer, so a wider picture
 // stretched its HUD, text and menus. Screen-space draws on the back buffer are squeezed back to 16:9 about the
 // centre. All of them come from one sprite routine (FUN_00325810).
@@ -2032,6 +2236,12 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
     bool art = t0 && (resource_type(t0) == RTYPE_TEXTURE || resource_type(t0) == RTYPE_SURFACE) && !((PixelContainer *)t0)->Size &&
                !g_stage0_rendered;
     bool full_h = mxy - mny >= 0.9f * h, squeeze = art || !(mnx <= 0.5f || mxx >= w - 2.0f || full_h), clip = art;
+    if (!t0 && full_h && mnx <= 1.0f && mxx >= w - 1.0f && (fvf & D3DFVF_DIFFUSE) && stride >= 20) {
+        uint32_t c;
+        memcpy(&c, verts + 16, 4); // XYZRHW, then the colour
+        if (c >> 24 == 0xFF || !render_state()[XRS_ALPHABLENDENABLE]) g_wh.covered = true; // an item's screen: art about the middle
+    }
+    bool centre_only = false; // a menu's piece or a movie: always about the middle
     if (g_stage0_rendered && (fvf >> 8 & 0xF) && !(fvf & 0x30000)) {
         // A piece of the picture put back where it was: every vertex samples the screen copy at its own place (u, v =
         // x / 720, y / 480). The underwater wobble (FUN_0031B460) draws the screen as 12 x 8 tiles of 60 x 60; the ones
@@ -2060,13 +2270,23 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
         // sprites through FUN_00325810, and their lines through 0x3273B8 (r375)
         const Wide2D *w2 = g_cfg.profile ? g_cfg.profile->wide2d : nullptr;
         auto menu = [w2](uint32_t a) { return w2 && a >= w2->menu_lo && a < w2->menu_hi; };
-        if (full_h && w2 && by[0] == w2->movie_ret) squeeze = true; // a movie frame
-        else if (!full_h && (menu(by[1]) || menu(by[2]))) squeeze = clip = true;
+        if (full_h && w2 && by[0] == w2->movie_ret) squeeze = centre_only = true; // a movie frame
+        else if (!full_h && (menu(by[1]) || menu(by[2]))) squeeze = clip = centre_only = true;
     }
     if (!squeeze) return;
+    // In play (3D drawn into the back buffer this frame before this 2D) the HUD's elements keep to their sides
+    // (wide_hud_place); a picture over most of the screen there is a screen effect and fills it as drawn.
+    float ax = w * 0.5f, ay = h * 0.5f;
+    if (!centre_only && g_wh.threed >= 30 && !g_cfg.hud_centre) {
+        if (art && mxx - mnx >= 0.85f * w && mxy - mny >= 0.75f * h) return;
+        wide_hud_place(mnx, mxx, mny, mxy, w, h, ax, ay);
+        if (mxx - mnx < 0.89f * w && mxy - mny < 0.9f * h && g_wh.boxes.size() < 2048)
+            g_wh.boxes.push_back({mnx, mxx, mny, mxy, g_wh.draws});
+    }
     float k = (16.0f / 9.0f) * g_cfg.aspect_h / g_cfg.aspect_w;
-    if (k < 1.0f) { // wider than 16:9 (21:9): narrowed about the centre, black or the game on either side
-        float c = w * 0.5f;
+    if (k < 1.0f) { // wider than 16:9 (21:9): narrowed about the centre (or the HUD element's side), the game beyond
+        float c = ax;
+        if (c != w * 0.5f) clip = false; // a corner's piece is whole as narrowed
         for (uint32_t v = 0; v < count; v++) {
             float *p = (float *)&verts[(size_t)v * stride];
             p[0] = c + (p[0] - c) * k;
@@ -2075,7 +2295,8 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
             g_rhw_clip = {(LONG)((c - c * k) * sx + 0.5f), 0, (LONG)((c + c * k) * sx + 0.5f), (LONG)(h * sy + 0.5f)};
     } else { // narrower (16:10): widening it would cut its sides off (r392: the title's credits); lowered about the
              // middle instead, the whole 16:9 layout shown with black or the game above and below
-        float ky = 1.0f / k, c = h * 0.5f;
+        float ky = 1.0f / k, c = ay;
+        if (c != h * 0.5f) clip = false;
         for (uint32_t v = 0; v < count; v++) {
             float *p = (float *)&verts[(size_t)v * stride];
             p[1] = c + (p[1] - c) * ky;

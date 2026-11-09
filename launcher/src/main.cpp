@@ -144,7 +144,7 @@ enum {
     kHitSave, kHitDiscard, kHitAskAlt,
     kHitHelpSet = 400, // + the setting's index in kSettingHelp: its "?"
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
-    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370,
+    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370, kHitCpuMode = 380,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitClearCache = 495, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitNewConsole, kHitRegister, kHitDashboard, kHitRebuildConsole, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
@@ -155,6 +155,7 @@ enum {
 };
 // Ids in a range must not run into the next fixed id (2.2.8's kHitClearCache once put Export on Open folder's 500).
 static_assert(kHitWebsite + 5 <= kHitClearCache && kHitClearCache < kHitOpenSaves && kHitExport < kHitRestore, "button ids overlap");
+constexpr int kMsaaLevels[3] = {2, 4, 8}; // the anti-aliasing list's MSAA rows (black.ini msaa)
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
 // texture limit (loader d3d/device.cpp setup_render_scale: 10x widescreen renders 8192x4800, r289).
@@ -1568,6 +1569,13 @@ struct Painter {
                  DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
             if (i < 2) fill({c.left + 26, y + 46, c.right - 20, y + 47}, kInk3);
         }
+        // CPU cores (black.ini multicore): one core like the Xbox (default), or Windows spreads the game's threads
+        // (experimental). Saved at once: this page has no Save button.
+        float cy = c.bottom + 22;
+        text(S(Str::CpuMode), {x, cy, x + 130, cy + 30}, 13.5f, kAsh);
+        segmented(kHitCpuMode, x + 130, cy, {S(Str::CpuSingle), S(Str::CpuAuto)}, black_ini("multicore") == "1" ? 1 : 0, 150);
+        text(S(Str::CpuNote), {x + 130, cy + 36, x + 760, cy + 76}, 12, kAsh, 0.8f);
+
         wchar_t foot[160];
         swprintf(foot, 160, S(Str::Footer), L"" GAME_VERSION);
         text(foot, {x, kH - 44, x + 700, kH - 20}, 12, kAsh, 0.75f);
@@ -2148,7 +2156,7 @@ struct Painter {
         aniso_list(cx, y - 2);
         y += 40;
         label(Str::AntiAlias);
-        segmented(kHitAa, cx, y, {S(Str::On), S(Str::Off)}, black_ini("aa") == "0" ? 1 : 0, 72);
+        aa_list(cx, y - 2);
         y += 40;
         label(Str::VSync); // black.ini vsync: off by default (frames paced by the Xbox vblank alone)
         segmented(kHitVsync, cx, y, {S(Str::On), S(Str::Off)}, black_ini("vsync") == "1" ? 0 : 1, 72);
@@ -2172,6 +2180,19 @@ struct Painter {
         float y3 = card(c3, S(Str::ClearCache));
         text(S(Str::ClearCacheNote), {lx, y3, c3.right - 280, y3 + 48}, 12.5f, kAsh, 0.8f);
         button(kHitClearCache, {c3.right - 246, y3, c3.right - 26, y3 + 32}, S(Str::ClearCacheButton), false);
+    }
+
+    // Anti-aliasing: off, FXAA (black.ini aa = 1, the default) or MSAA 2x / 4x / 8x (msaa; the highest Direct3D 9 counts
+    // the cards here offer, host: MSAA sample counts in the log)
+    void aa_list(float x, float y)
+    {
+        int msaa = atoi(black_ini("msaa").c_str()), sel = black_ini("aa") == "0" ? 0 : 1;
+        std::vector<ListRow> rows = {{S(Str::AnisoOff), L""}, {L"FXAA", S(Str::AaFxaaRow)}};
+        for (int i = 0; i < 3; i++) {
+            rows.push_back({L"MSAA " + std::to_wstring(kMsaaLevels[i]) + L"\u00D7", S(Str::AaMsaaRow)});
+            if (msaa == kMsaaLevels[i]) sel = 2 + i;
+        }
+        drop_list(kHitAa, x, y, {200, 380, 110, 0}, {rows[sel].a, L"", L""}, rows, sel, S(Str::AaNote));
     }
 
     // Texture filtering: off (as the game sets: linear) or anisotropic 2x-16x (black.ini aniso)
@@ -2985,6 +3006,7 @@ void reset_page(Page p)
         black_ini_set("shadowsoft", "1");
         black_ini_set("aniso", "1");
         black_ini_set("aa", "1");
+        black_ini_set("msaa", "0");
         black_ini_set("vsync", "0");
         black_ini_set("seamfill", "1");
         black_ini_set("effectsnative", "0");
@@ -3165,6 +3187,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (g.list_open >= kHitPadMap && g.list_open < kHitPadMap + keys::kButtons * 16 && row >= 0 && row < keys::kButtons)
                 black_ini_set((std::string("padmap_") + keys::input_ini((g.list_open - kHitPadMap) / 16)).c_str(), keys::input_ini(row));
             if (g.list_open == kHitAniso && row >= 0 && row < 5) black_ini_set("aniso", std::to_string(kAnisoLevels[row]));
+            if (g.list_open == kHitAa && row >= 0 && row < 5) { // off, FXAA, MSAA 2x / 4x / 8x
+                black_ini_set("aa", row == 1 ? "1" : "0");
+                black_ini_set("msaa", row >= 2 ? std::to_string(kMsaaLevels[row - 2]) : std::string("0"));
+            }
             if (g.list_open == kHitSysLang && row >= 0 && row < 9) black_ini_set("language", std::to_string(row + 1));
             if (g.list_open == kHitShadow && row >= 0 && row < 4) black_ini_set("shadow", std::to_string(kShadowScales[row]));
             if (g.list_open == kHitResList && row == 0) {
@@ -3276,11 +3302,14 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id == kHitPickGame) choose_existing();
         else if (id == kHitDefaultPath && !installing()) set_game_folder(default_game_folder());
         else if (id == kHitResetPage) g.ask = kAskReset;
-        else if (id >= kHitAa && id < kHitAa + 2) black_ini_set("aa", id == kHitAa ? "1" : "0");
         else if (id >= kHitSeam && id < kHitSeam + 2) black_ini_set("seamfill", id == kHitSeam ? "1" : "0");
         else if (id >= kHitFx && id < kHitFx + 2) black_ini_set("effectsnative", id == kHitFx ? "1" : "0");
         else if (id >= kHitVsync && id < kHitVsync + 2) black_ini_set("vsync", id == kHitVsync ? "1" : "0");
         else if (id >= kHitFsRes && id < kHitFsRes + 2) black_ini_set("fullscreen_res", id == kHitFsRes ? "screen" : "window");
+        else if (id >= kHitCpuMode && id < kHitCpuMode + 2) {
+            g_pending.erase("multicore");
+            black_ini_write("multicore", id == kHitCpuMode ? "0" : "1");
+        }
         else if (id >= kHitShadowSoft && id < kHitShadowSoft + 2) black_ini_set("shadowsoft", id == kHitShadowSoft ? "1" : "0");
         else if (id >= kHitAudioMode && id < kHitAudioMode + 3)
             black_ini_set("audio_mode", id == kHitAudioMode ? "mono" : id == kHitAudioMode + 1 ? "stereo" : "surround");
@@ -3320,7 +3349,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             online_import();
         }
         else if (id == kHitInsignia) ShellExecuteW(h, L"open", L"https://insignia.live/", nullptr, nullptr, SW_SHOWNORMAL);
-        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso || id == kHitSysLang || id == kHitUninstall) {
+        else if (id == kHitGpu || id == kHitResList || id == kHitMode || id == kHitAspect || id == kHitWin || id == kHitShadow || id == kHitAniso || id == kHitAa || id == kHitSysLang || id == kHitUninstall) {
             g.list_open = id;
             g.list_scroll = g.list_scroll_max = 0;
         }
@@ -3473,6 +3502,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
                             : !wcscmp(v, L"window") ? kHitWin
                             : !wcscmp(v, L"shadow") ? kHitShadow
                             : !wcscmp(v, L"aniso")  ? kHitAniso
+                            : !wcscmp(v, L"aa")     ? kHitAa
                             : !wcscmp(v, L"language") ? kHitSysLang
                             : !wcscmp(v, L"padmap") ? kHitPadMap
                             : !wcscmp(v, L"uninstall") ? kHitUninstall

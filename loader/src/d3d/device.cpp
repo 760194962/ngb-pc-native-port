@@ -74,12 +74,16 @@ struct HostRT {
     bool from_bigger = false;             // filled by drawing a bigger buffer into it (a screen copy, a reduction step)
     IDirect3DTexture9 *soft = nullptr, *soft_tmp = nullptr; // softened for the picture (softened_rt)
     uint32_t soft_epoch = ~0u;
+    IDirect3DSurface9 *ms = nullptr; // MSAA: the multisampled surface drawn into instead of tex (ms_bind)
+    bool tex_ahead = false;          // tex was written outside the draws (a copy, the CPU): ms gets it before the next draw
+    bool ms_drawn = false;           // ms was drawn into since tex last had it (resolved only then)
 };
 uint64_t mem_key(uint32_t data, uint32_t w, uint32_t h) { return ((uint64_t)data << 24) | ((uint64_t)(w & 0xFFF) << 12) | (h & 0xFFF); }
 std::unordered_map<uint64_t, HostRT> g_rts;
 struct HostZ {
     IDirect3DTexture9 *tex = nullptr;  // INTZ, so the game can sample its depth buffer (when supported)
     IDirect3DSurface9 *surf = nullptr;
+    IDirect3DSurface9 *ms = nullptr;   // MSAA: the multisampled depth paired with a multisampled target
 };
 std::unordered_map<uint64_t, HostZ> g_zs;
 std::unordered_map<uint64_t, IDirect3DTexture9 *> g_zviews; // depth buffers as the game reads them as colour textures
@@ -90,6 +94,11 @@ IDirect3DPixelShader9 *g_zview_ps, *g_zfill_ps;
 enum class Owner : uint8_t { None, Color, Depth };
 std::unordered_map<uint64_t, Owner> g_owner;
 IDirect3DTexture9 *g_cur_rt; // host texture currently bound as render target
+extern int g_msaa;                   // MSAA (below, before bind_render_target)
+extern HostRT *g_ms_bound;
+void ms_resolve_bound();
+void ms_resolve(HostRT &h);
+void ms_tex_written(HostRT &h);
 uint32_t g_device_gen;       // new devices made (recreate_device): statics holding host objects check it
 // Objects some debug paths keep in statics of their own (--rawvideo, flash_watch, --debug-frame): let go with the rest
 // of the device (drop_device_objects) and made again by those paths
@@ -725,9 +734,13 @@ void copy_to_frontbuffer()
 {
     if (!g_frontbuffer) return;
     HostRT &bb = host_rt(g_backbuffer), &fb = host_rt(g_frontbuffer);
+    ms_resolve(bb);
+    ms_resolve(fb); // (its own draws first, then the copy over them)
     IDirect3DSurface9 *src = nullptr, *dst = nullptr;
-    if (bb.tex && fb.tex && SUCCEEDED(bb.tex->GetSurfaceLevel(0, &src)) && SUCCEEDED(fb.tex->GetSurfaceLevel(0, &dst)))
+    if (bb.tex && fb.tex && SUCCEEDED(bb.tex->GetSurfaceLevel(0, &src)) && SUCCEEDED(fb.tex->GetSurfaceLevel(0, &dst))) {
         host3d::dev()->StretchRect(src, nullptr, dst, nullptr, D3DTEXF_POINT);
+        ms_tex_written(fb);
+    }
     if (src) src->Release();
     if (dst) dst->Release();
 }
@@ -746,6 +759,7 @@ void present_backbuffer()
              g_cfg.gamma, g_cfg.aa ? "on" : "off");
     }
     HostRT &bb = host_rt(g_backbuffer);
+    ms_resolve(bb);
     IDirect3DSurface9 *s = nullptr;
     if (FAILED(bb.tex->GetSurfaceLevel(0, &s))) return;
     host3d::end_scene();
@@ -777,7 +791,7 @@ void present_backbuffer()
     IDirect3DTexture9 *src = bb.tex; // the frame, with seams filled when that is on
     // Seam fill on the frame, where a seam (one frame pixel wide) can still show: below 3 frame pixels per picture
     // pixel. From there the resolve averages it with the pixels around it (a third at most).
-    if (g_cfg.seam_fill && g_main_z && (legacy || foot < 3.0f)) {
+    if (g_cfg.seam_fill && g_main_z && !g_msaa && (legacy || foot < 3.0f)) { // (MSAA: the depth it reads is not drawn)
         if (!g_seam_ps && !g_seam_tried) {
             g_seam_tried = true;
             g_seam_ps = compile_ps(kSeamPS, "seamfill", "ps_2_a");
@@ -862,6 +876,103 @@ IDirect3DTexture9 *scratch_rt(uint32_t w, uint32_t h)
     return t;
 }
 
+// MSAA (black.ini msaa, 2.2.12). The frame-sized targets (the back buffer and its pair, at the render scale) are drawn
+// into a multisampled surface with a multisampled depth buffer, and resolved into their texture (StretchRect) only when
+// something reads the texture after new draws (the game sampling it, a screen copy, the picture, the front buffer
+// copy, a CPU read, a rebuild): ms_resolve. What is written into a texture outside the draws (the front buffer copy,
+// the CPU's pixels) goes into its multisampled surface before the next draw. iGPU, chapter 1 at 3x, median frame:
+// off 6.1 ms, 2x 5.7, 4x 10.7 (17.6 resolving at every switch of target, 23.5 before skipping undrawn ones), 8x 23.8;
+// at 1x, 8x 4.65 = off. The game never samples its main depth buffer
+// (the depth reads are the 128x128 shadow map's, checked in chapter 1); seam fill, which does, is off with MSAA.
+int g_msaa;           // samples in use (0: off): g_cfg.msaa, or the next lower count the card has
+HostRT *g_ms_bound;   // the multisampled target bound now
+const char kCopyPS[] = "sampler2D s : register(s0);\n"
+                       "float4 main(float2 uv : TEXCOORD0) : COLOR0 { return tex2D(s, uv); }\n";
+IDirect3DPixelShader9 *g_copy_ps;
+
+bool ms_target(const HostRT &h)
+{
+    return g_msaa && h.xw == (uint32_t)g_width && h.xh == (uint32_t)g_height && h.sx == scale_x() && h.sy == scale_y();
+}
+
+// A multisampled target's draws into its texture, when something is about to read (or write) the texture. Resolved
+// only then: of the 4 times a frame the back buffer was left with new draws, only 2 were followed by a read (chapter 1).
+void ms_resolve(HostRT &h)
+{
+    if (!h.ms || !h.tex || !h.ms_drawn) return;
+    h.ms_drawn = false;
+    IDirect3DSurface9 *t = nullptr;
+    if (FAILED(h.tex->GetSurfaceLevel(0, &t))) return;
+    host3d::end_scene();
+    host3d::dev()->StretchRect(h.ms, nullptr, t, nullptr, D3DTEXF_NONE);
+    t->Release();
+}
+
+void ms_resolve_bound()
+{
+    if (g_ms_bound) ms_resolve(*g_ms_bound);
+}
+
+// The texture into the multisampled surface (D3D9 cannot StretchRect into one): a full-screen copy
+void ms_upload(HostRT &h)
+{
+    h.tex_ahead = false;
+    h.ms_drawn = false; // the surface now holds the texture
+    if (!g_copy_ps) g_copy_ps = compile_ps(kCopyPS, "mscopy");
+    if (!g_copy_ps || !h.ms) return;
+    host3d::end_scene();
+    fullscreen_pass(g_copy_ps, h.tex, h.ms, nullptr, h.w, h.h, false, nullptr, false, nullptr, nullptr, nullptr);
+}
+
+// tex was written outside the draws (callers resolve it first: ms_resolve)
+void ms_tex_written(HostRT &h)
+{
+    if (!h.ms) return;
+    if (g_ms_bound == &h) ms_upload(h); // bound: the draws after it go on over it
+    else h.tex_ahead = true;
+}
+
+} // namespace
+// A draw or a clear into the bound target (draw.cpp begin_draw, Clear): its multisampled surface is ahead of its texture
+void ms_note_draw()
+{
+    if (g_ms_bound) g_ms_bound->ms_drawn = true;
+}
+namespace {
+
+// The surfaces to draw into for a frame-sized target (null when MSAA is off or the card refused them)
+IDirect3DSurface9 *ms_color(HostRT &h)
+{
+    if (!ms_target(h)) return nullptr;
+    if (!h.ms) {
+        if (FAILED(host3d::dev()->CreateRenderTarget(h.w, h.h, D3DFMT_A8R8G8B8, (D3DMULTISAMPLE_TYPE)g_msaa, 0, FALSE, &h.ms, nullptr))) {
+            logf("[d3d] MSAA %dx: the %ux%u multisampled target was refused: MSAA off", g_msaa, h.w, h.h);
+            g_msaa = 0;
+            h.ms = nullptr;
+            return nullptr;
+        }
+        h.tex_ahead = true; // whatever the texture holds (a rebuilt target's picture) before the first draw
+        static int noted;
+        if (noted++ < 4) logf("[d3d] MSAA %dx: multisampled target %ux%u", g_msaa, h.w, h.h);
+    }
+    if (h.tex_ahead) ms_upload(h);
+    return h.ms;
+}
+
+IDirect3DSurface9 *ms_depth(HostZ &hz)
+{
+    if (!hz.ms) {
+        D3DSURFACE_DESC desc;
+        if (!hz.surf || FAILED(hz.surf->GetDesc(&desc)) ||
+            FAILED(host3d::dev()->CreateDepthStencilSurface(desc.Width, desc.Height, D3DFMT_D24S8, (D3DMULTISAMPLE_TYPE)g_msaa, 0,
+                                                            FALSE, &hz.ms, nullptr))) {
+            hz.ms = nullptr;
+            return nullptr;
+        }
+    }
+    return hz.ms;
+}
+
 void bind_render_target(Surface *rt, Surface *z)
 {
     IDirect3DDevice9 *d = host3d::dev();
@@ -881,6 +992,8 @@ void bind_render_target(Surface *rt, Surface *z)
         }
     }
     HostRT &h = host_rt(rt);
+    g_ms_bound = nullptr; // a multisampled target left keeps its draws until its texture is read (ms_resolve)
+    IDirect3DSurface9 *msc = ms_color(h), *msz = nullptr;
     IDirect3DSurface9 *zs = nullptr;
     g_cur_zkey = 0; // set below when a depth surface is bound
     if (z) {
@@ -897,19 +1010,31 @@ void bind_render_target(Surface *rt, Surface *z)
             KNOTE_ONCE("render target %ux%u and depth %ux%u at different scales: depth test misaligned", h.xw, h.xh, zw, zh);
         auto c = g_rts.find(zkey);
         if (g_owner[zkey] == Owner::Color && c != g_rts.end() && hz.tex) {
+            ms_resolve(c->second);
             color_to_depth(c->second.tex, hz, c->second.w, c->second.h); // memory last written as colour
             static int logged;
             if (logged++ < 10) logf("[d3d] depth buffer 0x%08x was written as colour: converted (%ux%u)", z->Data, c->second.w, c->second.h);
         }
         g_owner[zkey] = Owner::Depth;
         zs = hz.surf;
+        if (msc && !(msz = ms_depth(hz))) msc = nullptr; // no multisampled depth for it: this target drawn as before
+        if (hz.ms && !msc) {
+            static int noted;
+            if (noted++ < 4) logf("[d3d] MSAA: depth 0x%08x bound with a target that is not multisampled (%ux%u)", z->Data, h.xw, h.xh);
+        }
     }
     g_owner[mem_key(rt->Data, rw, rh)] = Owner::Color;
     h.epoch++;
-    IDirect3DSurface9 *s = nullptr;
-    h.tex->GetSurfaceLevel(0, &s);
-    d->SetRenderTarget(0, s);
-    s->Release();
+    if (msc) {
+        d->SetRenderTarget(0, msc);
+        g_ms_bound = &h;
+        if (msz) zs = msz;
+    } else {
+        IDirect3DSurface9 *s = nullptr;
+        h.tex->GetSurfaceLevel(0, &s);
+        d->SetRenderTarget(0, s);
+        s->Release();
+    }
     g_cur_rt = h.tex;
     g_cur_xw = h.xw;
     g_cur_xh = h.xh;
@@ -930,6 +1055,7 @@ IDirect3DTexture9 *snapshot_of(IDirect3DTexture9 *src)
 {
     perf::Scope perf_scope(perf::kRtCopy);
     perf::add_rt_copy();
+    if (g_ms_bound && g_ms_bound->tex == src) ms_resolve_bound();
     D3DSURFACE_DESC desc;
     src->GetLevelDesc(0, &desc);
     IDirect3DTexture9 *&snap = g_snapshots[mem_key(0, desc.Width, desc.Height)];
@@ -1181,6 +1307,7 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
         if (depth_format && ffp && g_cfg.zmode == 2) mode = shadow_func_code();
         if (depth_format && ffp && g_cfg.zmode == 3) {
             HostRT &bb = host_rt(g_backbuffer);
+            ms_resolve(bb);
             return bb.tex == g_cur_rt ? snapshot_of(bb.tex) : bb.tex;
         }
         static uint32_t view_serial = ~0u;
@@ -1205,6 +1332,7 @@ IDirect3DTexture9 *rt_texture_for(const PixelContainer *tex, uint32_t draw_seria
         return view;
     }
     if (it == g_rts.end()) return nullptr;
+    ms_resolve(it->second);
     IDirect3DTexture9 *t = it->second.tex;
     // A scaled buffer drawn into one of at most half its size (in Xbox pixels): from its Xbox-size copy, filtered or not
     // (a point sample of the 2880-wide picture flickers the same way). The glow's steps: the back buffer 720x480 into
@@ -1356,7 +1484,9 @@ void upload_cpu_backbuffer()
     HostRT &bb = host_rt(g_backbuffer);
     if (SUCCEEDED(g_bb_cpu_def->GetSurfaceLevel(0, &from)) && bb.tex && SUCCEEDED(bb.tex->GetSurfaceLevel(0, &to))) {
         host3d::end_scene();
+        ms_resolve(bb); // its draws first, the CPU's pixels over them
         d->StretchRect(from, nullptr, to, nullptr, D3DTEXF_POINT);
+        ms_tex_written(bb);
     }
     if (from) from->Release();
     if (to) to->Release();
@@ -1395,6 +1525,7 @@ void rt_cpu_lock(const Surface *s)
     surface_size(s, &w, &h);
     auto it = g_rts.find(mem_key(s->Data, w, h));
     if (it == g_rts.end() || !it->second.tex) return; // never drawn into: the memory is all there is
+    ms_resolve(it->second);
     uint32_t pitch = (((s->Size >> SIZE_PITCH_SHIFT) & 0xFF) + 1) * 64;
     for (const CpuRt &c : g_cpu_rts)
         if (c.data == s->Data && c.w == w && c.h == h) return; // already read since the last upload
@@ -1486,6 +1617,10 @@ HRESULT __stdcall Direct3D_CreateDevice(uint32_t Adapter, uint32_t DeviceType, u
     if (!host3d::open_window(g_cfg.window_w, g_cfg.window_h, g_cfg.widescreen ? g_cfg.aspect_w : 4, g_cfg.widescreen ? g_cfg.aspect_h : 3))
         return D3DERR_NOTAVAILABLE;
     if (!host3d::create_device()) return D3DERR_NOTAVAILABLE;
+    g_msaa = 0; // MSAA: the count asked, or the next lower one the card has
+    for (int n = std::min(g_cfg.msaa, 16); n >= 2 && !g_msaa; n--)
+        if (host3d::msaa_supported(n)) g_msaa = n;
+    if (g_cfg.msaa) logf("[d3d] MSAA %dx asked: %s", g_cfg.msaa, g_msaa ? ("drawing with " + std::to_string(g_msaa) + "x").c_str() : "the card has none: off");
     RECT frame, pic; // the picture's size in the window (for --resolution native)
     host3d::frame_layout(&frame, &pic);
     g_native_w = pic.right - pic.left;
@@ -1632,6 +1767,7 @@ HRESULT __stdcall D3DDevice_Clear(uint32_t Count, const D3DRECT *pRects, uint32_
         rects.push_back({r.left, r.top, r.right, r.bottom});
     }
     host3d::dev()->Clear(pRects ? Count : 0, pRects ? rects.data() : nullptr, f, Color, Z, Stencil);
+    ms_note_draw();
     return D3D_OK;
 }
 
@@ -1782,9 +1918,12 @@ void release_host_targets()
         if (kv.second.reduced) kv.second.reduced->Release();
         if (kv.second.soft) kv.second.soft->Release();
         if (kv.second.soft_tmp) kv.second.soft_tmp->Release();
+        if (kv.second.ms) kv.second.ms->Release();
     }
     g_rts.clear();
+    g_ms_bound = nullptr;
     for (auto &kv : g_zs) {
+        if (kv.second.ms) kv.second.ms->Release();
         if (kv.second.surf) kv.second.surf->Release();
         if (kv.second.tex) kv.second.tex->Release();
     }
@@ -1834,6 +1973,7 @@ void change_render_scale(int pic_w, int pic_h)
     // all of them every frame (the pause menu's background is a frame it captured once), and new targets are black,
     // so changing PC SETTINGS > EFFECTS AT XBOX SIZE or the render size behind the menu turned it black.
     std::vector<std::pair<uint64_t, IDirect3DTexture9 *>> old;
+    for (auto &kv : g_rts) ms_resolve(kv.second); // (MSAA) every target's last draws into its texture first
     for (auto &kv : g_rts)
         if (kv.second.tex) {
             kv.second.tex->AddRef();
@@ -1883,7 +2023,7 @@ std::atomic<bool> g_recreate_requested; // tests: press-file "recreate"
 // The loader's own pixel shaders (made on demand)
 void release_loader_shaders()
 {
-    for (IDirect3DPixelShader9 **ps : {&g_zfill_ps, &g_zview_ps, &g_zdepth_ps, &g_gamma_ps, &g_fxaa_ps, &g_seam_ps, &g_box_ps, &g_soft_ps})
+    for (IDirect3DPixelShader9 **ps : {&g_zfill_ps, &g_zview_ps, &g_zdepth_ps, &g_gamma_ps, &g_fxaa_ps, &g_seam_ps, &g_box_ps, &g_soft_ps, &g_copy_ps})
         if (*ps) {
             (*ps)->Release();
             *ps = nullptr;
@@ -2107,6 +2247,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
 {
     DTRACE("0x%x", Flags);
     game_load::on_swap(); // the engine's load figure for the frame it hands over (game_load.cpp)
+    if (g_cfg.widescreen && g_cfg.aspect_w * 9 != g_cfg.aspect_h * 16) xd3d::wide_hud_frame_end();
     pb_flush();
     perf::swap_begin();
     pace_swap();

@@ -29,6 +29,7 @@ std::atomic<bool> g_closed{false};
 IDirect3D9Ex *g_d3d;
 bool g_intz;
 D3DFORMAT g_depth_view_fmt = D3DFMT_A8R8G8B8;
+uint32_t g_msaa_mask; // bit n: n-sample MSAA supported for the frame's colour and depth
 IDirect3DDevice9 *g_dev;
 IDirect3DDevice9Ex *g_devex; // the same device
 bool g_in_scene;
@@ -610,6 +611,18 @@ bool create_device_here()
         g_depth_view_fmt = D3DFMT_R32F;
     logf("host: depth views %s", g_depth_view_fmt == D3DFMT_R32F ? "R32F (full depth precision)"
                                                                   : "A8R8G8B8 (R32F render target with filtering not supported: 8-bit depth)");
+    // MSAA (black.ini msaa): the sample counts this card draws colour and depth with (the frame's targets)
+    g_msaa_mask = 0;
+    std::string ms;
+    for (int n = 2; n <= 16; n++) {
+        D3DMULTISAMPLE_TYPE t = (D3DMULTISAMPLE_TYPE)n;
+        if (SUCCEEDED(g_d3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_A8R8G8B8, TRUE, t, nullptr)) &&
+            SUCCEEDED(g_d3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, D3DFMT_D24S8, TRUE, t, nullptr))) {
+            g_msaa_mask |= 1u << n;
+            ms += (ms.empty() ? "" : ", ") + std::to_string(n) + "x";
+        }
+    }
+    logf("host: MSAA sample counts %s", ms.empty() ? "none" : ms.c_str());
     logf("host: Direct3D 9Ex device, back buffer %dx%d on '%s'; INTZ depth textures %s", g_bb_w, g_bb_h, id.Description,
          g_intz ? "supported" : "NOT supported (depth-buffer reads return zero)");
     xd3d::prewarm_shaders(g_dev); // the cached shaders' objects now, not in the frame that first draws with them
@@ -696,6 +709,7 @@ void CpuTexture::release()
 }
 bool intz() { return g_intz; }
 D3DFORMAT depth_view_format() { return g_depth_view_fmt; }
+bool msaa_supported(int samples) { return samples >= 2 && samples <= 16 && (g_msaa_mask >> samples & 1); }
 
 void begin_scene()
 {

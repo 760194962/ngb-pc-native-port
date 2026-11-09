@@ -70,6 +70,9 @@ void load_file()
         else if (k == "shadowsoft") g_cfg.shadow_pcf = v != 0 ? 2 : 0; // soft shadow edges (d3d/nv2a_psh.cpp)
         else if (k == "vsync") g_cfg.vsync = v != 0;
         else if (k == "perfhud") g_cfg.perfhud = v != 0;
+        else if (k == "multicore") g_cfg.multicore = v != 0;
+        else if (k == "msaa") g_cfg.msaa = std::clamp(atoi(val), 0, 16); // MSAA samples (0 off)
+        else if (k == "hud_centre") g_cfg.hud_centre = v != 0; // 21:9 / 16:10: the HUD about the middle, as before // the launcher's CPU cores: automatic (experimental)
         else if (k == "aniso") g_cfg.aniso = std::clamp(atoi(val), 1, 16);
         else if (k == "fps") g_cfg.fps = atoi(val) == 60 ? 60 : 30;
         else if (k == "widescreen") g_cfg.widescreen = v != 0;
@@ -205,6 +208,7 @@ void write_all(FILE *f)
     fprintf(f, "shadowsoft = %d\n", g_cfg.shadow_pcf ? 1 : 0);
     fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\naniso = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0,
             g_cfg.perfhud ? 1 : 0, g_cfg.aniso);
+    fprintf(f, "multicore = %d\nmsaa = %d\n", g_cfg.multicore ? 1 : 0, g_cfg.msaa);
     padkeys::save_ini(f);
     bindings::save_ini(f);
 }

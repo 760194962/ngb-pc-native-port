@@ -245,7 +245,8 @@ bool parse_args()
             if (!next(g_cfg.online_insigniadns)) return false;
             settings_mark_cli("online_insigniadns");
         }
-        else if (a == L"--multicore") g_cfg.multicore = true;
+        else if (a == L"--multicore") { g_cfg.multicore = true; settings_mark_cli("multicore"); }
+        else if (a == L"--msaa" && i + 1 < argc) { g_cfg.msaa = std::clamp(_wtoi(argv[++i]), 0, 16); settings_mark_cli("msaa"); }
         else if (a == L"--game-cpu") {
             std::wstring v;
             if (!next(v)) return false;
@@ -701,6 +702,7 @@ int run(void *reserve, unsigned reserve_size)
 
     if (!g_cfg.symbols_path.empty()) symbols_load(g_cfg.symbols_path);
     if (!g_cfg.multicore) pin_to_one_cpu();
+    else logf("cpu: game threads not pinned: Windows spreads them over the cores (black.ini multicore = 1, the launcher's automatic CPU cores; experimental)");
     if (!kmem_init()) return 1;
     if (!xthread_init_slots()) return 1;
     prefer_dedicated_gpu();

@@ -44,6 +44,7 @@ struct CpuTexture {
 // INTZ: a depth-stencil format that can also be sampled as a texture (driver extension, all current GPUs)
 constexpr D3DFORMAT FMT_INTZ = (D3DFORMAT)MAKEFOURCC('I', 'N', 'T', 'Z');
 D3DFORMAT depth_view_format(); // R32F when it can be a filtered render target, else A8R8G8B8 (d3d/host.cpp)
+bool msaa_supported(int samples); // the card draws the frame (A8R8G8B8 + D24S8) with this many samples
 bool intz();
 void begin_scene();                         // BeginScene once per frame, lazily
 void end_scene();                           // close the scene (before StretchRect); the next draw reopens one
