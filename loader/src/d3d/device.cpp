@@ -953,7 +953,9 @@ IDirect3DSurface9 *ms_color(HostRT &h)
         }
         h.tex_ahead = true; // whatever the texture holds (a rebuilt target's picture) before the first draw
         static int noted;
-        if (noted++ < 4) logf("[d3d] MSAA %dx: multisampled target %ux%u", g_msaa, h.w, h.h);
+        if (noted++ < 4)
+            logf("[d3d] MSAA %dx: multisampled target %ux%u (%.0f MB with its depth)", g_msaa, h.w, h.h,
+                 2.0 * h.w * h.h * 4 * g_msaa / (1024.0 * 1024.0));
     }
     if (h.tex_ahead) ms_upload(h);
     return h.ms;
@@ -966,6 +968,9 @@ IDirect3DSurface9 *ms_depth(HostZ &hz)
         if (!hz.surf || FAILED(hz.surf->GetDesc(&desc)) ||
             FAILED(host3d::dev()->CreateDepthStencilSurface(desc.Width, desc.Height, D3DFMT_D24S8, (D3DMULTISAMPLE_TYPE)g_msaa, 0,
                                                             FALSE, &hz.ms, nullptr))) {
+            // refused (video memory at a high render scale): MSAA off for the run, not asked again at every bind
+            logf("[d3d] MSAA %dx: the multisampled depth buffer was refused: MSAA off", g_msaa);
+            g_msaa = 0;
             hz.ms = nullptr;
             return nullptr;
         }
@@ -1017,7 +1022,13 @@ void bind_render_target(Surface *rt, Surface *z)
         }
         g_owner[zkey] = Owner::Depth;
         zs = hz.surf;
-        if (msc && !(msz = ms_depth(hz))) msc = nullptr; // no multisampled depth for it: this target drawn as before
+        if (msc && !(msz = ms_depth(hz))) { // no multisampled depth for it: this target drawn as before
+            msc = nullptr;
+            if (!g_msaa && h.ms && !h.ms_drawn) { // MSAA turned off: its surface freed
+                h.ms->Release();
+                h.ms = nullptr;
+            }
+        }
         if (hz.ms && !msc) {
             static int noted;
             if (noted++ < 4) logf("[d3d] MSAA: depth 0x%08x bound with a target that is not multisampled (%ux%u)", z->Data, h.xw, h.xh);
