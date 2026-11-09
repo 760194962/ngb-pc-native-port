@@ -1664,12 +1664,38 @@ HRESULT __stdcall Direct3D_CreateDevice(uint32_t Adapter, uint32_t DeviceType, u
     dev_field<float>(0x0970) = 1.0f; // back buffer scale y
     *(uint32_t *)(uintptr_t)g_layout.push_segment = 0x2000;
 
-    g_backbuffer = make_surface(g_width, g_height, pp->BackBufferFormat ? pp->BackBufferFormat : XFMT_LIN_X8R8G8B8);
+    // The frame buffers are linear (pitch) whatever format code the game asks for: Ninja Gaiden 2004's disc program
+    // 1.02.04 asks for A8R8G8B8 0x06 and D24S8 0x2A (its title update 1.06.04 for LIN_A8R8G8B8 0x12 and LIN_D24S8 0x2E).
+    // Kept as asked, the back buffer carried the swizzled code, and the game's own texture header over it for the lava
+    // heat haze's screen copy came out a 16x32 swizzled texture (format 0x05410629; 1.06: 720x480 linear 0x00011229):
+    // not the back buffer's render target, so the copy read the empty memory and the haze drew a black block over the
+    // lava (the user, 2026-11-09; run/ng04_lava traces f10007 / f10629). Each swizzled code becomes its linear twin.
+    auto frame_format = [](uint32_t f) -> uint32_t {
+        switch (f) {
+        case XFMT_A1R5G5B5: return XFMT_LIN_A1R5G5B5;
+        case XFMT_X1R5G5B5: return XFMT_LIN_X1R5G5B5;
+        case XFMT_A4R4G4B4: return XFMT_LIN_A4R4G4B4;
+        case XFMT_R5G6B5: return XFMT_LIN_R5G6B5;
+        case XFMT_A8R8G8B8: return XFMT_LIN_A8R8G8B8;
+        case XFMT_X8R8G8B8: return XFMT_LIN_X8R8G8B8;
+        case XFMT_D24S8: return XFMT_LIN_D24S8;
+        case XFMT_F24S8: return XFMT_LIN_F24S8;
+        case XFMT_D16: return XFMT_LIN_D16;
+        case XFMT_F16: return XFMT_LIN_F16;
+        default: return f;
+        }
+    };
+    uint32_t bb_fmt = frame_format(pp->BackBufferFormat ? pp->BackBufferFormat : XFMT_LIN_X8R8G8B8),
+             z_fmt = frame_format(pp->AutoDepthStencilFormat ? pp->AutoDepthStencilFormat : XFMT_LIN_D24S8);
+    if (bb_fmt != pp->BackBufferFormat || (pp->EnableAutoDepthStencil && z_fmt != pp->AutoDepthStencilFormat))
+        logf("[d3d] frame buffers made linear: back buffer format 0x%x -> 0x%x, depth 0x%x -> 0x%x", pp->BackBufferFormat, bb_fmt,
+             pp->AutoDepthStencilFormat, z_fmt);
+    g_backbuffer = make_surface(g_width, g_height, bb_fmt);
     if (pp->EnableAutoDepthStencil)
-        g_depthbuffer = make_surface(g_width, g_height, pp->AutoDepthStencilFormat ? pp->AutoDepthStencilFormat : XFMT_LIN_D24S8);
+        g_depthbuffer = make_surface(g_width, g_height, z_fmt);
     dev_field<Surface *>(DEV_RENDERTARGET) = g_backbuffer;
     dev_field<Surface *>(DEV_ZBUFFER) = g_depthbuffer;
-    g_frontbuffer = make_surface(g_width, g_height, pp->BackBufferFormat ? pp->BackBufferFormat : XFMT_LIN_X8R8G8B8);
+    g_frontbuffer = make_surface(g_width, g_height, bb_fmt);
     dev_field<Surface *>(DEV_BACKBUFFER) = g_backbuffer;
     dev_field<Surface *>(DEV_FRONTBUFFER) = g_frontbuffer;
     g_st.render_target = g_backbuffer;
