@@ -409,6 +409,12 @@ bool open_window(int width, int height, int aspect_w, int aspect_h)
     g_win_h = height;
     g_out_w = width; // the launcher's size (or auto's), not later drags: what fullscreen_res = window promises
     g_out_h = height;
+    // No input method in the game: nothing here takes typed text, and a window taking the focus first talks to the
+    // input method's service. With that service hung (2026-11-10, a Chinese IME), every window of the PC that took the
+    // front hung with it: the game window stayed white "not responding" at start. Also no IME candidate box when a
+    // player's keys switch the input mode mid-game.
+    if (HMODULE imm = LoadLibraryW(L"imm32.dll"))
+        if (auto disable = (BOOL(WINAPI *)(DWORD))GetProcAddress(imm, "ImmDisableIME")) disable((DWORD)-1); // every thread of the process
     g_window_ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     CreateThread(nullptr, 0, ui_thread, nullptr, 0, nullptr);
     WaitForSingleObject(g_window_ready, 10000);
