@@ -158,9 +158,10 @@ struct Config {
                                // (main.cpp, its destructible walls); press-file "cfg:vsnap:0/1"
     bool rhw_tex_matrix = false; // press-file "cfg:rhwtexmat:1": XYZRHW coordinates through the game's texture matrix
                                  // (before 2.1.1; the console never applies it: d3d/draw.cpp rhw_tex_scales)
-    int shadow_pcf = 2;        // shadow maps read with linear filtering: 2x2 percentage-closer filtering, as the NV2A
-                               // does (d3d/nv2a_psh.cpp); 2 over the Xbox map's texels, 1 over the host map's, 0 one
-                               // sample as before; black.ini shadowsoft = 1 / 0 (2 / 0); press-file "cfg:shadowpcf:N"
+    int shadow_pcf = 1;        // shadow maps read with linear filtering: 2x2 percentage-closer filtering, as the NV2A
+                               // does (d3d/nv2a_psh.cpp); 1 over the host map's texels (since 2.2.18: smooth at every
+                               // shadow resolution, as ngbrecomp), 2 over the Xbox map's (the console's width, stepped like
+                               // a 128x128 map above 1x), 0 one sample; black.ini shadowsoft = 1 / 0; press-file "cfg:shadowpcf:N"
     bool quad_snap = true;     // press-file "cfg:quadsnap:0": 2D quads above 1x drawn as before (d3d/draw.cpp quad_snap)
     bool quad_weight = true;   // press-file "cfg:quadweight:0": QuadSnap without the alpha-weighted four-texel read (diagnosis)
     int msaa = 0;              // black.ini msaa: 0 off, 2 / 4 / 8 samples for the frame's targets (d3d/device.cpp)

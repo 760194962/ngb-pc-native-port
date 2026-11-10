@@ -591,11 +591,12 @@ const Pair kText[(int)Str::Count] = {
     {L"数字输出开启时以 5.1 输出，此项不起作用", L"Digital output on: 5.1 out, this has no effect"},
     {L"影子柔化", L"Soft shadows"},
     {L"角色影子的边缘按原机显卡的方式柔化：对阴影贴图周围 2×2 个点分别比较深度再混合（PCF，原机这一代显卡在阴影贴图开线性过滤时由硬件完成），"
-     L"边缘是柔和的渐变，而不是硬边和锯齿。关闭后为以前的做法：只比较一次，边缘硬朗。\n\n"
+     L"边缘是柔和的渐变，而不是硬边和锯齿。在所选的阴影分辨率上柔化：分辨率越高，边缘越细越平滑。关闭后为以前的做法：只比较一次，边缘硬朗。\n\n"
      L"性能影响很小（只多读几次阴影贴图，只在画影子的地方）。下次开始游戏时生效。",
      L"Character shadows get the soft edge of the console's GPU: four texels of the shadow map around each pixel are "
      L"compared and blended (percentage-closer filtering, done in hardware by that generation of GPUs when the shadow "
-     L"map is filtered linearly), instead of a hard, stepped edge. Off: the earlier way, one compare, a hard edge.\n\n"
+     L"map is filtered linearly), instead of a hard, stepped edge. It works at the chosen shadow resolution: the higher, "
+     L"the finer and smoother the edge. Off: the earlier way, one compare, a hard edge.\n\n"
      L"Little cost (a few more shadow-map reads, only where shadows are drawn). Takes effect the next time the game starts."},
     {L"本机主机",
      L"This console"},

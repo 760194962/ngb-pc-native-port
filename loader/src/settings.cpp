@@ -67,7 +67,7 @@ void load_file()
         else if (k == "seamfill") g_cfg.seam_fill = v != 0;
         else if (k == "effectsnative") g_cfg.effects_native = v != 0;
         else if (k == "shadow") g_cfg.shadow_scale = std::clamp(atoi(val), 1, 16);
-        else if (k == "shadowsoft") g_cfg.shadow_pcf = v != 0 ? 2 : 0; // soft shadow edges (d3d/nv2a_psh.cpp)
+        else if (k == "shadowsoft") g_cfg.shadow_pcf = v != 0 ? 1 : 0; // soft shadow edges (d3d/nv2a_psh.cpp; 1: over the host map, 2.2.18)
         else if (k == "vsync") g_cfg.vsync = v != 0;
         else if (k == "perfhud") g_cfg.perfhud = v != 0;
         else if (k == "multicore") g_cfg.multicore = v != 0;
