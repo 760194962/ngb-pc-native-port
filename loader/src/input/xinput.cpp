@@ -71,6 +71,58 @@ constexpr uint32_t DEV_MAGIC = 0x44495858; // 'XXID'
 
 bool g_reported_insertion;
 
+// The slow XInput calls run on a host thread, not the game thread: asking an empty slot whether a pad is there
+// (Microsoft: do not poll empty slots every frame; how long it takes depends on the PC's HID and Bluetooth
+// devices) and setting the motors (~0.4 ms per slot with a pad attached, r119; the game changes the speeds every
+// frame while a charge builds). The game thread still reads the attached pads itself each poll, so input is as
+// fresh as before; it only skips the slots this thread has not found a pad in.
+std::atomic<uint32_t> g_pc_present{0};               // bit i: XInput slot i has a pad
+std::atomic<uint32_t> g_pc_motors{0xFFFFFFFFu};      // the game's latest speeds, left << 16 | right; all ones: none yet
+HANDLE g_input_wake;                                 // set when the speeds change
+
+uint32_t probe_slots(uint32_t present)
+{
+    for (DWORD i = 0; i < 4; i++) {
+        if (present & (1u << i)) continue;
+        PcState pc = {};
+        if (g_pc_get(i, &pc) == ERROR_SUCCESS) present |= 1u << i;
+    }
+    return present;
+}
+
+DWORD WINAPI xinput_thread(void *)
+{
+    { // host code: keep it off the game's CPU (as the SDL pad thread, input/sdlpad.cpp)
+        DWORD_PTR proc = 0, sys = 0;
+        GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys);
+        if (g_game_cpu && (proc & ~g_game_cpu)) SetThreadAffinityMask(GetCurrentThread(), proc & ~g_game_cpu);
+    }
+    ULONGLONG probed = GetTickCount64();
+    uint32_t sent = 0xFFFFFFFFu, sent_to = 0;
+    for (;;) {
+        // asleep until the speeds change or the next probe is due
+        ULONGLONG since = GetTickCount64() - probed;
+        WaitForSingleObject(g_input_wake, since >= 2000 ? 0 : (DWORD)(2000 - since));
+        ULONGLONG now = GetTickCount64();
+        if (now - probed >= 2000) { // a pad plugged in later (the game thread clears a slot that stops answering)
+            uint32_t found = probe_slots(g_pc_present.load()) & ~g_pc_present.load();
+            if (found) {
+                g_pc_present.fetch_or(found);
+                logf("[input] XInput pad found in slot mask 0x%x", found);
+            }
+            probed = now;
+        }
+        uint32_t m = g_pc_motors.load(), present = g_pc_present.load();
+        if (g_pc_set && m != 0xFFFFFFFFu && (m != sent || (present & ~sent_to))) { // a change, or a pad that has not had it
+            PcVibration v = {(WORD)(m >> 16), (WORD)m};
+            for (DWORD i = 0; i < 4; i++)
+                if (present & (1u << i)) g_pc_set(i, &v); // Xbox port 0 = every PC pad
+            sent = m;
+            sent_to = present;
+        }
+    }
+}
+
 void load_xinput()
 {
     static bool tried;
@@ -83,6 +135,12 @@ void load_xinput()
         g_pc_set = (PFN_SetState)GetProcAddress(m, "XInputSetState");
     }
     logf("[input] PC XInput %s; keyboard mapping active when the game window has focus", g_pc_get ? "loaded" : "not available");
+    if (g_pc_get) {
+        g_pc_present = probe_slots(0); // once here, so pads already attached work from the first poll
+        g_input_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (HANDLE t = CreateThread(nullptr, 0, xinput_thread, nullptr, 0, nullptr)) CloseHandle(t);
+        logf("[input] XInput pads in slot mask 0x%x; empty slots and the motors are handled on a host thread", g_pc_present.load());
+    }
     sdlpad::start(); // the pads XInput does not see
 }
 
@@ -431,16 +489,14 @@ void read_pad(uint32_t port, XGamepad &g)
         last = g;
         have_last = true;
     };
-    static uint32_t polls, absent[4]; // absent: the poll count when a slot was last found empty
-    polls++;
+    const uint32_t present = g_pc_present.load(); // empty slots are probed by xinput_thread, not here
     for (DWORD i = 0; g_pc_get && i < 4; i++) {
-        if (absent[i] && polls - absent[i] < 120) continue;
+        if (!(present & (1u << i))) continue;
         PcState pc = {};
         if (g_pc_get(i, &pc) != ERROR_SUCCESS) {
-            absent[i] = polls;
+            g_pc_present.fetch_and(~(1u << i)); // unplugged: back to the host thread's probing
             continue;
         }
-        absent[i] = 0;
         const PcGamepad &p = pc.Gamepad;
         g.wButtons |= p.wButtons & 0x00FF; // D-pad, START, BACK, thumb clicks map 1:1
         if (p.wButtons & 0x1000) g.bAnalogButtons[0] = 255; // A
@@ -615,20 +671,18 @@ uint32_t __stdcall XInputSetState(Device *h, uint8_t *pFeedback)
     if (!h || h->magic != DEV_MAGIC) return ERROR_DEVICE_NOT_CONNECTED;
     PcVibration v = {*(uint16_t *)(pFeedback + 66), *(uint16_t *)(pFeedback + 68)};
     // The game sets the motors every frame; the host call costs ~0.4 ms per pad slot (11% of the frame time in
-    // chapter 1, r119 perf), so pass it on only when the speeds change (and again every 2 s for a pad plugged in later).
-    static PcVibration last = {0xFFFF, 0xFFFF};
-    static ULONGLONG last_ms;
-    ULONGLONG now = GetTickCount64();
-    if (h->port == 0 && (v.wLeftMotorSpeed != last.wLeftMotorSpeed || v.wRightMotorSpeed != last.wRightMotorSpeed || now - last_ms > 2000)) {
-        for (DWORD i = 0; g_pc_set && i < 4; i++) g_pc_set(i, &v); // port 0 = every PC pad
-        sdlpad::rumble(v.wLeftMotorSpeed, v.wRightMotorSpeed);
-        static int logged; // the first changes, as evidence in the log
-        if (logged < 40 && (v.wLeftMotorSpeed != last.wLeftMotorSpeed || v.wRightMotorSpeed != last.wRightMotorSpeed)) {
-            logged++;
-            logf("[input] rumble left %u right %u (frame %u)", v.wLeftMotorSpeed, v.wRightMotorSpeed, g_frame_count.load());
+    // chapter 1, r119 perf), so a change only wakes xinput_thread, which sends it to the attached pads.
+    if (h->port == 0) {
+        uint32_t m = (uint32_t)v.wLeftMotorSpeed << 16 | v.wRightMotorSpeed;
+        if (g_pc_motors.exchange(m) != m) {
+            if (g_input_wake) SetEvent(g_input_wake);
+            sdlpad::rumble(v.wLeftMotorSpeed, v.wRightMotorSpeed);
+            static int logged; // the first changes, as evidence in the log
+            if (logged < 40) {
+                logged++;
+                logf("[input] rumble left %u right %u (frame %u)", v.wLeftMotorSpeed, v.wRightMotorSpeed, g_frame_count.load());
+            }
         }
-        last = v;
-        last_ms = now;
     }
     *(uint32_t *)pFeedback = ERROR_SUCCESS; // completed immediately
     if (HANDLE ev = *(HANDLE *)(pFeedback + 4)) SetEvent(ev);
