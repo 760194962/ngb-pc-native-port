@@ -21,6 +21,10 @@
 #include <string>
 #include <vector>
 
+namespace xdsound {
+void use_full_hrtf(); // audio/dsound.cpp
+}
+
 namespace xd3d {
 
 // Implemented in d3d/device.cpp, d3d/resources.cpp (same translation unit visibility rules as BLACK's tables).
@@ -343,9 +347,13 @@ HRESULT __stdcall EndVisibilityTest(uint32_t Index)
     return vis_end(Index);
 }
 
-// DSOUND: DirectSoundUseFullHRTF selects the head-related transfer function of the 3D sound hardware; the software
-// mixer has distance and panning only (BLACK's DirectSoundUseLightHRTF is the same no-op).
-void __stdcall DirectSoundUseFullHRTF() { DTRACE(""); }
+// DSOUND: DirectSoundUseFullHRTF selects the head-related transfer function of the 3D sound hardware: the mixer filters
+// 3D voices per ear as the console does from then on (audio/hrtf.h; BLACK's DirectSoundUseLightHRTF stays a no-op).
+void __stdcall DirectSoundUseFullHRTF()
+{
+    DTRACE("");
+    ::xdsound::use_full_hrtf();
+}
 
 // XNET: XNetStartup (0x3AFB34) brings up the network stack, and XnInit programs the NIC's registers directly
 // (0xFEF00110 written by FUN_003B786C: an access violation in r116, when the Ranking menu started the online

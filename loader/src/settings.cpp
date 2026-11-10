@@ -107,6 +107,7 @@ void load_file()
         }
         else if (k == "online_insigniadns") g_cfg.online_insigniadns = widen(val);
         else if (k == "reverb") g_cfg.reverb = v != 0;
+        else if (k == "hrtf") g_cfg.hrtf = v != 0;
         else if (k == "reverb_gain") g_cfg.reverb_gain = std::clamp(v, 0.0f, 8.0f);
         else if (padkeys::load_ini(k.c_str(), val)) {} // kb_<input> = Key[,Key], padmap_<input> = <input> (Ninja Gaiden Black)
         else bindings::load_ini(k.c_str(), val); // key_<action> = Key[,Key] (BLACK)
@@ -190,6 +191,7 @@ void write_all(FILE *f)
     fprintf(f, "gain = %.2f\ngamma = %.2f\n", g_cfg.gain, g_cfg.gamma);
     fprintf(f, "mouse_sens = %.3f\nmouse_invert = %d\n", g_cfg.mouse_sens, g_cfg.mouse_invert ? 1 : 0);
     fprintf(f, "reverb = %d\nreverb_gain = %.2f\n", g_cfg.reverb ? 1 : 0, g_cfg.reverb_gain);
+    fprintf(f, "hrtf = %d\n", g_cfg.hrtf ? 1 : 0);
     fprintf(f, "autoaim = %d\n", g_cfg.autoaim ? 1 : 0);
     fprintf(f, "fov = %.1f\n", g_cfg.fov);
     fprintf(f, "skipanymovie = %d\n", g_cfg.skip_movies ? 1 : 0);

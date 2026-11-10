@@ -53,6 +53,7 @@ add_library(blackrt SHARED
   src/input/bindings.cpp
   src/input/padkeys.cpp
   src/input/movies.cpp
+  src/audio/hrtf.cpp
   src/audio/reverb.cpp
   src/settings.cpp
   src/perf.cpp
