@@ -108,6 +108,7 @@ DWORD WINAPI xinput_thread(void *)
             uint32_t found = probe_slots(g_pc_present.load()) & ~g_pc_present.load();
             if (found) {
                 g_pc_present.fetch_or(found);
+                sent_to &= ~found; // a pad plugged back in has lost the motors' speeds
                 logf("[input] XInput pad found in slot mask 0x%x", found);
             }
             probed = now;
