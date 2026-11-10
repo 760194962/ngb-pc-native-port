@@ -93,7 +93,7 @@ void xthread_bind(XThread *t)
     TlsSetValue(g_slot[XSLOT_DPC_ACTIVE], nullptr);
     t_current = t;
     xthread_register(t);
-    if (g_game_cpu) SetThreadAffinityMask(GetCurrentThread(), g_game_cpu);
+    if (DWORD_PTR m = g_game_cpu ? g_game_cpu : g_game_threads_mask) SetThreadAffinityMask(GetCurrentThread(), m);
     if (g_cfg.watch_count) {
         // Hardware breakpoints (DR0-3, 4-byte; write-only, or read/write with an "r" suffix) for --watch.
         CONTEXT c = {};

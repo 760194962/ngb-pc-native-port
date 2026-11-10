@@ -488,6 +488,46 @@ std::string sha256_hex(const std::vector<uint8_t> &data)
     return hex;
 }
 
+// --multicore (the launcher's automatic CPU cores): the game threads are not pinned, but on a hybrid CPU they stay on the
+// performance cores (the efficiency cores took the game thread 8.5 ms a frame against 6.2: see pin_to_one_cpu). Host
+// threads are left free. Nothing changes on a CPU whose cores are all of one kind.
+void limit_to_performance_cores()
+{
+    DWORD_PTR proc = 0, sys = 0;
+    GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys);
+    DWORD len = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &len);
+    std::vector<uint8_t> buf(len);
+    std::vector<std::pair<DWORD_PTR, int>> all;
+    int best = -1, worst = 1 << 30;
+    if (len && GetLogicalProcessorInformationEx(RelationProcessorCore, (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)buf.data(), &len)) {
+        for (DWORD at = 0; at < len;) {
+            auto *r = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)(buf.data() + at);
+            if (r->Relationship == RelationProcessorCore && r->Processor.GroupCount && r->Processor.GroupMask[0].Group == 0 &&
+                (r->Processor.GroupMask[0].Mask & proc)) {
+                int cls = r->Processor.EfficiencyClass;
+                all.push_back({(DWORD_PTR)(r->Processor.GroupMask[0].Mask & proc), cls});
+                best = std::max(best, cls);
+                worst = std::min(worst, cls);
+            }
+            at += r->Size;
+        }
+    }
+    DWORD_PTR mask = 0;
+    for (auto &c : all)
+        if (c.second == best) mask |= c.first;
+    if (best <= worst || !mask || mask == proc) {
+        logf("cpu: game threads not pinned: Windows spreads them over all the cores (black.ini multicore = 1, the launcher's "
+             "automatic CPU cores; experimental)");
+        return;
+    }
+    g_game_threads_mask = mask;
+    SetThreadAffinityMask(GetCurrentThread(), mask);
+    logf("cpu: game threads not pinned to one CPU: Windows spreads them over the performance cores, mask 0x%lx of 0x%lx "
+         "(black.ini multicore = 1, the launcher's automatic CPU cores; experimental); host threads use any core",
+         (unsigned long)mask, (unsigned long)proc);
+}
+
 // Threads that run game code share one CPU like the single-core Xbox (XAPI/DSound code assumes it); every
 // Xbox thread takes this mask in xthread_bind. Host threads (audio mixer and XAudio2, the graphics driver,
 // the window) stay free to use the other CPUs, so the game keeping its core busy at 60 fps does not starve
@@ -702,7 +742,7 @@ int run(void *reserve, unsigned reserve_size)
 
     if (!g_cfg.symbols_path.empty()) symbols_load(g_cfg.symbols_path);
     if (!g_cfg.multicore) pin_to_one_cpu();
-    else logf("cpu: game threads not pinned: Windows spreads them over the cores (black.ini multicore = 1, the launcher's automatic CPU cores; experimental)");
+    else limit_to_performance_cores();
     if (!kmem_init()) return 1;
     if (!xthread_init_slots()) return 1;
     prefer_dedicated_gpu();

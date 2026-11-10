@@ -8,6 +8,7 @@
 
 Config g_cfg;
 DWORD_PTR g_game_cpu;
+DWORD_PTR g_game_threads_mask; // multicore: the performance cores the game threads may use (0 = any)
 
 static CRITICAL_SECTION g_log_cs;
 static FILE *g_log_file;

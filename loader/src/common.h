@@ -214,6 +214,7 @@ struct Config {
 };
 extern Config g_cfg;
 extern DWORD_PTR g_game_cpu; // affinity of the threads that run game code (0 = any, --multicore)
+extern DWORD_PTR g_game_threads_mask; // --multicore on a hybrid CPU: its performance cores for the game threads (0 = any)
 extern uint32_t g_pad_watch; // address DR3 watches for --watch-pad (input/xinput.cpp), 0 = off
 extern std::atomic<uint32_t> g_frame_count; // frames presented so far (d3d/device.cpp)
 
