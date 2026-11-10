@@ -592,12 +592,15 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
             d->SetSamplerState(s, D3DSAMP_MINFILTER, f);
         });
         ts_on_change(s, 5, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MIPFILTER, v > 2 ? D3DTEXF_LINEAR : v); });
-        // LOD bias: Ninja Gaiden Black writes 0xFFFFFFFF (a NaN) into stage 0's (0x12A4CD). The NV2A field is a
-        // signed 5.8 fixed-point value converted with an x86 float-to-int, which turns a NaN into 0x80000000 and so
-        // a bias of 0; the host driver's treatment of a NaN is undefined. Non-finite -> 0, finite clamped to the field.
+        // LOD bias: Ninja Gaiden Black writes 0xFFFFFFFF (a NaN) into stage 0's for the water's ripple map (FUN_00129b60
+        // at 0x12A4CD, chapter 2's pond). The console's D3D gives the NV2A field (signed 5.8 fixed point) 0x1000 for it,
+        // -16: xemu's register model shows TEXFILTER0 E2063000 for the pond (ngbrecomp #16). The sampler then always
+        // reads the top level, the only one the game fills; with a bias of 0 (2.2.17 and before) the far water at low
+        // render scales read the other levels' leftover data, in bands. NaN -> -16; other non-finite values -> 0 as
+        // before; finite ones clamped to the field. The host driver's treatment of a NaN is undefined.
         ts_on_change(s, 6, [&](uint32_t v) {
             float b = as_float(v);
-            b = std::isfinite(b) ? std::min(std::max(b, -16.0f), 15.99f) : 0.0f;
+            b = std::isnan(b) ? -16.0f : std::isfinite(b) ? std::min(std::max(b, -16.0f), 15.99f) : 0.0f;
             d->SetSamplerState(s, D3DSAMP_MIPMAPLODBIAS, f2u(b));
         });
         ts_on_change(s, 7, [&](uint32_t v) { d->SetSamplerState(s, D3DSAMP_MAXMIPLEVEL, v); });
