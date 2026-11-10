@@ -28,6 +28,7 @@ D3DTEXTUREOP conv_texop(uint32_t v); // draw.cpp: the Xbox op number -> D3DTEXTU
 
 uint32_t g_ffp_edge_stages;
 uint32_t g_ffp_quad_stages, g_ffp_quad_weighted;
+bool g_ffp_sprite_tc;
 
 namespace {
 
@@ -122,6 +123,9 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
         "              float4 tc2 : TEXCOORD2; float4 tc3 : TEXCOORD3; };\n"
         "float4 main(PSIn I) : COLOR0 {\n"
         "  float4 tc[4] = { I.tc0, I.tc1, I.tc2, I.tc3 };\n";
+    // Point sprites: the sprite stage (3) reads the coordinate every driver replaces with the sprite's, the first set
+    // (the draw passes one vertex coordinate through every stage: d3d/draw.cpp with_sprite_tc)
+    if (first == 3 && g_ffp_sprite_tc) s += "  tc[3] = I.tc0;\n";
     s += def_diffuse ? "  float4 v0 = 1;\n" : "  float4 v0 = I.v0;\n";  // no diffuse in the vertex: opaque white
     s += def_specular ? "  float4 v1 = 0;\n" : "  float4 v1 = I.v1;\n"; // no specular in the vertex: 0
     s += "  float4 cur = v0, temp = 0, prev;\n";
@@ -259,6 +263,7 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
     int first = render_state()[XRS_POINTSPRITEENABLE] ? 3 : 0;
     std::string key((const char *)k, sizeof k);
     key.push_back((char)first);
+    key.push_back((char)(first == 3 && g_ffp_sprite_tc));
     key.push_back((char)((specular ? 1 : 0) | (def_diffuse ? 2 : 0) | (def_specular ? 4 : 0)));
     key.push_back((char)g_cfg.ffp_debug);
     key.push_back((char)g_cfg.untex);

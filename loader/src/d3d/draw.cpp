@@ -1626,6 +1626,41 @@ void set_fvf(IDirect3DDevice9 *d, DWORD fvf)
     g_decl_sent = nullptr;
 }
 
+// Point sprites of fixed-function vertices without texture coordinates (Ninja Gaiden Black's particles: water drops and
+// splashes FUN_00326e70, sparks and smoke FUN_002b9d20; FVF XYZ|DIFFUSE). The host replaces texture coordinates with the
+// sprite's own (0..1 across the point), but only where it has some: the port used to give it a generated coordinate
+// (D3DTSS_TCI_CAMERASPACEPOSITION) read in TEXCOORD3, the sprite stage on the Xbox. An AMD Radeon RX 9070 XT drew the
+// water drops as solid squares (2026-11-10): the dot texture read at one coordinate. Now these draws get what every
+// driver handles, the plain use of point sprites: a texture coordinate in the vertices (set 0, appended here), passed
+// through by every stage, and the stage shader reads the sprite stage from TEXCOORD0 (d3d/ffp_ps.cpp).
+bool g_sprite_tc;        // this draw: append the coordinate (set by begin_draw)
+DWORD g_sprite_fvf;      // its FVF without the coordinate
+std::vector<uint8_t> g_sprite_buf;
+
+const void *with_sprite_tc(const void *src, uint32_t nverts, uint32_t &stride)
+{
+    // The coordinate goes right after the FVF's own fields (the game's stride can be larger: padding the host skips)
+    uint32_t size = fvf_stride(g_sprite_fvf);
+    if (!size || size > stride) return src; // not the layout expected: the vertices go as they are
+    uint32_t out = size + 8;
+    g_sprite_buf.resize((size_t)nverts * out);
+    const uint8_t *s = (const uint8_t *)src;
+    uint8_t *o = g_sprite_buf.data();
+    for (uint32_t i = 0; i < nverts; i++, s += stride, o += out) {
+        memcpy(o, s, size);
+        memset(o + size, 0, 8); // (0, 0): replaced by the sprite coordinate on points
+    }
+    set_fvf(host3d::dev(), g_sprite_fvf | D3DFVF_TEX1);
+    static bool noted;
+    if (!noted) {
+        noted = true;
+        logf("[draw] frame %u: point sprites without texture coordinates (fvf 0x%x, %u vertices): one appended for the "
+             "sprite coordinates, read from TEXCOORD0", g_frame_count.load(), g_sprite_fvf, nverts);
+    }
+    stride = out;
+    return g_sprite_buf.data();
+}
+
 void set_decl(IDirect3DDevice9 *d, IDirect3DVertexDeclaration9 *decl)
 {
     if (decl == g_decl_sent) return;
@@ -1679,12 +1714,13 @@ namespace {
 
 int g_ms_aa_sent = -1; // D3DRS_MULTISAMPLEANTIALIAS as last sent (-1: unknown, a new device)
 
-bool begin_draw(DrawCtx &ctx)
+bool begin_draw(DrawCtx &ctx, uint32_t xprim)
 {
     IDirect3DDevice9 *d = host3d::dev();
     if (!d) return false;
     rt_cpu_upload(); // render targets the CPU wrote into since the last draw (the NG2004 downloader; nothing otherwise)
     g_draw_serial++;
+    g_sprite_tc = false;
     g_ffp_quad_stages = g_ffp_quad_weighted = 0; // a 2D quad's stage shader variant is picked by scale_rhw (QuadSnap)
     if (g_cfg.skip_texmodes && g_st.pixel_shader && render_state()[XRS_PSTEXTUREMODES] == g_cfg.skip_texmodes) return false;
     // Stack scans stop at the thread's stack base: a draw near the top of a game thread's stack read past it and
@@ -1712,6 +1748,21 @@ bool begin_draw(DrawCtx &ctx)
     // pipeline (D3D9On12) dropped alpha modulation on pass-through stages (docs/04 §3.9). --host-ffp keeps it.
     uint32_t vsh = g_st.vertex_shader;
     bool fvf_vs = vs_is_fvf(vsh);
+    // Point sprites (points drawn with POINTSPRITEENABLE; other primitives with it on are drawn as before): the stage
+    // shader reads the sprite stage from TEXCOORD0, the set every driver replaces with the sprite's coordinates, and
+    // FVF vertices without texture coordinates get one appended there (with_sprite_tc)
+    bool sprite_points = render_state()[XRS_POINTSPRITEENABLE] && xprim == XPT_POINTLIST;
+    g_ffp_sprite_tc = sprite_points;
+    g_sprite_tc = sprite_points && fvf_vs && vsh && !((vsh >> 8) & 0xF);
+    if (sprite_points && !fvf_vs) { // not seen in Ninja Gaiden Black so far: noted, to know if AMD needs more (docs/04 §3.30)
+        static bool noted;
+        if (!noted) {
+            noted = true;
+            logf("[draw] frame %u: point sprites through a vertex program or declaration (vs 0x%x, %s), from %s", g_frame_count.load(),
+                 vsh, ps ? "the game's pixel shader: its stage 3 reads TEXCOORD3" : "stage shader: the sprite stage reads TEXCOORD0",
+                 game_callers((const uint32_t *)_AddressOfReturnAddress()).c_str());
+        }
+    }
     IDirect3DPixelShader9 *hps = ps ? ps_host_shader()
                                  : g_cfg.host_ffp ? nullptr
                                  : ffp_pixel_shader(!fvf_vs || (vsh & D3DFVF_DIFFUSE) != 0, !fvf_vs || (vsh & D3DFVF_SPECULAR) != 0,
@@ -1734,15 +1785,21 @@ bool begin_draw(DrawCtx &ctx)
             set_vs(d, nullptr);
             set_fvf(d, h);
             apply_fvf_texture_scale(d, (h & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
-            if (render_state()[XRS_POINTSPRITEENABLE] && !((h >> 8) & 0xF)) {
-                // Point sprites whose vertices carry no texture coordinates (Ninja Gaiden Black's particles: FVF
-                // XYZ|DIFFUSE). The host replaces only the coordinates the vertex pipeline outputs; a generated
-                // coordinate gives the stage (stage 3, the sprite stage on the Xbox: d3d/ffp_ps.cpp) an output for
-                // the sprite coordinates to replace.
+            if (g_sprite_tc) {
+                // Point sprites whose vertices carry no texture coordinates: the draw appends one (with_sprite_tc)
+                // and every stage passes it through, for the host to replace with the sprite's coordinates.
+                g_sprite_fvf = h;
+                for (int s = 0; s < 4; s++) {
+                    d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_PASSTHRU | 0);
+                    g_ts_valid[s][28] = false; // the game's index is sent again on the next draw
+                }
+            } else if (render_state()[XRS_POINTSPRITEENABLE] && !((h >> 8) & 0xF)) {
+                // Other primitives with POINTSPRITEENABLE left on and no texture coordinates: as before 2.2.17, a
+                // generated coordinate for the stages with a texture
                 for (int s = 0; s < 4; s++) {
                     if (!g_st.textures[s]) continue;
                     d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEPOSITION | s);
-                    g_ts_valid[s][28] = false; // the game's index is sent again on the next draw
+                    g_ts_valid[s][28] = false;
                 }
             }
             ctx.path = Path::Fvf;
@@ -1836,6 +1893,7 @@ void draw_up(uint32_t xprim, uint32_t verts, const void *data, uint32_t stride)
     ClipRhw clip;
     Prim p = conv_prim(xprim, verts);
     if (!p.count) return;
+    if (g_sprite_tc) data = with_sprite_tc(data, verts, stride);
     perf::add_draw(verts, verts * stride);
     IDirect3DDevice9 *d = host3d::dev();
     if (p.quads)
@@ -1917,6 +1975,7 @@ void draw_indexed_up(uint32_t xprim, uint32_t nidx, const uint16_t *idx, const v
         g_st.draws_skipped++;
         return;
     }
+    if (g_sprite_tc) src = (const uint8_t *)with_sprite_tc(src, mx - mn + 1, stride);
     perf::add_draw(mx - mn + 1, (mx - mn + 1) * stride);
     // Indices rebased to the first used vertex, data pointer at that vertex: the host then copies exactly the
     // vertices [mn, mx]. Passing MinVertexIndex = mn with the pointer backed up mn vertices (so index 0 would be
@@ -2658,7 +2717,7 @@ void __stdcall D3DDevice_DrawVerticesUP(uint32_t PrimitiveType, uint32_t VertexC
     pb_flush();
     perf::Scope perf_scope(perf::kDraw);
     DrawCtx ctx;
-    if (!begin_draw(ctx)) return;
+    if (!begin_draw(ctx, PrimitiveType)) return;
     if (ctx.path == Path::Prog) {
         uint32_t stride = convert_vertices(ctx.vs, 0, VertexCount, (const uint8_t *)pVertexStreamZeroData, VertexStreamZeroStride);
         debug_draw("DrawVerticesUP", ctx, PrimitiveType, VertexCount, g_conv.data(), stride / 4);
@@ -2685,7 +2744,7 @@ void __stdcall D3DDevice_DrawVertices(uint32_t PrimitiveType, uint32_t StartVert
     pb_flush();
     perf::Scope perf_scope(perf::kDraw);
     DrawCtx ctx;
-    if (!begin_draw(ctx)) return;
+    if (!begin_draw(ctx, PrimitiveType)) return;
     if (ctx.path == Path::Prog) {
         uint32_t stride = convert_vertices(ctx.vs, StartVertex, VertexCount, nullptr, 0);
         debug_draw("DrawVertices", ctx, PrimitiveType, VertexCount, g_conv.data(), stride / 4);
@@ -2747,7 +2806,7 @@ void __stdcall D3DDevice_DrawIndexedVertices(uint32_t PrimitiveType, uint32_t Ve
     pb_flush();
     perf::Scope perf_scope(perf::kDraw);
     DrawCtx ctx;
-    if (!begin_draw(ctx) || !pIndexData || !VertexCount) return;
+    if (!begin_draw(ctx, PrimitiveType) || !pIndexData || !VertexCount) return;
     if (ctx.path == Path::Prog) {
         uint32_t mn = 0xFFFF, mx = 0;
         for (uint32_t i = 0; i < VertexCount; i++) {
@@ -2816,7 +2875,7 @@ void draw_immediate(uint32_t prim, const float *verts, uint32_t count, uint32_t 
 {
     perf::Scope perf_scope(perf::kDraw);
     DrawCtx ctx;
-    if (!begin_draw(ctx)) return;
+    if (!begin_draw(ctx, prim)) return;
     if (ctx.path == Path::Prog) { // the 16 attribute slots are exactly the shader's v0-v15
         debug_draw("immediate", ctx, prim, count, verts, 64);
         uint32_t mask = (attr_mask | vs_input_mask(ctx.vs) | 1u) & 0xFFFF, n = 0;
@@ -2880,7 +2939,7 @@ void draw_inline_array(uint32_t prim, const uint32_t *data, uint32_t dwords)
 {
     perf::Scope perf_scope(perf::kDraw);
     DrawCtx ctx;
-    if (!begin_draw(ctx)) return;
+    if (!begin_draw(ctx, prim)) return;
     if (ctx.path == Path::Prog) { // inline data uses the stream-0 layout of the declaration
         uint32_t in_stride = ctx.vs->stream_stride[0];
         if (!in_stride) return;
