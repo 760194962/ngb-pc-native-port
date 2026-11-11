@@ -30,6 +30,27 @@ mix buffer and the scratch memory after every 32-sample frame.
 
 `dis_tool.c` disassembles any range of an unscrambled image: `dis_tool <image> <byte offset> <byte size> <P address>`.
 
+## The EP's Dolby Surround encoder (`ep_surround_test.cpp`, docs/05 §12)
+
+Evidence for `loader/src/audio/ep_surround.cpp`: module 0 of the EP program in the XBE's DOLBY section (plaintext,
+0x716C bytes, identical in all eight supported builds) on xemu's core and the translation side by side.
+
+1. Save the DOLBY section's raw data from the XBE (section header: raw address and size) as `dolby.bin`.
+2. Build `xemu_ep.c` like `xemu_gp.c` (same `xdsp/` tree and shims), then
+   `clang++ -O2 -std=c++17 -static ep_surround_test.cpp <loader>/src/audio/ep_surround.cpp xemu_ep.o -I<loader>/src/audio -I<loader>/src`.
+3. `ep_surround_test dolby.bin <frames> <seed> <amplitude> [tone]`.
+
+`xemu_ep.c` does the EP kernel's service routine (P:0x180) for the commands module 0 uses (7 input, 8 output, 0xF
+levels, 0x11 state heap), and the one instruction xemu lacks: `extractu #CO,S,D` (DSP56300 Family Manual), which the
+module uses to read its flag word. xemu also decodes `IFcc` (`0x2020xx-0x203Fxx`, conditional ALU) as a plain ALU
+op with a stray move; at `p:03DA` / `p:03DE` (the gain index clamp) both give the same result for the index the game
+has (0x1F).
+
+Result (2026-11-11): noise at 0.1, 0.5, 1.0, 2.0 and 8.0 of full scale and five tones, 400 frames each, the
+translation fed blocks of random length: every word identical. Two deliberate breaks show the comparison bites:
+rounding without the tie-to-even rule differs in about 58% of the words; leaving out the 48-bit cut of the filters'
+remainder at the frame end differs at 8.0 (clipping) only.
+
 ## What the comparison found (2026-11-11)
 
 - Three parameter sets, noise at 0.5 and 1.0, 3000 frames each: every word identical. Two settings are needed:
