@@ -4,6 +4,7 @@
 // folded to the speakers, and the library's 3D model (distance, HRTF, doppler) for 3D voices. The output clock drives
 // play positions and stream packet completion, so the game's audio/music/video code runs as on the Xbox.
 // Without a host audio device the same mixer runs on a timer and the result is discarded.
+#include "audio/ep_surround.h"
 #include "audio/gp_effects.h"
 #include "audio/hrtf.h"
 #include "audio/reverb.h"
@@ -727,12 +728,21 @@ void mix_report(const float *out, uint32_t samples)
 
 // The console's audio settings (black.ini audio_mode, audio_ac3, audio_dts; read once, at the mixer's start):
 // stereo and mono mix two channels as before; Dolby Surround and Dolby Digital / DTS mix 5.1 (mix_voice with 6 channels), which goes
-// out as it is for the digital ones (audio_out: 5.1, Windows folding it for fewer speakers) and matrixed into two for
-// Dolby Surround: the rear pair as one surround channel, out of phase between left and right, as a Pro Logic decoder
-// takes it back out (Lt = L + 0.707 C - 0.707 S, Rt = R + 0.707 C + 0.707 S, S = 0.707 (BL + BR); the LFE is left out
-// as in stereo).
+// out as it is for the digital ones (audio_out: 5.1, Windows folding it for fewer speakers) and encoded into two for
+// Dolby Surround by the console's own encoder, EP module 0 (audio/ep_surround.h, docs/05 §12): 2.46 dB down, the
+// rear pair as one band-limited surround channel 90 degrees from the front, + in Lt and - in Rt, the centre to both at
+// -3 dB, no LFE. Before 2.2.21 this was a plain matrix (Lt = L + 0.707 C - 0.707 S, Rt = R + 0.707 C + 0.707 S).
 bool g_mix6;     // 5.1 mix
 uint32_t g_out_ch = 2; // what goes out: 6 for Dolby Digital / DTS
+epds::Encoder g_ds_enc; // Dolby Surround (g_mix6 with two out)
+
+// a mix value as the APU's 24-bit word: past full scale it saturates, below it rounds to nearest even (MXCSR default)
+static inline uint32_t to24(float f)
+{
+    float v = f * 8388608.0f;
+    v = v > 8388607.0f ? 8388607.0f : v < -8388608.0f ? -8388608.0f : v;
+    return (uint32_t)_mm_cvtss_si32(_mm_set_ss(v)) & 0xFFFFFF; // as lrintf, without the CRT call
+}
 
 void mix_block(float *out, std::vector<Completion> &done)
 {
@@ -770,11 +780,6 @@ void mix_block(float *out, std::vector<Completion> &done)
         // words (the voice processor's; past full scale they saturate), effects 0-5, then the speaker bins 0-5 out: as
         // they are for 5.1, or folded for two speakers as the image's EP downmix does (bin_stereo: the front pair at 1,
         // the centre to both and the back pair to its side at -3 dB, no LFE).
-        auto to24 = [](float f) {
-            float v = f * 8388608.0f;
-            v = v > 8388607.0f ? 8388607.0f : v < -8388608.0f ? -8388608.0f : v;
-            return (uint32_t)_mm_cvtss_si32(_mm_set_ss(v)) & 0xFFFFFF; // round to nearest even, as lrintf (MXCSR default), without the CRT call
-        };
         const float kSide = 0.70710678f, inv = 1.0f / 8388608.0f;
         const float rv_gain = g_cfg.reverb_gain; // the launcher's reverb level, on the reverb's input (1: as the console)
         LARGE_INTEGER g0, g1;
@@ -813,14 +818,16 @@ void mix_block(float *out, std::vector<Completion> &done)
             }
         }
     }
-    if (g_mix6 && g_out_ch == 2) // Dolby Surround: 5.1 matrixed into two, in place (frame i is read before 2i, 2i+1 are written)
-        for (uint32_t i = 0; i < audio_out::BLOCK; i++) {
-            const float *f = out + 6 * i;
-            float s = 0.70710678f * (f[BL] + f[BR]), c = 0.70710678f * f[FC];
-            float l = f[FL] + c - 0.70710678f * s, r = f[FR] + c + 0.70710678f * s;
-            out[2 * i] = l, out[2 * i + 1] = r;
-        }
-    else if (g_cfg.audio_mode == 1) // mono: both speakers the same
+    if (g_mix6 && g_out_ch == 2) { // Dolby Surround: the EP's encoder, the speaker bins in its input order L C R Ls Rs
+        static int32_t in[5][audio_out::BLOCK], lt[audio_out::BLOCK], rt[audio_out::BLOCK];
+        static const int kIn[5] = {FL, FC, FR, BL, BR};
+        for (uint32_t i = 0; i < audio_out::BLOCK; i++)
+            for (int c = 0; c < 5; c++) in[c][i] = (int32_t)(to24(out[6 * i + kIn[c]]) << 8) >> 8;
+        const int32_t *ip[5] = {in[0], in[1], in[2], in[3], in[4]};
+        g_ds_enc.process(ip, lt, rt, audio_out::BLOCK);
+        const float inv = 1.0f / 8388608.0f;
+        for (uint32_t i = 0; i < audio_out::BLOCK; i++) out[2 * i] = (float)lt[i] * inv, out[2 * i + 1] = (float)rt[i] * inv;
+    } else if (g_cfg.audio_mode == 1) // mono: both speakers the same
         for (uint32_t i = 0; i < audio_out::BLOCK; i++) out[2 * i] = out[2 * i + 1] = 0.5f * (out[2 * i] + out[2 * i + 1]);
     const uint32_t samples = audio_out::BLOCK * g_out_ch;
     // The output's level: the mix bins as they are, no gain added. Ninja Gaiden Black sets the headroom of bins 0-10 to 0
@@ -857,10 +864,11 @@ void __stdcall worker(void *)
     // the library's front / back split and HRTF folding: speakers surround (2) or Dolby Digital (FUN_0037BA5E; the
     // speaker setting it reads is the one IDirectSound_GetSpeakerConfig reports: DTS as surround too)
     g_surround = g_mix6;
+    g_ds_enc.reset();
     lagrange_init();
     att_init();
     logf("[dsound] audio: %s (XC_AUDIO 0x%x)", g_out_ch == 6 ? (g_cfg.audio_dts ? "DTS, 5.1 out" : "Dolby Digital, 5.1 out")
-                                     : g_mix6 ? "Dolby Surround (5.1 matrixed into two)" : g_cfg.audio_mode == 1 ? "mono" : "stereo",
+                                     : g_mix6 ? "Dolby Surround (the EP's encoder)" : g_cfg.audio_mode == 1 ? "mono" : "stereo",
          ((uint32_t)g_cfg.audio_mode | (g_cfg.audio_ac3 ? 0x10000u : 0u) | (g_cfg.audio_dts ? 0x20000u : 0u)));
     audio_out::open(g_out_ch); // without a device the output asks for blocks by the clock
     std::vector<Completion> done;
