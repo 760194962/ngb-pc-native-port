@@ -18,35 +18,53 @@
 
 **标题画面**（16:9）
 
-| 黑之章 飓风版 vb-zh-x2.1 | 黑之章 美版原版 | 忍者龙剑传（2004） |
-|---|---|---|
-| ![飓风版标题](docs/screenshots/black_title.jpg) | ![美版原版标题](docs/screenshots/black_us_title.jpg) | ![2004 标题](docs/screenshots/ng04_title.jpg) |
+黑之章 飓风版 vb-zh-x2.1 · 黑之章 美版原版 · 忍者龙剑传（2004）
+
+<p>
+<img src="docs/screenshots/black_title.jpg" alt="飓风版标题" width="32.3%">
+<img src="docs/screenshots/black_us_title.jpg" alt="美版原版标题" width="32.3%">
+<img src="docs/screenshots/ng04_title.jpg" alt="2004 标题" width="32.3%">
+</p>
 
 **忍者龙剑传 黑之章**（16:9）
 
-| | | |
-|---|---|---|
-| ![遗迹中的魔神](docs/screenshots/black_ruins.jpg) | ![忍法](docs/screenshots/black_ninpo.jpg) | ![军事基地铁路调车场](docs/screenshots/black_railyard.jpg) |
+<p>
+<img src="docs/screenshots/black_ruins.jpg" alt="遗迹中的魔神" width="32.3%">
+<img src="docs/screenshots/black_ninpo.jpg" alt="忍法" width="32.3%">
+<img src="docs/screenshots/black_railyard.jpg" alt="军事基地铁路调车场" width="32.3%">
+</p>
 
 **不同显示比例**（黑之章，同一画面）：4:3、16:9、16:10、21:9。16:10 / 21:9 的画面加宽，血条等界面放在两侧。
 
-| 4:3 | 16:9 |
-|---|---|
-| ![4:3](docs/screenshots/black_4x3.jpg) | ![16:9](docs/screenshots/black_16x9.jpg) |
+4:3 · 16:9
 
-| 16:10 | 21:9 |
-|---|---|
-| ![16:10](docs/screenshots/black_16x10.jpg) | ![21:9](docs/screenshots/black_21x9.jpg) |
+<p>
+<img src="docs/screenshots/black_4x3.jpg" alt="4:3" width="41.6%">
+<img src="docs/screenshots/black_16x9.jpg" alt="16:9" width="55.4%">
+</p>
+
+16:10 · 21:9
+
+<p>
+<img src="docs/screenshots/black_16x10.jpg" alt="16:10" width="39.5%">
+<img src="docs/screenshots/black_21x9.jpg" alt="21:9" width="57.5%">
+</p>
 
 **忍者龙剑传（2004）**：16:9、4:3、21:9 与菜单。
 
-| 16:9 | 4:3 |
-|---|---|
-| ![2004 16:9](docs/screenshots/ng04_16x9.jpg) | ![2004 4:3](docs/screenshots/ng04_4x3.jpg) |
+16:9 · 4:3
 
-| 21:9 | 菜单 |
-|---|---|
-| ![2004 21:9](docs/screenshots/ng04_21x9.jpg) | ![2004 菜单](docs/screenshots/ng04_menu.jpg) |
+<p>
+<img src="docs/screenshots/ng04_16x9.jpg" alt="2004 16:9" width="55.4%">
+<img src="docs/screenshots/ng04_4x3.jpg" alt="2004 4:3" width="41.6%">
+</p>
+
+21:9 · 菜单
+
+<p>
+<img src="docs/screenshots/ng04_21x9.jpg" alt="2004 21:9" width="55.1%">
+<img src="docs/screenshots/ng04_menu.jpg" alt="2004 菜单" width="41.9%">
+</p>
 
 ## 支持的版本
 
