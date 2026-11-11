@@ -168,8 +168,10 @@ These also happen on the Xbox; the port fixes them. Each fix can be switched bac
 - Mirror: seen close up in first person, a dark band with horizontal streaks runs down the right of the screen. This
   is an original-game defect (the reflection camera does not cover that part of the mirror); investigated and left
   unfixed (`project/docs/07_证据盘点.md`).
-- 3D sound and reverb approximate the Xbox's and have not been checked item by item (`project/docs/07_证据盘点.md`
-  #9).
+- Sound: since 2.2.21 the reverb, 3D sound and Dolby Surround use the console's own DSP programs (word for word the same
+  as an emulator running the originals); the voice processing before them (interpolation, HRTF filtering and so on)
+  follows the console's structure and parameters in floating point, so the lowest bits are not identical. Not yet
+  compared section by section with recordings from a real Xbox (`project/docs/05_音频输入存档.md`).
 - Opening the Xbox Live dashboard from Ninja Gaiden 2004's Master Ninja Tournament and coming back to the game has not
   been tested yet (Black's Ranking has).
 - Ninja Gaiden 2004's Xbox Live downloader has no sound.
