@@ -155,6 +155,10 @@ Redump 的「Ninja Gaiden (USA, Asia) (En,Ja)」也支持：同一个 1.02.04，
 - 2004 大师锦标赛里打开 Xbox Live 仪表盘、再回到游戏这条路还没实测（黑之章的排行榜已实测）。
 - 2004 的 Xbox Live 下载程序没有声音。
 - 不带启动数据直接运行 `NinjaFCJ.xbe` 会崩溃（玩家从主菜单进入不会走这条路）。
+- 少数杀毒引擎会把游戏程序报成木马（VirusTotal 上 2.2.22 的游戏程序是 5/71，都是机器学习或通用启发式规则，例如
+  Elastic、Malwarebytes、VBA32，没有报出具体病毒家族）。这是误报：游戏程序只是占住 Xbox 内存地址的小程序，
+  运行时把原版代码放进这段内存并打补丁，又没有数字签名，看起来像加壳程序。现在游戏程序开启了数据执行保护（DEP），
+  并带一份只声明普通权限的 manifest，减少这类误报（[issue #6](https://github.com/akirahayabusa/ngb-pc-native-port-release/issues/6)）。
 - 仍在核实中的模拟规则列在 `project/docs/07_证据盘点.md` 的核实进度里。
 
 ## 运行
@@ -413,6 +417,9 @@ cmake --build build --config RelWithDebInfo
 `Ninja Gaiden Black Any.exe` 是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
 `default.xbe` 映射进这段地址，提供游戏导入的 Xbox 内核函数，并在 Xbox 库（Direct3D 8、DirectSound、XAPI）的入口
 打补丁，转到 PC 上的实现。
+
+游戏程序开启了数据执行保护（DEP）：原版代码只在 `blackrt.dll` 自己标为可执行的内存里运行（XBE 映射区、连续内存、
+跳板页），其余内存不可执行。
 
 忍龙主程序是 LTCG 构建（寄存器传参、函数内联），库函数地址表是逐个核对的；附带程序是普通 D3D8，地址表由
 XbSymbolDatabase 的识别结果生成。每一条模拟规则都要有依据：原版程序、xemu / 文档、硬件规格或实测对照。依据记在

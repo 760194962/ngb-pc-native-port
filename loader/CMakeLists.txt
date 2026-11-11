@@ -153,9 +153,13 @@ ngb_version_info(black VFT_APP "Ninja Gaiden Black" "Ninja Gaiden Black Any.exe"
 target_link_libraries(black PRIVATE blackrt kernel32)
 set_property(TARGET black PROPERTY MSVC_RUNTIME_CHECKS "")
 target_compile_options(black PRIVATE /GS- /Gs999999)
+# /NXCOMPAT (DEP): the Xbox code only runs from memory blackrt.dll makes executable itself (the image range in
+# image.cpp, contiguous RAM in k_memory.cpp, thunk pages). The embedded manifest is the linker's default (asInvoker
+# only). Both make the exe look less like a packed program to anti-virus models (release repo issue #6).
 target_link_options(black PRIVATE
-  /BASE:0x10000 /FIXED /DYNAMICBASE:NO /NXCOMPAT:NO /SAFESEH:NO /LARGEADDRESSAWARE
-  /NODEFAULTLIB /ENTRY:StubEntry /SUBSYSTEM:WINDOWS /MANIFEST:NO /INCREMENTAL:NO)
+  /BASE:0x10000 /FIXED /DYNAMICBASE:NO /NXCOMPAT /SAFESEH:NO /LARGEADDRESSAWARE
+  /NODEFAULTLIB /ENTRY:StubEntry /SUBSYSTEM:WINDOWS /MANIFEST:EMBED /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+  /INCREMENTAL:NO)
 
 # The launcher (project/docs/08): installs and starts the game, display / graphics card / controls / saves.
 add_executable(launcher WIN32 ../launcher/src/main.cpp ../launcher/src/strings.cpp ../launcher/src/install.cpp

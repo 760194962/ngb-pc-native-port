@@ -175,6 +175,12 @@ These also happen on the Xbox; the port fixes them. Each fix can be switched bac
 - Ninja Gaiden 2004's Xbox Live downloader has no sound.
 - Running `NinjaFCJ.xbe` directly, without launch data, crashes (players entering from the main menu never take this
   path).
+- A few anti-virus engines flag the game program as a trojan (on VirusTotal 2.2.22's game program scores 5/71, all
+  machine-learning or generic heuristics such as Elastic, Malwarebytes and VBA32, none naming a malware family). It is
+  a false positive: the game program is only a small stub holding the Xbox's memory range, the original code is put
+  there and patched at run time, and nothing is code-signed, so it looks like a packed program. The game program now
+  has Data Execution Prevention (DEP) on and a manifest asking for normal rights only, to cut these false positives
+  ([issue #6](https://github.com/akirahayabusa/ngb-pc-native-port-release/issues/6)).
 - Emulation rules still being verified are listed in the progress section of `project/docs/07_证据盘点.md`.
 
 ## Running
@@ -474,6 +480,9 @@ Decompiler and disassembler output, game files and test-run folders stay local a
 put anything there. `blackrt.dll` maps `default.xbe` into the range, provides the Xbox kernel functions the game
 imports, and patches the entry points of the Xbox libraries (Direct3D 8, DirectSound, XAPI) to go to PC
 implementations.
+
+The game program runs with Data Execution Prevention (DEP) on: the original code only runs from memory `blackrt.dll`
+marks executable itself (the XBE range, contiguous memory, thunk pages); all other memory is not executable.
 
 The Ninja Gaiden main program is an LTCG build (register arguments, inlined functions), so its library function
 table was checked address by address; the launched programs use plain D3D8, and their tables are generated from
