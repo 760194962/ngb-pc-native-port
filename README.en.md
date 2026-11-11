@@ -15,6 +15,37 @@ support is kept.
 
 **You need your own copy of the game.** This repository contains no game code or data and no Microsoft XDK code.
 
+## Screenshots
+
+From the game's own attract demo (it plays when the title screen is left alone) and from saves, rendered at 1440 lines and scaled down.
+
+**Ninja Gaiden Black** (16:9)
+
+| | |
+|---|---|
+| ![Title screen](docs/screenshots/black_title.jpg) | ![A fiend in the ruins](docs/screenshots/black_ruins.jpg) |
+| ![Ninpo](docs/screenshots/black_ninpo.jpg) | ![The military base rail yard](docs/screenshots/black_railyard.jpg) |
+
+**Screen shapes** (Ninja Gaiden Black, the same moment): 4:3, 16:9, 16:10, 21:9. At 16:10 and 21:9 the picture is wider and the HUD sits at the sides.
+
+| 4:3 | 16:9 |
+|---|---|
+| ![4:3](docs/screenshots/black_4x3.jpg) | ![16:9](docs/screenshots/black_16x9.jpg) |
+
+| 16:10 | 21:9 |
+|---|---|
+| ![16:10](docs/screenshots/black_16x10.jpg) | ![21:9](docs/screenshots/black_21x9.jpg) |
+
+**Ninja Gaiden (2004)**: 16:9, 4:3, 21:9 and the menu.
+
+| 16:9 | 4:3 |
+|---|---|
+| ![2004 16:9](docs/screenshots/ng04_16x9.jpg) | ![2004 4:3](docs/screenshots/ng04_4x3.jpg) |
+
+| 21:9 | Menu |
+|---|---|
+| ![2004 21:9](docs/screenshots/ng04_21x9.jpg) | ![2004 menu](docs/screenshots/ng04_menu.jpg) |
+
 ## Supported builds
 
 The loader identifies the build by the XBE's SHA-256 and does not run any other. Four disc images are supported: the

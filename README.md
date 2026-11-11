@@ -12,6 +12,37 @@
 
 **需要自备游戏。** 本仓库不含任何游戏代码、数据或 Microsoft XDK 代码。
 
+## 截图
+
+截图来自游戏自带的待机演示（标题画面不按键时自动播放）和存档，渲染 1440 线后缩小。
+
+**忍者龙剑传 黑之章**（16:9）
+
+| | |
+|---|---|
+| ![标题画面](docs/screenshots/black_title.jpg) | ![遗迹中的魔神](docs/screenshots/black_ruins.jpg) |
+| ![忍法](docs/screenshots/black_ninpo.jpg) | ![军事基地铁路调车场](docs/screenshots/black_railyard.jpg) |
+
+**不同显示比例**（黑之章，同一画面）：4:3、16:9、16:10、21:9。16:10 / 21:9 的画面加宽，血条等界面放在两侧。
+
+| 4:3 | 16:9 |
+|---|---|
+| ![4:3](docs/screenshots/black_4x3.jpg) | ![16:9](docs/screenshots/black_16x9.jpg) |
+
+| 16:10 | 21:9 |
+|---|---|
+| ![16:10](docs/screenshots/black_16x10.jpg) | ![21:9](docs/screenshots/black_21x9.jpg) |
+
+**忍者龙剑传（2004）**：16:9、4:3、21:9 与菜单。
+
+| 16:9 | 4:3 |
+|---|---|
+| ![2004 16:9](docs/screenshots/ng04_16x9.jpg) | ![2004 4:3](docs/screenshots/ng04_4x3.jpg) |
+
+| 21:9 | 菜单 |
+|---|---|
+| ![2004 21:9](docs/screenshots/ng04_21x9.jpg) | ![2004 菜单](docs/screenshots/ng04_menu.jpg) |
+
 ## 支持的版本
 
 加载器按 XBE 的 SHA-256 识别版本，其他版本不运行。支持四种光盘镜像：美版原版，以及哈雅布撒在它基础上做的三个改版。
