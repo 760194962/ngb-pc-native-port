@@ -23,7 +23,7 @@ ngb-recomp-native\   git 仓库：从 ...hurricane recomp\black-pc 本地 clone�
 game\x21\            x2.1 解包文件的硬链接（指向路线 A input\x21，只读，不占空间）
 build\               CMake 构建目录（纯英文路径）；当前用 build\ngb2（play.bat 跑它），其余是旧对照构建
 run\<说明>\          每轮测试独立：hdd\（E/T/U/Z 分区）、日志、ini、shots\；run\play\ 归 play.bat
-docs\  → ngb-recomp-native\project\docs   证据与结论，编号文件（00 输入清单 … 12）
+docs\  → ngb-recomp-native\project\docs   证据与结论，编号文件（00 输入清单 … 13）
 tools\ → ngb-recomp-native\project\tools  量测脚本（xbe_*、disasm / xdis / callers、png_diff、frame_diff …）
 work\                符号表（functions_x21.csv）、反汇编等中间物（不提交）
 ```
