@@ -372,12 +372,14 @@ void apply_render_states(IDirect3DDevice9 *d)
         DWORD fog = render_state()[XRS_FOGENABLE] != 0 && !g_cfg.no_fog && !g_st.pixel_shader;
         if (fog && render_state()[XRS_FOGTABLEMODE] == D3DFOG_LINEAR) {
             // The Stage 3 skylight cutscene sets fog 5 -> -1.2 with the 0xff6e3c1e colour. D3D9's fixed-function
-            // linear fog divides by (end - start); a reversed range saturates every vertex to the fog colour and the
-            // whole scene turns flat brown. The Xbox path does not: no visible fog. Treat an empty range as fog off.
+            // linear fog on Intel saturates every vertex to the fog colour and the whole scene turns flat brown. The
+            // NV2A keeps the formula, (end - d) / (end - start): fog only nearer than 5, rising towards the camera,
+            // which D3D9's linear fog cannot express (its factor always falls with distance); it stays off here.
+            // start = end is the library's slope of 8192 (FUN_003D0EC0), sent as a start 1/8192 before the end.
             float fs = 0, fe = 0;
             memcpy(&fs, &render_state()[XRS_FOGSTART], 4);
             memcpy(&fe, &render_state()[XRS_FOGEND], 4);
-            if (fe <= fs) fog = 0;
+            if (fe < fs) fog = 0;
         }
         if (!g_rs_valid[XRS_FOGENABLE] || fog != fog_sent) {
             set(D3DRS_FOGENABLE, fog);
@@ -385,8 +387,17 @@ void apply_render_states(IDirect3DDevice9 *d)
             g_rs_valid[XRS_FOGENABLE] = true;
         }
     }
-    on_change(XRS_FOGSTART, [&](uint32_t v) { set(D3DRS_FOGSTART, v); });
-    on_change(XRS_FOGEND, [&](uint32_t v) { set(D3DRS_FOGEND, v); });
+    auto fog_start = [&]() { // the start sent: 1/8192 before the end when they are equal (see above)
+        float fs, fe;
+        memcpy(&fs, &render_state()[XRS_FOGSTART], 4);
+        memcpy(&fe, &render_state()[XRS_FOGEND], 4);
+        return fs == fe ? f2u(fe - 1.0f / 8192.0f) : render_state()[XRS_FOGSTART];
+    };
+    on_change(XRS_FOGSTART, [&](uint32_t) { set(D3DRS_FOGSTART, fog_start()); });
+    on_change(XRS_FOGEND, [&](uint32_t v) {
+        set(D3DRS_FOGEND, v);
+        set(D3DRS_FOGSTART, fog_start());
+    });
     on_change(XRS_FOGDENSITY, [&](uint32_t v) { set(D3DRS_FOGDENSITY, v); });
     on_change(XRS_FOGCOLOR, [&](uint32_t v) { set(D3DRS_FOGCOLOR, v); });
     on_change(XRS_RANGEFOGENABLE, [&](uint32_t v) { set(D3DRS_RANGEFOGENABLE, v != 0); });
@@ -1088,16 +1099,24 @@ void upload_vs_constants(IDirect3DDevice9 *d)
         linear_texture_scale(s, &k[8 + s * 4], &k[9 + s * 4]);
         k[10 + s * 4] = k[11 + s * 4] = 1.0f;
     }
-    // c198 fog start/end/density, c199 fog-mode weights (linear, exp, exp2, none)
+    // c198 the NV2A fog parameters (NV097_SET_FOG_PARAMS 0, 1), c199 the fog mode (linear, exp, exp2), worked out as the
+    // library does (FUN_003D0EC0, x2.1; its x87 runs at 24-bit precision, the game's _controlfp: float arithmetic):
+    // none -> linear with 1, 1 (the factor is oFog itself); linear -> k = 1 / (end - start), or 8192 when start = end,
+    // p0 = end k + 1, p1 = -k; exp / exp2 -> p0 = 1.5, p1 = density x -0.090168074 / -0.21233003 (0x415778 / 0x415774).
     const uint32_t *rs = render_state();
-    memcpy(&k[24], &rs[XRS_FOGSTART], 4);
-    memcpy(&k[25], &rs[XRS_FOGEND], 4);
-    memcpy(&k[26], &rs[XRS_FOGDENSITY], 4);
+    float fs, fe, fd;
+    memcpy(&fs, &rs[XRS_FOGSTART], 4);
+    memcpy(&fe, &rs[XRS_FOGEND], 4);
+    memcpy(&fd, &rs[XRS_FOGDENSITY], 4);
     switch (rs[XRS_FOGTABLEMODE]) {
-    case D3DFOG_LINEAR: k[28] = 1.0f; break;
-    case D3DFOG_EXP: k[29] = 1.0f; break;
-    case D3DFOG_EXP2: k[30] = 1.0f; break;
-    default: k[31] = 1.0f; break;
+    case D3DFOG_LINEAR: {
+        float kl = fs == fe ? 8192.0f : 1.0f / (fe - fs);
+        k[24] = fe * kl + 1.0f, k[25] = -kl, k[28] = 1.0f;
+        break;
+    }
+    case D3DFOG_EXP: k[24] = 1.5f, k[25] = fd * -0.0901680737733841f, k[29] = 1.0f; break;
+    case D3DFOG_EXP2: k[24] = 1.5f, k[25] = fd * -0.21233002841472626f, k[30] = 1.0f; break;
+    default: k[24] = k[25] = 1.0f, k[28] = 1.0f; break;
     }
     k[32] = k[33] = fov_viewmodel_scale(); // c200: the first-person gun keeps the game's FOV
     k[34] = g_cfg.vs_snap ? 1.0f : 0.0f; // c200.z: the 1/8-pixel snap (cfg:vsnap)

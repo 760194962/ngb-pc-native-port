@@ -250,8 +250,8 @@ std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_
          "float4 vpScale : register(c192);\n"
          "float4 vpOffset : register(c193);\n"
          "float4 texScale[4] : register(c194);\n" // 1/size for linear textures (NV2A uses texel coordinates)
-         "float4 fogParams : register(c198);\n"   // start, end, density
-         "float4 fogMode : register(c199);\n"     // weights: linear, exp, exp2, none (oFog is the factor)
+         "float4 fogParams : register(c198);\n"   // the NV2A fog parameters 0, 1 (draw.cpp upload_vs_constants)
+         "float4 fogMode : register(c199);\n"     // 1 in x / y / z: linear / exp / exp2
          "float4 vmScale : register(c200);\n"     // clip x/y factor: the first-person gun at the game's FOV (fov.cpp)
          "struct VSIn {\n";
     bool any_input = false;
@@ -393,14 +393,20 @@ std::string vsh_to_hlsl(const uint32_t *program, uint32_t count, uint32_t input_
          "  o.t0 = oT0 * float4(texScale[0].xy, 1, 1); o.t1 = oT1 * float4(texScale[1].xy, 1, 1);\n"
          "  o.t2 = oT2 * float4(texScale[2].xy, 1, 1); o.t3 = oT3 * float4(texScale[3].xy, 1, 1);\n"
          "  o.pts = oPts.x;\n";
-    // The NV2A fog unit turns the oFog coordinate into a factor with the table mode; D3D9 ignores oFog
-    // under table fog, so compute the factor here (the device runs vertex fog on this path).
+    // The NV2A fog unit turns oFog.x into the factor with the library's parameters (xemu vsh.c, the hardware's
+    // -1 / -1.5 bias): linear p0 + d p1 - 1, exp p0 + 2^(16 d p1) - 1.5, exp2 p0 + 2^(-32 d^2 p1^2) - 1.5. It is
+    // interpolated unclamped and clamped to 0..1 per pixel (the final combiner's FOG; t4 for the game's pixel shaders);
+    // an infinite distance or a NaN gives 1 (linear, exp) or 0 (exp2). D3D9's own fog (draws without a game pixel
+    // shader) takes o.fog, clamped per vertex.
     if (writes_fog)
-        s += "  float fc = abs(oFog.x), fden = fogParams.y - fogParams.x;\n"
-             "  float flin = (fogParams.y - fc) / (abs(fden) > 1e-6 ? fden : 1e-6);\n"
-             "  float fd = fogParams.z * fc;\n"
-             "  o.fog = saturate(dot(fogMode, float4(flin, exp(-fd), exp(-fd * fd), oFog.x)));\n"
-             "  o.t4 = float4(o.fog, 0, 0, 1);\n";
+        s += "  float fdist = oFog.x;\n"
+             "  float ff = fogMode.x > 0 ? fogParams.x + fdist * fogParams.y - 1.0\n"
+             "           : fogMode.y > 0 ? fogParams.x + exp2(fdist * fogParams.y * 16.0) - 1.5\n"
+             "           : fogParams.x + exp2(-fdist * fdist * fogParams.y * fogParams.y * 32.0) - 1.5;\n"
+             "  float fbad = fogMode.z > 0 ? 0.0 : 1.0;\n"
+             "  ff = isinf(fdist) || isnan(ff) ? fbad : clamp(ff, -3.402823e38, 3.402823e38);\n"
+             "  o.fog = saturate(ff);\n"
+             "  o.t4 = float4(ff, 0, 0, 1);\n";
     else
         s += "  o.fog = 1.0;\n"
              "  o.t4 = float4(1, 0, 0, 1);\n";
