@@ -19,12 +19,17 @@ support is kept.
 
 From the game's own attract demo (it plays when the title screen is left alone) and from saves, rendered at 1440 lines and scaled down.
 
+**Title screens** (16:9)
+
+| Ninja Gaiden Black, Hurricane vb-zh-x2.1 | Ninja Gaiden Black, original US release | Ninja Gaiden (2004) |
+|---|---|---|
+| ![Hurricane title](docs/screenshots/black_title.jpg) | ![Original US title](docs/screenshots/black_us_title.jpg) | ![2004 title](docs/screenshots/ng04_title.jpg) |
+
 **Ninja Gaiden Black** (16:9)
 
-| | |
-|---|---|
-| ![Title screen](docs/screenshots/black_title.jpg) | ![A fiend in the ruins](docs/screenshots/black_ruins.jpg) |
-| ![Ninpo](docs/screenshots/black_ninpo.jpg) | ![The military base rail yard](docs/screenshots/black_railyard.jpg) |
+| | | |
+|---|---|---|
+| ![A fiend in the ruins](docs/screenshots/black_ruins.jpg) | ![Ninpo](docs/screenshots/black_ninpo.jpg) | ![The military base rail yard](docs/screenshots/black_railyard.jpg) |
 
 **Screen shapes** (Ninja Gaiden Black, the same moment): 4:3, 16:9, 16:10, 21:9. At 16:10 and 21:9 the picture is wider and the HUD sits at the sides.
 
