@@ -12,6 +12,7 @@
 #include "xthread.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <deque>
@@ -171,7 +172,30 @@ struct Listener {
     float rolloff = 1.0f, distance = 1.0f;
 };
 
-std::recursive_mutex g_mutex;
+// The lock over the voices, shared by the game's DirectSound calls and the mixer. It counts the time the game's
+// threads wait for it (the mixer holds it while mixing the voices): the mixer log reports it.
+thread_local bool t_mixer = false;
+std::atomic<uint64_t> g_wait_n{0}, g_wait_ticks{0}, g_wait_max{0};
+struct VoiceLock {
+    std::recursive_mutex m;
+    void lock()
+    {
+        if (m.try_lock()) return;
+        if (t_mixer) return m.lock();
+        LARGE_INTEGER a, b;
+        QueryPerformanceCounter(&a);
+        m.lock();
+        QueryPerformanceCounter(&b);
+        uint64_t d = (uint64_t)(b.QuadPart - a.QuadPart), mx = g_wait_max.load(std::memory_order_relaxed);
+        g_wait_n.fetch_add(1, std::memory_order_relaxed);
+        g_wait_ticks.fetch_add(d, std::memory_order_relaxed);
+        while (d > mx && !g_wait_max.compare_exchange_weak(mx, d, std::memory_order_relaxed)) {}
+    }
+    bool try_lock() { return m.try_lock(); }
+    void unlock() { m.unlock(); }
+};
+VoiceLock g_mutex;
+uint64_t g_hold_ticks, g_hold_max; // the mixer's time holding it (mix_block)
 std::vector<Buffer *> g_buffers;
 std::vector<Stream *> g_streams;
 Object g_dsound;
@@ -656,6 +680,7 @@ void mix_report(const float *out, uint32_t samples)
     uint64_t n = ++blocks;
     uint64_t every = n < 6000 ? 200 : 3000;
     if (n % every) return;
+    std::lock_guard<VoiceLock> g(g_mutex);
     uint32_t nb = 0, ns = 0;
     std::string first;
     for (Buffer *b : g_buffers)
@@ -670,6 +695,12 @@ void mix_report(const float *out, uint32_t samples)
          "%.3f%% over 1), reverb send peak %.3f (bin %u)%s%s", nb, ns, peak, g_pre_peak,
          g_pre_samples ? 100.0 * g_pre_over_knee / g_pre_samples : 0.0, g_pre_samples ? 100.0 * g_pre_over_full / g_pre_samples : 0.0,
          send_peak, g_reverb_bin, first.empty() ? "" : "; e.g. ", first.c_str());
+    static double tick_us = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return 1e6 / (double)f.QuadPart; }();
+    uint64_t wn = g_wait_n.exchange(0), wt = g_wait_ticks.exchange(0), wm = g_wait_max.exchange(0);
+    logf("[dsound] lock: the mixer held it %.1f us a block on average (longest %.1f); the game waited %llu times, "
+         "%.1f us in all, longest %.1f us", g_hold_ticks * tick_us / every, g_hold_max * tick_us, (unsigned long long)wn,
+         wt * tick_us, wm * tick_us);
+    g_hold_ticks = g_hold_max = 0;
     peak = send_peak = g_pre_peak = 0;
     g_pre_samples = g_pre_over_knee = g_pre_over_full = 0;
 }
@@ -687,7 +718,9 @@ void mix_block(float *out, std::vector<Completion> &done)
 {
     memset(out, 0, sizeof(float) * audio_out::BLOCK * (g_mix6 ? 6 : 2));
     memset(g_send, 0, sizeof g_send);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    LARGE_INTEGER t0, t1;
+    g_mutex.lock();
+    QueryPerformanceCounter(&t0);
     for (Buffer *b : g_buffers) {
         if (!b->playing || !b->data || !b->bytes || !b->fmt.nBlockAlign) continue;
         uint32_t from = frames_to_bytes(b->fmt, b->cur);
@@ -703,6 +736,13 @@ void mix_block(float *out, std::vector<Completion> &done)
         auto fetch = [&](float *f) { return stream_fetch(*s, f, done); };
         mix_voice(*s, out, g_mix6 ? 6 : 2, fetch);
     }
+    // The rest uses the mixer's own data (the reverb has its own lock): the game's DirectSound calls need not wait for
+    // it. Holding the lock over the whole block, the game waited up to 5-10 ms at a time in chapter 1; over the voices
+    // alone, up to 2 ms, and the mixer's time holding it fell from about 115 to 80 us a block (Iris Xe, 2026-11-11).
+    QueryPerformanceCounter(&t1);
+    g_mutex.unlock();
+    g_hold_ticks += (uint64_t)(t1.QuadPart - t0.QuadPart);
+    g_hold_max = std::max<uint64_t>(g_hold_max, (uint64_t)(t1.QuadPart - t0.QuadPart));
     if (g_cfg.reverb) {
         static float applied = -1.0f; // the menu can change the level while running
         if (applied != g_cfg.reverb_gain) reverb::set_gain(applied = g_cfg.reverb_gain);
@@ -732,7 +772,7 @@ void mix_block(float *out, std::vector<Completion> &done)
     // at start (SetMixBinHeadroom, logged), so only the voices' own headroom remains: 2D voices 6 dB down, as on the
     // console. 2.2.19 added 6 dB over the whole mix to match a capture-card recording of the main menu, which depends on
     // the card's gain, not on the console; with it the title screen's attract cutscene peaked at 1.64 before the
-    // limiter (0.15% of samples over full scale), without it at 0.82 (2026-11-11, runs fdiag3 / rel2219).
+    // limiter (0.15% of samples over full scale), without it at 0.89 and none over (2026-11-11, runs fdiag3 / fdiag4).
     // Saturate at full scale, as the APU's DSP output does (its fixed-point moves limit); levels below pass unchanged.
     // This was a soft knee above 0.8, which also bent levels the Xbox plays as they are; in chapter 1 0.002% of the
     // samples pass 0.8 and none pass 1 (r237, docs/07 #13). The mixer log keeps the counts.
@@ -749,6 +789,7 @@ void mix_block(float *out, std::vector<Completion> &done)
 
 void __stdcall worker(void *)
 {
+    t_mixer = true;
     xthread_current()->base_priority = 2;
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     { // the mixer is host code: keep it off the game's CPU (see pin_to_one_cpu)
@@ -842,7 +883,7 @@ uint32_t __stdcall Stream_Release(Stream *s)
     std::vector<Completion> done;
     uint32_t refs;
     {
-        std::lock_guard<std::recursive_mutex> g(g_mutex);
+        std::lock_guard<VoiceLock> g(g_mutex);
         refs = s->refs ? --s->refs : 0;
         if (refs == 0) {
             for (auto &p : s->queue) finish_packet(p, s, PACKET_FLUSHED, done);
@@ -866,7 +907,7 @@ HRESULT __stdcall Stream_GetInfo(Stream *s, uint32_t *info)
 
 HRESULT __stdcall Stream_GetStatus(Stream *s, uint32_t *pdwStatus)
 {
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     uint32_t st = 0;
     if (s->queue.size() < (s->desc.dwMaxAttachedPackets ? s->desc.dwMaxAttachedPackets : 1)) st |= DSSTREAMSTATUS_READY;
     if (s->paused) st |= DSSTREAMSTATUS_PAUSED;
@@ -879,7 +920,7 @@ HRESULT __stdcall Stream_GetStatus(Stream *s, uint32_t *pdwStatus)
 HRESULT __stdcall Stream_Process(Stream *s, MediaPacket *pIn, MediaPacket *pOut)
 {
     if (!pIn) return E_POINTER;
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (pIn->pdwStatus) *pIn->pdwStatus = PACKET_PENDING;
     if (pIn->pdwCompletedSize) *pIn->pdwCompletedSize = 0;
     s->queue.push_back(*pIn);
@@ -892,7 +933,7 @@ HRESULT __stdcall Stream_Flush(Stream *s)
 {
     std::vector<Completion> done;
     {
-        std::lock_guard<std::recursive_mutex> g(g_mutex);
+        std::lock_guard<VoiceLock> g(g_mutex);
         for (auto &p : s->queue) finish_packet(p, s, PACKET_FLUSHED, done);
         s->queue.clear();
         s->consumed = 0;
@@ -956,7 +997,7 @@ HRESULT __stdcall DirectSoundCreateStream(StreamDesc *pdssd, Stream **ppStream)
     s->desc = *pdssd;
     s->paused = (pdssd->dwFlags & 0x10000) != 0; // DSSTREAMFLAGS_PAUSED
     {
-        std::lock_guard<std::recursive_mutex> g(g_mutex);
+        std::lock_guard<VoiceLock> g(g_mutex);
         g_streams.push_back(s);
     }
     *ppStream = s;
@@ -978,7 +1019,7 @@ HRESULT __stdcall IDirectSound_CreateSoundBuffer(Object *pThis, BufferDesc *pdsb
         else logf("[dsound] CreateSoundBuffer: no contiguous memory for %u bytes (the buffer stays silent)", b->bytes);
     }
     {
-        std::lock_guard<std::recursive_mutex> g(g_mutex);
+        std::lock_guard<VoiceLock> g(g_mutex);
         g_buffers.push_back(b);
     }
     *ppBuffer = b;
@@ -1171,7 +1212,7 @@ HRESULT __stdcall IDirectSound_Simple3(Object *pThis, uint32_t a, uint32_t b) { 
 HRESULT __stdcall IDirectSound_SetMixBinHeadroom(Object *pThis, uint32_t bin, uint32_t headroom)
 {
     STRACE("%p, %u, %u", pThis, bin, headroom);
-    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    std::lock_guard<VoiceLock> lock(g_mutex);
     if (bin < 32 && g_bin_headroom[bin] != (headroom & 7))
         logf("[dsound] SetMixBinHeadroom: bin %u headroom %u (was %u)", bin, headroom & 7, g_bin_headroom[bin]);
     if (bin < 32) g_bin_headroom[bin] = (uint8_t)(headroom & 7);
@@ -1187,7 +1228,7 @@ HRESULT __stdcall IDirectSound_Simple5(Object *pThis, uint32_t a, uint32_t b, ui
 HRESULT __stdcall IDirectSound_SetPosition(Object *pThis, float x, float y, float z, uint32_t apply)
 {
     STRACE("%p, %g %g %g", pThis, x, y, z);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     g_listener.pos = {x, y, z};
     return S_OK;
 }
@@ -1195,7 +1236,7 @@ HRESULT __stdcall IDirectSound_SetPosition(Object *pThis, float x, float y, floa
 HRESULT __stdcall IDirectSound_SetOrientation(Object *pThis, float xf, float yf, float zf, float xt, float yt, float zt, uint32_t apply)
 {
     STRACE("%p, front %g %g %g, top %g %g %g", pThis, xf, yf, zf, xt, yt, zt);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     g_listener.front = {xf, yf, zf};
     g_listener.top = {xt, yt, zt};
     return S_OK;
@@ -1229,7 +1270,7 @@ uint32_t __stdcall IDirectSoundBuffer_Release(void *p)
     STRACE("%p", p);
     Buffer *b = as_buffer(p);
     if (!b) return 0;
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (b->refs && --b->refs == 0) {
         g_buffers.erase(std::remove(g_buffers.begin(), g_buffers.end(), b), g_buffers.end());
         b->magic = 0;
@@ -1261,7 +1302,7 @@ HRESULT __stdcall Voice_SetHeadroom(void *p, uint32_t headroom)
 HRESULT __stdcall Voice_SetMixBins(void *p, const MixBins *mb)
 {
     STRACE("%p, %p", p, mb);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Voice *v = as_voice(p)) set_bins(*v, mb, false);
     return S_OK;
 }
@@ -1269,7 +1310,7 @@ HRESULT __stdcall Voice_SetMixBins(void *p, const MixBins *mb)
 HRESULT __stdcall Voice_SetMixBinVolumes(void *p, const MixBins *mb)
 {
     STRACE("%p, %p", p, mb);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Voice *v = as_voice(p)) set_bins(*v, mb, true);
     return S_OK;
 }
@@ -1277,7 +1318,7 @@ HRESULT __stdcall Voice_SetMixBinVolumes(void *p, const MixBins *mb)
 HRESULT __stdcall IDirectSoundBuffer_SetAllParameters(void *p, const Ds3dBuffer *params, uint32_t apply)
 {
     STRACE("%p, %p, %u", p, params, apply);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Voice *v = as_voice(p)) {
         uint32_t size = v->ds3d.dwSize;
         memcpy((uint8_t *)&v->ds3d + 4, (const uint8_t *)params + 4, sizeof(Ds3dBuffer) - 4);
@@ -1290,7 +1331,7 @@ HRESULT __stdcall IDirectSoundBuffer_SetAllParameters(void *p, const Ds3dBuffer 
 HRESULT __stdcall IDirectSound_SetVelocity(Object *pThis, float x, float y, float z, uint32_t apply)
 {
     STRACE("%p, %g %g %g, %u", pThis, x, y, z, apply);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     g_listener.vel = {x, y, z};
     return S_OK;
 }
@@ -1315,7 +1356,7 @@ HRESULT __stdcall IDirectSoundBuffer_SetFrequency(void *p, uint32_t freq)
 HRESULT __stdcall IDirectSoundBuffer_SetFormat(void *p, const WaveFormatEx *fmt)
 {
     STRACE("%p, %s", p, fmt_str(fmt).c_str());
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Buffer *b = as_buffer(p)) {
         if (fmt) b->fmt = *fmt;
         b->primed = false;
@@ -1328,7 +1369,7 @@ HRESULT __stdcall IDirectSoundBuffer_SetBufferData(void *p, void *pv, uint32_t b
 {
     STRACE("%p, %p, %u", p, pv, bytes);
     if (Buffer *b = as_buffer(p)) {
-        std::lock_guard<std::recursive_mutex> g(g_mutex);
+        std::lock_guard<VoiceLock> g(g_mutex);
         b->data = (uint8_t *)pv;
         b->bytes = bytes;
         b->cur = 0;
@@ -1342,7 +1383,7 @@ HRESULT __stdcall IDirectSoundBuffer_SetBufferData(void *p, void *pv, uint32_t b
 HRESULT __stdcall IDirectSoundBuffer_SetLoopRegion(void *p, uint32_t start, uint32_t len)
 {
     STRACE("%p, %u, %u", p, start, len);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Buffer *b = as_buffer(p)) {
         b->loop_start = start;
         b->loop_len = len;
@@ -1353,7 +1394,7 @@ HRESULT __stdcall IDirectSoundBuffer_SetLoopRegion(void *p, uint32_t start, uint
 HRESULT __stdcall IDirectSoundBuffer_SetPlayRegion(void *p, uint32_t start, uint32_t len)
 {
     STRACE("%p, %u, %u", p, start, len);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Buffer *b = as_buffer(p)) {
         b->play_start = start;
         b->play_len = len;
@@ -1365,7 +1406,7 @@ HRESULT __stdcall IDirectSoundBuffer_Play(void *p, uint32_t r1, uint32_t r2, uin
 {
     STRACE("%p, 0x%x", p, flags);
     if (Buffer *b = as_buffer(p)) {
-        std::lock_guard<std::recursive_mutex> g(g_mutex);
+        std::lock_guard<VoiceLock> g(g_mutex);
         if ((flags & DSBPLAY_FROMSTART) || (!b->playing && b->cur >= region_frames(*b))) {
             b->cur = 0;
             b->primed = false;
@@ -1384,7 +1425,7 @@ HRESULT __stdcall IDirectSoundBuffer_Play(void *p, uint32_t r1, uint32_t r2, uin
 HRESULT __stdcall IDirectSoundBuffer_StopEx(void *p, uint32_t tsLo, uint32_t tsHi, uint32_t flags)
 {
     STRACE("%p, 0x%x", p, flags);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Buffer *b = as_buffer(p)) b->playing = false;
     return S_OK;
 }
@@ -1406,7 +1447,7 @@ HRESULT __stdcall IDirectSoundBuffer_GetCurrentPosition(void *p, uint32_t *pPlay
     STRACE("%p", p);
     uint32_t pos = 0;
     if (Buffer *b = as_buffer(p)) {
-        std::lock_guard<std::recursive_mutex> g(g_mutex);
+        std::lock_guard<VoiceLock> g(g_mutex);
         pos = frames_to_bytes(b->fmt, b->cur);
     }
     if (pPlay) *pPlay = pos;
@@ -1417,7 +1458,7 @@ HRESULT __stdcall IDirectSoundBuffer_GetCurrentPosition(void *p, uint32_t *pPlay
 HRESULT __stdcall IDirectSoundBuffer_SetCurrentPosition(void *p, uint32_t pos)
 {
     STRACE("%p, %u", p, pos);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Buffer *b = as_buffer(p)) {
         b->cur = bytes_to_frames(b->fmt, pos);
         b->primed = false;
@@ -1430,7 +1471,7 @@ HRESULT __stdcall IDirectSoundBuffer_SetCurrentPosition(void *p, uint32_t pos)
 HRESULT __stdcall IDirectSoundStream_Pause(void *p, uint32_t dwPause)
 {
     STRACE("%p, %u", p, dwPause);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Stream *s = as_stream(p)) s->paused = dwPause == 1;
     return S_OK;
 }
@@ -1515,7 +1556,7 @@ HRESULT __stdcall IDirectSoundBuffer_Lock(void *p, uint32_t offset, uint32_t byt
                                           uint32_t *pbytes2, uint32_t flags)
 {
     STRACE("%p, off %u, %u bytes, flags 0x%x", p, offset, bytes, flags);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     Buffer *b = as_buffer(p);
     if (!b || !b->data) return E_FAIL;
     if (flags & 2) { // DSBLOCK_ENTIREBUFFER
@@ -1546,7 +1587,7 @@ HRESULT __stdcall IDirectSoundBuffer_SetNotificationPositions(void *p, uint32_t 
     STRACE("%p, %u, %p", p, count, notifies);
     Buffer *b = as_buffer(p);
     if (!b) return E_INVALIDARG;
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     b->notes.clear();
     for (uint32_t i = 0; i < count && notifies; i++) b->notes.push_back({notifies[2 * i], (HANDLE)(uintptr_t)notifies[2 * i + 1]});
     static bool noted;
@@ -1562,7 +1603,7 @@ HRESULT __stdcall IDirectSoundBuffer_SetNotificationPositions(void *p, uint32_t 
     HRESULT __stdcall fn(void *p, float v, uint32_t apply)                 \
     {                                                                      \
         STRACE("%p, %g, %u", p, v, apply);                                 \
-        std::lock_guard<std::recursive_mutex> g(g_mutex);                  \
+        std::lock_guard<VoiceLock> g(g_mutex);                  \
         if (Voice *vo = as_voice(p)) vo->ds3d.field = v;                   \
         return S_OK;                                                       \
     }
@@ -1575,7 +1616,7 @@ DS3D_SETTER(IDirectSoundBuffer_SetDistanceFactor, flDistanceFactor)
 HRESULT __stdcall IDirectSoundBuffer_SetPosition(void *p, float x, float y, float z, uint32_t apply)
 {
     STRACE("%p, %g %g %g, %u", p, x, y, z, apply);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Voice *v = as_voice(p)) v->ds3d.vPosition = {x, y, z};
     return S_OK;
 }
@@ -1583,7 +1624,7 @@ HRESULT __stdcall IDirectSoundBuffer_SetPosition(void *p, float x, float y, floa
 HRESULT __stdcall IDirectSoundBuffer_SetVelocity(void *p, float x, float y, float z, uint32_t apply)
 {
     STRACE("%p, %g %g %g, %u", p, x, y, z, apply);
-    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    std::lock_guard<VoiceLock> g(g_mutex);
     if (Voice *v = as_voice(p)) v->ds3d.vVelocity = {x, y, z};
     return S_OK;
 }
@@ -1617,7 +1658,7 @@ using Hle = xd3d::Hle;
 // DirectSoundUseFullHRTF (d3d_ngb.cpp): 3D voices through the library's HRTF from now on (voice_3d)
 void use_full_hrtf()
 {
-    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    std::lock_guard<VoiceLock> lock(g_mutex);
     if (hrtf::load()) g_full_hrtf = true;
 }
 } // namespace xdsound
