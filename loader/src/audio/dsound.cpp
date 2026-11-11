@@ -1,7 +1,7 @@
 // HLE replacement for the Xbox DirectSound library (DSOUND section), which talks to the MCPX audio
 // hardware. Buffers and streams are mixed in software into one 48 kHz stereo host stream (XAudio2):
-// PCM 8/16-bit and Xbox ADPCM sources, linear resampling, volume, mix-bin routing folded down to
-// stereo, and a simple 3D model (distance rolloff + panning) for 3D voices. The output clock drives
+// PCM 8/16-bit and Xbox ADPCM sources, the voice processor's interpolation, routes and gains (mix_voice), mix bins
+// folded to the speakers, and the library's 3D model (distance, HRTF, doppler) for 3D voices. The output clock drives
 // play positions and stream packet completion, so the game's audio/music/video code runs as on the Xbox.
 // Without a host audio device the same mixer runs on a timer and the result is discarded.
 #include "audio/hrtf.h"
@@ -112,11 +112,13 @@ struct Voice : Object {
     MixBinVolumePair bins[8] = {};
     bool is3d = false;
     Ds3dBuffer ds3d = {};
-    // resampler: the two source frames around the output position
-    float s0[2] = {}, s1[2] = {};
-    double phase = 0;
+    // interpolator (mix_voice): frames -3..+4 around the 16.16 cursor (frame 0 at hist[3]), zero frames past the end
+    float hist[8][2] = {};
+    uint32_t frac = 0, tail = 0;
     bool primed = false;
-    hrtf::State hrtf;      // a 3D voice's head-related filter (hrtf_voice)
+    float ramp_from[8] = {}; // each route's gain in the last block (mix_voice ramps from it)
+    bool ramp_valid = false;
+    hrtf::State hrtf;      // a 3D voice's head-related filter (mix_voice)
     // Xbox ADPCM: one decoded block
     const uint8_t *dec_ptr = nullptr;
     int16_t dec[2][ADPCM_SAMPLES] = {};
@@ -165,6 +167,7 @@ struct Completion {
 
 struct Listener {
     Vec3 pos = {0, 0, 0}, front = {0, 0, 1}, top = {0, 1, 0};
+    Vec3 vel = {0, 0, 0}; // IDirectSound_SetVelocity
     float rolloff = 1.0f, distance = 1.0f;
 };
 
@@ -325,273 +328,310 @@ Vec3 cross(Vec3 a, Vec3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.
 // standard image) feeds bin 10 (I3DL2) to its effect 4. 11 until an image is downloaded.
 uint32_t g_reverb_bin = 11;
 
-// A 3D voice's distance attenuation as the library computes it (CDirectSound3DCalculator 0x37D504 / 0x37D1BA):
-// -2000 log10(1 + rolloff (d / min - 1)) millibels, d clamped to [min, max], rolloff = the listener's x the voice's; 1 for
-// the other voices. The console applies it to every bin of the voice, its reverb send included (FUN_0037F56A).
-float ds3d_att(const Voice &v)
+// ---- The voice processor and DirectSound's speaker mix, as the console does them (docs/05 §10 of the port project) ----
+//
+// Each voice has up to 8 routes, one per entry of its mix bins. A route's gain is the voice's volume minus its headroom
+// plus the entry's volume, and for a 3D voice the library's terms for that bin (FUN_0037F56A), in millibels; then the
+// destination bin's headroom divides it by 2^n (hakuX-lr #166: "the destination bin's headroom", HRTF sends included).
+// A 2D voice's route k carries its channel k % channels; a 3D voice's routes 0-1 carry the left ear and 2-3 the right
+// ear of its HRTF, routes 4-7 the voice itself, dry (hakuX-lr #166). Every route's gain ramps from the previous frame's
+// over 32 samples, from silence for a voice that starts (hakuX-lr vp.c, measured). The bins then reach the speakers as
+// DirectSound's own DSP image takes them: stereo with the weights measured in Halo (hakuX-lr stereo_route.h), 5.1 each
+// to its speaker; the reverb's bin feeds the reverb.
+
+// Mix-bin headroom, DSHEADROOM_DEFAULT 1 (the XDK's dsound.h): the library fills bins 0-30 with 1 and bin 31 with 0 when
+// it starts (FUN_0037C627, x2.1 0x37C695); SetMixBinHeadroom changes one (0..7).
+uint8_t g_bin_headroom[32] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0};
+float bin_scale(uint32_t bin) { return 1.0f / (float)(1u << (g_bin_headroom[bin & 31] & 7)); }
+
+// A bin on the speakers. Stereo: DirectSound's DSP weights for a stereo console, measured in Halo (hakuX-lr
+// stereo_route.h): front pair 0/1 and the 3D front pair 6/7 to their side at 1, centre 2 to both at -3 dB, back pair 4/5
+// and the 3D back pair 8/9 to their side at -3 dB, the LFE not at all. Bins 19-24 are this game's DSP image's FXSEND_8-13,
+// which it carries to FL FR C LFE BL BR (NOTES.md "Sound effects image"): as those speakers. Other bins are effect
+// sends: not heard on the speakers (the reverb's one feeds the reverb, mix_block).
+constexpr float kSide = 0.70710678f;
+bool bin_stereo(uint32_t bin, float &l, float &r)
 {
-    if (!v.is3d || v.ds3d.dwMode == DS3DMODE_DISABLE) return 1.0f;
+    switch (bin) {
+    case 0: case 6: case 19: l = 1, r = 0; return true;
+    case 1: case 7: case 20: l = 0, r = 1; return true;
+    case 2: case 21: l = r = kSide; return true;
+    case 4: case 8: case 23: l = kSide, r = 0; return true;
+    case 5: case 9: case 24: l = 0, r = kSide; return true;
+    default: return false;
+    }
+}
+enum { FL, FR, FC, LFE, BL, BR };
+int bin_speaker(uint32_t bin) // 5.1: each bin to its own speaker
+{
+    switch (bin) {
+    case 0: case 6: case 19: return FL;
+    case 1: case 7: case 20: return FR;
+    case 2: case 21: return FC;
+    case 3: case 22: return LFE;
+    case 4: case 8: case 23: return BL;
+    case 5: case 9: case 24: return BR;
+    default: return -1;
+    }
+}
+
+// The library's default mix bins (FUN_0037B87B): 3D voices 0x3963FC {6, 8, 7, 9, 10}; the others by channel count
+// (0x383BF4): one or two channels {0, 1}, four {0, 1, 4, 5}, six {0..5}; all at 0 dB.
+const MixBinVolumePair kBins3d[5] = {{6, 0}, {8, 0}, {7, 0}, {9, 0}, {10, 0}};
+const MixBinVolumePair kBins2[2] = {{0, 0}, {1, 0}}, kBins4[4] = {{0, 0}, {1, 0}, {4, 0}, {5, 0}};
+const MixBinVolumePair kBins6[6] = {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}};
+const MixBinVolumePair *voice_bins(const Voice &v, uint32_t &n)
+{
+    if (v.nbins) return n = v.nbins, v.bins;
+    if (v.is3d) return n = 5, kBins3d;
+    uint32_t ch = channels(v.fmt);
+    if (ch >= 6) return n = 6, kBins6;
+    if (ch >= 4) return n = 4, kBins4;
+    return n = 2, kBins2;
+}
+
+// A 3D voice's distance attenuation as the library computes it (CDirectSound3DCalculator 0x37D504 / 0x37D1BA):
+// -2000 log10(1 + rolloff (d / min - 1)) millibels, d clamped to [min, max], rolloff = the listener's x the voice's.
+float ds3d_distance(const Voice &v)
+{
     const Ds3dBuffer &p = v.ds3d;
     Vec3 rel = p.dwMode == DS3DMODE_HEADRELATIVE ? p.vPosition : sub(p.vPosition, g_listener.pos);
-    float d = sqrtf(dot(rel, rel));
+    return sqrtf(dot(rel, rel));
+}
+int32_t ds3d_att_mb(const Voice &v)
+{
+    const Ds3dBuffer &p = v.ds3d;
     float mn = p.flMinDistance > 0 ? p.flMinDistance : 1.0f;
     float mx = p.flMaxDistance > mn ? p.flMaxDistance : 1e9f;
     float roll = g_listener.rolloff * (p.flRolloffFactor > 0 ? p.flRolloffFactor : 1.0f);
-    return mn / (mn + roll * (std::clamp(d, mn, mx) - mn));
+    float d = std::min(ds3d_distance(v), mx);
+    if (d <= mn) return 0;
+    return std::max(-10000, (int32_t)(-2000.0f * log10f(1.0f + roll * (d / mn - 1.0f))));
 }
 
-// m[source channel][output L/R]; send[source channel] = level into the I3DL2 reverb (mix bin g_reverb_bin)
-void voice_gains(const Voice &v, float m[2][2], float send[2])
-{
-    float amp = db_to_amp(v.volume - (int32_t)v.headroom);
-    m[0][0] = m[0][1] = m[1][0] = m[1][1] = 0.0f;
-    send[0] = send[1] = 0.0f;
-    // The reverb send as the other bins: each entry of the voice's mix bins takes one of its channels (a stereo voice's
-    // alternate, a mono voice's one: the fetch repeats it in the second, which was sent too before 2.2.19, 6 dB over),
-    // at the voice's volume and the entry's, and for a 3D voice its distance attenuation (none before 2.2.19: far
-    // sounds reverberated as loud as near ones). The I3DL2 source terms are 0 dB: the game never sets them.
-    float att3 = ds3d_att(v);
-    for (uint32_t k = 0; k < v.nbins; k++)
-        if (v.bins[k].dwMixBin == g_reverb_bin) send[channels(v.fmt) > 1 ? (k & 1) : 0] += amp * att3 * db_to_amp(v.bins[k].lVolume);
-    if (v.is3d && v.ds3d.dwMode != DS3DMODE_DISABLE) {
-        const Ds3dBuffer &p = v.ds3d;
-        Vec3 rel = p.dwMode == DS3DMODE_HEADRELATIVE ? p.vPosition : sub(p.vPosition, g_listener.pos);
-        float d = sqrtf(dot(rel, rel));
-        Vec3 right = cross(g_listener.top, g_listener.front); // left-handed: x = y cross z
-        float rl = sqrtf(dot(right, right));
-        float x = (d > 1e-4f && rl > 1e-6f) ? dot(rel, right) / (d * rl) : 0.0f;
-        float att = ds3d_att(v);
-        x = std::clamp(x, -1.0f, 1.0f);
-        float l = sqrtf(0.5f * (1 - x)) * 1.41421356f, r = sqrtf(0.5f * (1 + x)) * 1.41421356f;
-        m[0][0] = m[1][0] = 0.5f * amp * att * l; // a stereo source is folded to mono first
-        m[0][1] = m[1][1] = 0.5f * amp * att * r;
-        if (channels(v.fmt) == 1) { // its one channel, once: the fetch repeats it in the second (it was 1.5 times before 2.2.19)
-            m[0][0] *= 2;
-            m[0][1] *= 2;
-            m[1][0] = m[1][1] = 0.0f;
-        }
-        return;
-    }
-    uint32_t ch = channels(v.fmt) > 1 ? 2 : 1;
-    MixBinVolumePair defaults[2] = {{0, 0}, {1, 0}};
-    const MixBinVolumePair *bins = v.nbins ? v.bins : defaults;
-    uint32_t n = v.nbins ? v.nbins : 2;
-    for (uint32_t k = 0; k < n; k++) {
-        float a = amp * db_to_amp(bins[k].lVolume);
-        int src = ch == 2 ? (int)(k & 1) : 0;
-        // The game's DSP effects image (not emulated) takes FXSEND_8-13 (bins 19-24) as FL/FR/C/LFE/BL/BR
-        // and carries them to the speakers; fold those to stereo like the speaker bins.
-        switch (bins[k].dwMixBin) {
-        case 0: case 4: case 6: case 8: case 19: case 23: m[src][0] += a; break; // front/back/3D left
-        case 1: case 5: case 7: case 9: case 20: case 24: m[src][1] += a; break; // front/back/3D right
-        case 2: case 21: m[src][0] += a * 0.7071f; m[src][1] += a * 0.7071f; break; // center
-        default: break; // LFE and the other effect sends are not mixed (11 = reverb, above)
-        }
-    }
-}
+bool g_full_hrtf; // the game called DirectSoundUseFullHRTF (use_full_hrtf)
+bool g_surround;  // the speakers are surround or Dolby Digital / DTS: the library's front / back split (FUN_0037BA5E)
 
-// 5.1 (Dolby Surround, Dolby Digital, DTS): m[source channel][FL FR C LFE BL BR]. The Xbox mix bins go to their own
-// speakers (0-5 the speaker bins, 6-9 the 3D front and back pairs, 19-24 the DSP image's FXSEND_8-13 outputs), the LFE
-// too. A 3D voice (folded to mono, as in voice_gains) is attenuated by distance and panned left / right as there; its
-// 3D pairs split front / back by the listener's front (power-preserving), the centre takes the front share and the
-// LFE its level as set (route A's dsound_hle.cpp Locate / BinScale does the same); each bin at its own volume.
-enum { FL, FR, FC, LFE, BL, BR };
-void voice_gains6(const Voice &v, float m[2][6], float send[2], bool hrtf_shares = false)
-{
-    float m2[2][2];
-    voice_gains(v, m2, send); // the reverb send
-    for (int s = 0; s < 2; s++)
-        for (int c = 0; c < 6; c++) m[s][c] = 0.0f;
-    if (v.is3d && v.ds3d.dwMode != DS3DMODE_DISABLE) {
-        const Ds3dBuffer &p = v.ds3d;
-        Vec3 rel = p.dwMode == DS3DMODE_HEADRELATIVE ? p.vPosition : sub(p.vPosition, g_listener.pos);
-        float d = sqrtf(dot(rel, rel));
-        Vec3 right = cross(g_listener.top, g_listener.front);
-        float rl = sqrtf(dot(right, right)), fl = sqrtf(dot(g_listener.front, g_listener.front));
-        float x = (d > 1e-4f && rl > 1e-6f) ? std::clamp(dot(rel, right) / (d * rl), -1.0f, 1.0f) : 0.0f;
-        float y = (d > 1e-4f && fl > 1e-6f) ? std::clamp(dot(rel, g_listener.front) / (d * fl), -1.0f, 1.0f) : 1.0f;
-        float att = ds3d_att(v);
-        float l = sqrtf(0.5f * (1 - x)) * 1.41421356f, r = sqrtf(0.5f * (1 + x)) * 1.41421356f;
-        float back = 0.5f * (1 - y), fw = sqrtf(1 - back), bw = sqrtf(back);
-        float base = db_to_amp(v.volume - (int32_t)v.headroom) * att * (channels(v.fmt) == 1 ? 1.0f : 0.5f); // a stereo source folded to mono
-        if (hrtf_shares) l = r = base = 1.0f; // the ears' filters place it; mix_voice6 applies the gain
-        static const MixBinVolumePair k3d[4] = {{6, 0}, {7, 0}, {8, 0}, {9, 0}};
-        const MixBinVolumePair *bins = v.nbins ? v.bins : k3d;
-        uint32_t n = v.nbins ? v.nbins : 4;
-        float g[6] = {};
-        for (uint32_t k = 0; k < n; k++) {
-            float a = base * db_to_amp(bins[k].lVolume);
-            switch (bins[k].dwMixBin) {
-            case 6: g[FL] += a * l * fw; break;
-            case 7: g[FR] += a * r * fw; break;
-            case 8: g[BL] += a * l * bw; break;
-            case 9: g[BR] += a * r * bw; break;
-            case 2: g[FC] += a * fw; break;
-            case 3: g[LFE] += a; break;
-            case 0: g[FL] += a; break;
-            case 1: g[FR] += a; break;
-            case 4: g[BL] += a; break;
-            case 5: g[BR] += a; break;
-            default: break; // the reverb's and the other effect sends
-            }
-        }
-        for (int s = 0; s < 2; s++) // a mono voice's one channel, once (the fetch repeats it; it was twice before 2.2.19)
-            for (int c = 0; c < 6; c++) m[s][c] = s == 1 && channels(v.fmt) == 1 ? 0.0f : g[c];
-        return;
-    }
-    float amp = db_to_amp(v.volume - (int32_t)v.headroom);
-    uint32_t ch = channels(v.fmt) > 1 ? 2 : 1;
-    MixBinVolumePair defaults[2] = {{0, 0}, {1, 0}};
-    const MixBinVolumePair *bins = v.nbins ? v.bins : defaults;
-    uint32_t n = v.nbins ? v.nbins : 2;
-    for (uint32_t k = 0; k < n; k++) {
-        float a = amp * db_to_amp(bins[k].lVolume);
-        int src = ch == 2 ? (int)(k & 1) : 0;
-        switch (bins[k].dwMixBin) {
-        case 0: case 6: case 19: m[src][FL] += a; break;
-        case 1: case 7: case 20: m[src][FR] += a; break;
-        case 2: case 21: m[src][FC] += a; break;
-        case 3: case 22: m[src][LFE] += a; break;
-        case 4: case 8: case 23: m[src][BL] += a; break;
-        case 5: case 9: case 24: m[src][BR] += a; break;
-        default: break; // the other effect sends (the reverb's: voice_gains)
-        }
-    }
-}
+// What a 3D voice adds to each of its bins, in millibels (GetVoiceData 0x37B204 -> FUN_0037F56A), and its HRTF filter.
+// The game never sets cones (the library's default 360 / 360: 0 dB, 0x37D615) nor I3DL2 source parameters (direct and
+// room 0 dB, FUN_00381B1F), so the terms are the distance, the front / back split and the centre / front shares.
+struct Voice3d {
+    int32_t front_pair, back_pair, centre, other, reverb; // bins 6/7, 8/9, 2, the rest, the I3DL2 reverb's
+    int32_t doppler; // pitch shift, 4096ths of an octave
+    hrtf::Filter filter;
+    bool filtered; // HRTF on (the game asked for it, black.ini hrtf)
+};
+int32_t clamp_mb(int32_t mb) { return std::min(0, std::max(-10000, mb)); }
+// The library's power-to-millibel conversion (0x37D1F1): 1000 log10, <= 0 silent, >= 1 unity, truncated.
+int32_t pow_mb(float x) { return x <= 0 ? -10000 : x >= 1 ? 0 : (int32_t)(1000.0f * log10f(x)); }
 
-float g_send[audio_out::BLOCK]; // reverb input of the block being mixed
-
-// The head-related transfer function (audio/hrtf.h): Ninja Gaiden Black calls DirectSoundUseFullHRTF at start, and on the
-// console every 3D voice is then filtered per ear by its direction, the far ear delayed: quieter and darker than a
-// plain pan, most behind and on the far side. true: this voice is one, its filter and its gain (volume and distance, as
-// voice_gains: the library's own attenuation, 0x37D504) set; the voice is folded to mono first, each channel once.
-bool g_full_hrtf; // the game asked for it (use_full_hrtf)
-bool hrtf_voice(const Voice &v, hrtf::Filter &f, float &gain)
+void voice_3d(const Voice &v, Voice3d &t)
 {
-    if (!g_full_hrtf || !g_cfg.hrtf || !v.is3d || v.ds3d.dwMode == DS3DMODE_DISABLE || !hrtf::loaded()) return false;
     const Ds3dBuffer &p = v.ds3d;
     bool head = p.dwMode == DS3DMODE_HEADRELATIVE; // the library's default axes then (0x37D2C0)
     Vec3 rel = head ? p.vPosition : sub(p.vPosition, g_listener.pos);
     Vec3 fr = head ? Vec3{0, 0, 1} : g_listener.front, tp = head ? Vec3{0, 1, 0} : g_listener.top;
     Vec3 rt = head ? Vec3{1, 0, 0} : cross(tp, fr); // the library's right: top x front (0x37D23A)
     float r3[3] = {rel.x, rel.y, rel.z}, f3[3] = {fr.x, fr.y, fr.z}, t3[3] = {tp.x, tp.y, tp.z}, x3[3] = {rt.x, rt.y, rt.z};
-    float az, el;
+    float az = 0, el = 0;
     hrtf::angles(r3, f3, t3, x3, az, el);
-    // the library folds sources behind to the front when the speakers are surround or Dolby Digital (0x37FD0B)
-    hrtf::pick(az, el, g_cfg.audio_ac3 || g_cfg.audio_dts || g_cfg.audio_mode == 2, f);
-    gain = db_to_amp(v.volume - (int32_t)v.headroom) * ds3d_att(v);
-    return true;
-}
-float g_hrtf_in[audio_out::BLOCK], g_hrtf_l[audio_out::BLOCK], g_hrtf_r[audio_out::BLOCK];
-
-template <typename Fetch> bool mix_voice(Voice &v, float *out, Fetch fetch)
-{
-    float m[2][2], send[2];
-    voice_gains(v, m, send);
-    bool wet = g_cfg.reverb && (send[0] > 0 || send[1] > 0);
-    hrtf::Filter hf;
-    float hg = 0;
-    bool hr = hrtf_voice(v, hf, hg), mono = channels(v.fmt) == 1;
-    if (hr) memset(g_hrtf_in, 0, sizeof g_hrtf_in);
-    auto hrtf_out = [&] { // the block's mono input through the ears' filters
-        if (!hr) return;
-        hrtf::process(v.hrtf, hf, g_hrtf_in, g_hrtf_l, g_hrtf_r, audio_out::BLOCK);
-        for (uint32_t i = 0; i < audio_out::BLOCK; i++) {
-            out[2 * i] += g_hrtf_l[i];
-            out[2 * i + 1] += g_hrtf_r[i];
-        }
-    };
-    uint32_t rate = v.frequency ? v.frequency : v.fmt.nSamplesPerSec;
-    double step = (rate ? rate : audio_out::RATE) / (double)audio_out::RATE;
-    if (!v.primed) {
-        if (!fetch(v.s0)) return false;
-        if (!fetch(v.s1)) memcpy(v.s1, v.s0, sizeof v.s1);
-        v.phase = 0;
-        v.primed = true;
+    int32_t dist = clamp_mb(ds3d_att_mb(v));
+    // front / back (0x37D6A5): only with surround speakers or Dolby Digital; stereo has the front pair alone
+    int32_t front = 0, back = -10000;
+    if (g_surround) {
+        float w = 0.5f + (1.0f - fabsf(el) / 90.0f) * (fabsf(az) / 90.0f - 1.0f);
+        w = std::min(1.0f, std::max(0.0f, w));
+        float dfac = (g_listener.distance > 0 ? g_listener.distance : 1.0f) * (p.flDistanceFactor > 0 ? p.flDistanceFactor : 1.0f);
+        float s = dfac * sqrtf(dot(rel, rel));
+        if (s < 0.5f) w = 0.5f + 0.5f * s * (w - 0.5f); // close sources lean to an even split, as the code does
+        front = pow_mb(1.0f - w), back = pow_mb(w);
     }
+    // centre / front shares (GetCenterVolume): when the voice's fifth bin is the centre (FUN_0037B87B)
+    int32_t cfront = 0, ccentre = 0;
+    if (v.nbins >= 5 && v.bins[4].dwMixBin == 2) hrtf::centre(az, el, cfront, ccentre);
+    t.front_pair = clamp_mb(cfront + front + dist);
+    t.back_pair = clamp_mb(back + dist);
+    t.centre = clamp_mb(ccentre + front + dist);
+    t.other = dist;
+    t.reverb = dist;
+    t.filtered = g_full_hrtf && g_cfg.hrtf && hrtf::loaded();
+    if (t.filtered) hrtf::pick(az, el, g_surround, t.filter);
+    // Doppler, as the library does it. The speed along the line from the listener to the source (0x37D4B9: the
+    // source's velocity, less the listener's unless head-relative, dotted with the unit vector 0x37D277 / 0x37EB29
+    // makes), times the distance and doppler factors of listener and source (CDirectSound3DCalculator_GetVoiceData at
+    // 0x37B397; the game sets none of them, all 1 by default), becomes a pitch of 4096 log2(1 - x / 342), rounded,
+    // +4096 at x <= -342 and -32767 at x >= 342 (0x37D816); the voice's pitch adds it (0x37F7BE).
+    t.doppler = 0;
+    float len = sqrtf(dot(rel, rel));
+    if (len > 0) {
+        Vec3 dir = {rel.x / len, rel.y / len, rel.z / len};
+        float x = dot(head ? p.vVelocity : sub(p.vVelocity, g_listener.vel), dir);
+        x *= (g_listener.distance > 0 ? g_listener.distance : 1.0f) * p.flDistanceFactor * p.flDopplerFactor;
+        if (x >= 342.0f) t.doppler = -32767;
+        else if (x <= -342.0f) t.doppler = 4096;
+        else if (x != 0) t.doppler = (int32_t)lrintf(4096.0f * log2f(1.0f - x * 0.0029239766f));
+    }
+}
+
+// A route's gain from its millibels, as the console gets it. The library writes the route's attenuation register as
+// min(floor(-mB * 64 / 100), 0xFFF), 1/64 dB steps (FUN_0037F56A at 0x37F6F3); the voice processor turns it into a gain
+// in 1/16384 (hakuX-lr vp.c attenuation_gain, measured): straight lines between whole decibels through
+// round(4095 * 10^(-k / 20)), rounded down, from 48 dB a straight line to nothing at 63 dB.
+uint32_t g_att_nodes[64];
+void att_init()
+{
+    for (int k = 0; k <= 48; k++) g_att_nodes[k] = (uint32_t)floor(4095.0 * pow(10.0, -k / 20.0) + 0.5);
+    for (int k = 49; k < 64; k++) g_att_nodes[k] = g_att_nodes[48] * (63 - k) / 15;
+}
+float route_gain(int32_t mb)
+{
+    if (mb >= 0) return 1.0f;
+    uint32_t att = std::min<uint32_t>((uint32_t)(-(int64_t)mb) * 64 / 100, 0xFFF);
+    if (att == 0) return 1.0f;
+    if (att >= 63 * 64) return 0.0f;
+    uint32_t n0 = g_att_nodes[att >> 6], n1 = g_att_nodes[(att >> 6) + 1];
+    return (float)((256 * n0 - 4 * (n0 - n1) * (att & 63)) >> 6) / 16384.0f;
+}
+
+// Route gains of the voice for this block, before the bin's headroom and the speaker weights: g[k] linear.
+// src[k]: 0 / 1 the voice's channel, 2 the left ear, 3 the right ear, 4 the voice folded to mono.
+struct Routes {
+    uint32_t n;
+    float g[8];
+    uint8_t src[8];
+    uint32_t bin[8];
+};
+void voice_routes(const Voice &v, Routes &r, Voice3d *t3)
+{
+    uint32_t n;
+    const MixBinVolumePair *bins = voice_bins(v, n);
+    r.n = std::min<uint32_t>(n, 8);
+    int32_t base = v.volume - (int32_t)v.headroom;
+    uint32_t ch = std::max<uint32_t>(1, channels(v.fmt));
+    for (uint32_t k = 0; k < r.n; k++) {
+        uint32_t bin = bins[k].dwMixBin & 31;
+        int32_t mb = base + bins[k].lVolume;
+        if (t3) {
+            mb += bin == 2 ? t3->centre : bin == 6 || bin == 7 ? t3->front_pair : bin == 8 || bin == 9 ? t3->back_pair
+                : bin == 10 ? t3->reverb : t3->other;
+            r.src[k] = k < 2 ? 2 : k < 4 ? 3 : 4;
+        } else {
+            r.src[k] = (uint8_t)((k % ch) & 1);
+        }
+        r.g[k] = route_gain(mb) * bin_scale(bin);
+        r.bin[k] = bin;
+    }
+}
+
+// The voice processor's eight-point Lagrange interpolator (hakuX-lr resample.c, xemu #3105, raddad772's probes): taps
+// -3..+4 around a 16.16 cursor, weights for 256 steps of the fraction rounded to 1/65536 ("hardware probes match at
+// eighth-sample offsets"), blended between adjacent steps; a whole-sample position takes the sample itself.
+float g_lagrange[257][8];
+void lagrange_init()
+{
+    for (int r = 0; r <= 256; r++)
+        for (int k = -3; k <= 4; k++) {
+            double w = 1.0;
+            for (int j = -3; j <= 4; j++)
+                if (j != k) w *= (r / 256.0 - j) / (k - j);
+            g_lagrange[r][k + 3] = (float)(round(w * 65536.0) / 65536.0);
+        }
+}
+
+float g_send[audio_out::BLOCK]; // reverb input of the block being mixed
+float g_src[5][audio_out::BLOCK]; // the block's route sources (see Routes::src)
+
+// Mixes one voice into out (outs channels: 2, or 6 for FL FR C LFE BL BR) and the reverb send.
+template <typename Fetch> bool mix_voice(Voice &v, float *out, uint32_t outs, Fetch fetch)
+{
+    Voice3d t3;
+    bool is3d = v.is3d && v.ds3d.dwMode != DS3DMODE_DISABLE;
+    if (is3d) voice_3d(v, t3);
+    Routes r;
+    voice_routes(v, r, is3d ? &t3 : nullptr);
+    uint32_t ch = channels(v.fmt);
+    // the voice's samples for the block, through the interpolator
+    uint32_t rate = v.frequency ? v.frequency : v.fmt.nSamplesPerSec;
+    uint32_t step = (uint32_t)llround((rate ? rate : audio_out::RATE) * 65536.0 / audio_out::RATE);
+    if (is3d && t3.doppler) { // the voice's pitch plus the doppler shift, within the register's -32767..8191 (0x37F81F)
+        double pitch = 4096.0 * log2((double)step / 65536.0) + t3.doppler;
+        step = (uint32_t)llround(exp2(std::min(8191.0, std::max(-32767.0, pitch)) / 4096.0) * 65536.0);
+    }
+    auto pull = [&] { // one more frame at hist[7]; zeros past the end
+        memmove(v.hist[0], v.hist[1], sizeof(float) * 2 * 7);
+        if (v.tail || !fetch(v.hist[7])) v.hist[7][0] = v.hist[7][1] = 0, v.tail++;
+    };
+    if (!v.primed) {
+        memset(v.hist, 0, sizeof v.hist);
+        v.tail = 0;
+        v.frac = 0;
+        for (int i = 0; i < 5; i++) pull(); // the voice's first frame at hist[3]
+        v.primed = true;
+        v.ramp_valid = false; // a voice that starts: its routes ramp up from silence
+    }
+    uint32_t done = audio_out::BLOCK; // samples produced (fewer when the voice ends)
     for (uint32_t i = 0; i < audio_out::BLOCK; i++) {
-        float t = (float)v.phase;
-        float a0 = v.s0[0] + (v.s1[0] - v.s0[0]) * t, a1 = v.s0[1] + (v.s1[1] - v.s0[1]) * t;
-        if (hr) g_hrtf_in[i] = (mono ? a0 : 0.5f * (a0 + a1)) * hg;
+        if (v.tail >= 5) { // past the last frame
+            done = i;
+            break;
+        }
+        float a[2];
+        if (!v.frac) a[0] = v.hist[3][0], a[1] = v.hist[3][1];
         else {
-            out[2 * i] += a0 * m[0][0] + a1 * m[1][0];
-            out[2 * i + 1] += a0 * m[0][1] + a1 * m[1][1];
-        }
-        if (wet) g_send[i] += a0 * send[0] + a1 * send[1];
-        v.phase += step;
-        while (v.phase >= 1.0) {
-            v.phase -= 1.0;
-            memcpy(v.s0, v.s1, sizeof v.s0);
-            if (!fetch(v.s1)) {
-                v.primed = false;
-                hrtf_out();
-                return false;
+            const float *w0 = g_lagrange[v.frac >> 8], *w1 = g_lagrange[(v.frac >> 8) + 1];
+            float b = (v.frac & 0xFF) / 256.0f;
+            a[0] = a[1] = 0;
+            for (int j = 0; j < 8; j++) {
+                float w = w0[j] + (w1[j] - w0[j]) * b;
+                a[0] += w * v.hist[j][0], a[1] += w * v.hist[j][1];
             }
         }
+        g_src[0][i] = a[0];
+        g_src[1][i] = ch > 1 ? a[1] : a[0];
+        g_src[4][i] = ch > 1 ? 0.5f * (a[0] + a[1]) : a[0];
+        v.frac += step;
+        while (v.frac >= 0x10000) {
+            v.frac -= 0x10000;
+            pull();
+        }
     }
-    hrtf_out();
-    return true;
-}
-
-// The same for 5.1: out holds FL FR C LFE BL BR frames
-template <typename Fetch> bool mix_voice6(Voice &v, float *out, Fetch fetch)
-{
-    float m[2][6], send[2];
-    voice_gains6(v, m, send);
-    bool wet = g_cfg.reverb && (send[0] > 0 || send[1] > 0);
-    // HRTF (hrtf_voice): the left ear to the left pair, the right ear to the right pair, at the bins' front / back
-    // shares; the centre and the LFE take the voice unfiltered. rg: per channel, the share of a centred source
-    // (voice_gains6 with hrtf_shares), the voice's own gain applied to the input.
-    hrtf::Filter hf;
-    float hg = 0;
-    bool hr = hrtf_voice(v, hf, hg), mono = channels(v.fmt) == 1;
-    float rg[6] = {};
-    if (hr) {
-        memset(g_hrtf_in, 0, sizeof g_hrtf_in);
-        float ms[2][6], ss[2];
-        voice_gains6(v, ms, ss, true);
-        for (int c = 0; c < 6; c++) rg[c] = ms[0][c];
+    for (uint32_t i = done; i < audio_out::BLOCK; i++) g_src[0][i] = g_src[1][i] = g_src[4][i] = 0;
+    if (is3d) { // the ears: the voice's HRTF filter on its mono signal, or the signal itself with HRTF off
+        if (t3.filtered) hrtf::process(v.hrtf, t3.filter, g_src[4], g_src[2], g_src[3], audio_out::BLOCK);
+        else memcpy(g_src[2], g_src[4], sizeof g_src[2]), memcpy(g_src[3], g_src[4], sizeof g_src[3]);
     }
-    auto hrtf_out = [&] {
-        if (!hr) return;
-        hrtf::process(v.hrtf, hf, g_hrtf_in, g_hrtf_l, g_hrtf_r, audio_out::BLOCK);
+    // the routes into the bins, each gain ramping from the last block's over 32 samples
+    for (uint32_t k = 0; k < r.n; k++) {
+        float to = r.g[k], from = v.ramp_valid ? v.ramp_from[k] : 0.0f;
+        v.ramp_from[k] = to;
+        if (to == 0 && from == 0) continue;
+        const float *s = g_src[r.src[k]];
+        float w[6] = {}, *dst = nullptr;
+        bool wet = r.bin[k] == g_reverb_bin;
+        if (wet) {
+            if (!g_cfg.reverb) continue;
+            dst = g_send;
+        } else if (outs == 2) {
+            if (!bin_stereo(r.bin[k], w[0], w[1])) continue;
+        } else {
+            int sp = bin_speaker(r.bin[k]);
+            if (sp < 0) continue;
+            w[sp] = 1;
+        }
         for (uint32_t i = 0; i < audio_out::BLOCK; i++) {
-            float *o = out + 6 * i;
-            o[FL] += g_hrtf_l[i] * rg[FL];
-            o[BL] += g_hrtf_l[i] * rg[BL];
-            o[FR] += g_hrtf_r[i] * rg[FR];
-            o[BR] += g_hrtf_r[i] * rg[BR];
-            o[FC] += g_hrtf_in[i] * rg[FC];
-            o[LFE] += g_hrtf_in[i] * rg[LFE];
-        }
-    };
-    uint32_t rate = v.frequency ? v.frequency : v.fmt.nSamplesPerSec;
-    double step = (rate ? rate : audio_out::RATE) / (double)audio_out::RATE;
-    if (!v.primed) {
-        if (!fetch(v.s0)) return false;
-        if (!fetch(v.s1)) memcpy(v.s1, v.s0, sizeof v.s1);
-        v.phase = 0;
-        v.primed = true;
-    }
-    for (uint32_t i = 0; i < audio_out::BLOCK; i++) {
-        float t = (float)v.phase;
-        float a0 = v.s0[0] + (v.s1[0] - v.s0[0]) * t, a1 = v.s0[1] + (v.s1[1] - v.s0[1]) * t;
-        if (hr) g_hrtf_in[i] = (mono ? a0 : 0.5f * (a0 + a1)) * hg;
-        else
-            for (int c = 0; c < 6; c++) out[6 * i + c] += a0 * m[0][c] + a1 * m[1][c];
-        if (wet) g_send[i] += a0 * send[0] + a1 * send[1];
-        v.phase += step;
-        while (v.phase >= 1.0) {
-            v.phase -= 1.0;
-            memcpy(v.s0, v.s1, sizeof v.s0);
-            if (!fetch(v.s1)) {
-                v.primed = false;
-                hrtf_out();
-                return false;
-            }
+            float g = i < 32 ? from + (to - from) * (i / 32.0f) : to;
+            float x = g * s[i];
+            if (dst) dst[i] += x;
+            else
+                for (uint32_t c = 0; c < outs; c++) out[outs * i + c] += x * w[c];
         }
     }
-    hrtf_out();
+    for (uint32_t k = r.n; k < 8; k++) v.ramp_from[k] = 0;
+    v.ramp_valid = true;
+    if (done < audio_out::BLOCK) {
+        v.primed = false;
+        return false;
+    }
     return true;
 }
 
@@ -635,7 +675,7 @@ void mix_report(const float *out, uint32_t samples)
 }
 
 // The console's audio settings (black.ini audio_mode, audio_ac3, audio_dts; read once, at the mixer's start):
-// stereo and mono mix two channels as before; Dolby Surround and Dolby Digital / DTS mix 5.1 (voice_gains6), which goes
+// stereo and mono mix two channels as before; Dolby Surround and Dolby Digital / DTS mix 5.1 (mix_voice with 6 channels), which goes
 // out as it is for the digital ones (audio_out: 5.1, Windows folding it for fewer speakers) and matrixed into two for
 // Dolby Surround: the rear pair as one surround channel, out of phase between left and right, as a Pro Logic decoder
 // takes it back out (Lt = L + 0.707 C - 0.707 S, Rt = R + 0.707 C + 0.707 S, S = 0.707 (BL + BR); the LFE is left out
@@ -652,7 +692,7 @@ void mix_block(float *out, std::vector<Completion> &done)
         if (!b->playing || !b->data || !b->bytes || !b->fmt.nBlockAlign) continue;
         uint32_t from = frames_to_bytes(b->fmt, b->cur);
         auto fetch = [&](float *f) { return buffer_fetch(*b, f); };
-        if (!(g_mix6 ? mix_voice6(*b, out, fetch) : mix_voice(*b, out, fetch))) b->playing = false;
+        if (!mix_voice(*b, out, g_mix6 ? 6 : 2, fetch)) b->playing = false;
         if (!b->notes.empty()) {
             notify_passed(*b, from, frames_to_bytes(b->fmt, b->cur));
             if (!b->playing) notify_stop(*b);
@@ -661,8 +701,7 @@ void mix_block(float *out, std::vector<Completion> &done)
     for (Stream *s : g_streams) {
         if (s->paused || s->queue.empty() || !s->fmt.nBlockAlign) continue;
         auto fetch = [&](float *f) { return stream_fetch(*s, f, done); };
-        if (g_mix6) mix_voice6(*s, out, fetch);
-        else mix_voice(*s, out, fetch);
+        mix_voice(*s, out, g_mix6 ? 6 : 2, fetch);
     }
     if (g_cfg.reverb) {
         static float applied = -1.0f; // the menu can change the level while running
@@ -689,10 +728,11 @@ void mix_block(float *out, std::vector<Completion> &done)
     else if (g_cfg.audio_mode == 1) // mono: both speakers the same
         for (uint32_t i = 0; i < audio_out::BLOCK; i++) out[2 * i] = out[2 * i + 1] = 0.5f * (out[2 * i] + out[2 * i + 1]);
     const uint32_t samples = audio_out::BLOCK * g_out_ch;
-    // The voices' headroom (init_voice) left the 2D ones 6 dB down, as on the console: 6 dB back over the whole mix, so
-    // the music and the 2D sounds play as loud as before 2.2.19 and the 3D ones keep the console's balance with them.
-    static const float makeup = db_to_amp(600);
-    for (uint32_t i = 0; i < audio_out::BLOCK * g_out_ch; i++) out[i] *= makeup;
+    // The output's level: the mix bins as they are, no gain added. Ninja Gaiden Black sets the headroom of bins 0-10 to 0
+    // at start (SetMixBinHeadroom, logged), so only the voices' own headroom remains: 2D voices 6 dB down, as on the
+    // console. 2.2.19 added 6 dB over the whole mix to match a capture-card recording of the main menu, which depends on
+    // the card's gain, not on the console; with it the title screen's attract cutscene peaked at 1.64 before the
+    // limiter (0.15% of samples over full scale), without it at 0.82 (2026-11-11, runs fdiag3 / rel2219).
     // Saturate at full scale, as the APU's DSP output does (its fixed-point moves limit); levels below pass unchanged.
     // This was a soft knee above 0.8, which also bent levels the Xbox plays as they are; in chapter 1 0.002% of the
     // samples pass 0.8 and none pass 1 (r237, docs/07 #13). The mixer log keeps the counts.
@@ -718,6 +758,11 @@ void __stdcall worker(void *)
     }
     g_out_ch = g_cfg.audio_ac3 || g_cfg.audio_dts ? 6 : 2;
     g_mix6 = g_out_ch == 6 || g_cfg.audio_mode == 2;
+    // the library's front / back split and HRTF folding: speakers surround (2) or Dolby Digital (FUN_0037BA5E; the
+    // speaker setting it reads is the one IDirectSound_GetSpeakerConfig reports: DTS as surround too)
+    g_surround = g_mix6;
+    lagrange_init();
+    att_init();
     logf("[dsound] audio: %s (XC_AUDIO 0x%x)", g_out_ch == 6 ? (g_cfg.audio_dts ? "DTS, 5.1 out" : "Dolby Digital, 5.1 out")
                                      : g_mix6 ? "Dolby Surround (5.1 matrixed into two)" : g_cfg.audio_mode == 1 ? "mono" : "stereo",
          ((uint32_t)g_cfg.audio_mode | (g_cfg.audio_ac3 ? 0x10000u : 0u) | (g_cfg.audio_dts ? 0x20000u : 0u)));
@@ -782,6 +827,9 @@ void init_voice(Voice &v, uint32_t kind, const WaveFormatEx *fmt, uint32_t flags
     v.ds3d.flMinDistance = 1.0f;
     v.ds3d.flMaxDistance = 1e9f;
     v.ds3d.flRolloffFactor = 1.0f;
+    // the library's defaults (0x3963B4, copied by FUN_0037C76B): distance and doppler factors 1
+    v.ds3d.flDistanceFactor = 1.0f;
+    v.ds3d.flDopplerFactor = 1.0f;
     set_bins(v, bins, false);
 }
 
@@ -1118,6 +1166,17 @@ HRESULT __stdcall IDirectSound_SetI3DL2Listener(Object *pThis, const I3dl2Listen
 HRESULT __stdcall IDirectSound_Simple1(Object *pThis) { STRACE("%p", pThis); return S_OK; }
 HRESULT __stdcall IDirectSound_Simple2(Object *pThis, uint32_t a) { STRACE("%p, 0x%x", pThis, a); return S_OK; }
 HRESULT __stdcall IDirectSound_Simple3(Object *pThis, uint32_t a, uint32_t b) { STRACE("%p, 0x%x, 0x%x", pThis, a, b); return S_OK; }
+
+// IDirectSound_SetMixBinHeadroom (CDirectSound_SetMixBinHeadroom x2.1 0x37AB0B): the bin's headroom, 0..7 (mix_voice)
+HRESULT __stdcall IDirectSound_SetMixBinHeadroom(Object *pThis, uint32_t bin, uint32_t headroom)
+{
+    STRACE("%p, %u, %u", pThis, bin, headroom);
+    std::lock_guard<std::recursive_mutex> lock(g_mutex);
+    if (bin < 32 && g_bin_headroom[bin] != (headroom & 7))
+        logf("[dsound] SetMixBinHeadroom: bin %u headroom %u (was %u)", bin, headroom & 7, g_bin_headroom[bin]);
+    if (bin < 32) g_bin_headroom[bin] = (uint8_t)(headroom & 7);
+    return S_OK;
+}
 HRESULT __stdcall IDirectSound_Simple5(Object *pThis, uint32_t a, uint32_t b, uint32_t c, uint32_t d)
 {
     STRACE("%p, 0x%x, 0x%x, 0x%x, 0x%x", pThis, a, b, c, d);
@@ -1227,6 +1286,21 @@ HRESULT __stdcall IDirectSoundBuffer_SetAllParameters(void *p, const Ds3dBuffer 
     return S_OK;
 }
 
+// IDirectSound_SetVelocity: the listener's velocity (doppler, voice_3d)
+HRESULT __stdcall IDirectSound_SetVelocity(Object *pThis, float x, float y, float z, uint32_t apply)
+{
+    STRACE("%p, %g %g %g, %u", pThis, x, y, z, apply);
+    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    g_listener.vel = {x, y, z};
+    return S_OK;
+}
+
+// IDirectSoundBuffer_SetFilter stays a no-op: Ninja Gaiden Black gives its 3D voices DLS2 with FC 0 and Q 0x8000
+// (logged 2026-11-11), which CMcpxVoiceClient_SetFilter (0x37FE22) writes to the voice as is; the voice processor's
+// low-pass at those values (hakuX-lr vp.c filter_coefficient / svf.h, measured: f = 2^(FC/4096) at most 65535/65536,
+// damping 1) passes every frequency within 0.01 dB. Their I3DL2 one-pole filters (FCB from FUN_00381B1F) stay open:
+// the game cannot set the source's I3DL2 parameters (no SetI3DL2Source in its image), and an HF level of 0 gives
+// a coefficient of 0 (FUN_00381987).
 HRESULT __stdcall IDirectSoundBuffer_Set1(void *p, uint32_t v) { STRACE("%p, 0x%x", p, v); return S_OK; }
 HRESULT __stdcall IDirectSoundBuffer_Set2(void *p, uint32_t a, uint32_t b) { STRACE("%p, 0x%x, 0x%x", p, a, b); return S_OK; }
 HRESULT __stdcall IDirectSoundBuffer_Set3(void *p, uint32_t a, uint32_t b, uint32_t c) { STRACE("%p, 0x%x, 0x%x, 0x%x", p, a, b, c); return S_OK; }
@@ -1387,7 +1461,7 @@ static const xd3d::Hle kTable[] = {
     H(0x0021964d, IDirectSound_SetEffectData, "s s s s s s", true),
     HN(0x00219677, "IDirectSound_CommitEffectData", IDirectSound_Simple1, "s", true),
     HN(0x0021968f, "IDirectSound_EnableHeadphones", IDirectSound_Simple2, "s s", true),
-    HN(0x002196ab, "IDirectSound_SetMixBinHeadroom", IDirectSound_Simple3, "s s s", true),
+    HN(0x002196ab, "IDirectSound_SetMixBinHeadroom", IDirectSound_SetMixBinHeadroom, "s s s", true),
     H(0x002196cb, IDirectSound_GetOutputLevels, "s s s", true),
     HN(0x002196eb, "IDirectSound_SynchPlayback", IDirectSound_Simple1, "s", true),
     HN(0x0021acf4, "IDirectSound_CommitDeferredSettings", IDirectSound_Simple1, "s", true),
@@ -1396,7 +1470,7 @@ static const xd3d::Hle kTable[] = {
     H(0x0021b258, IDirectSound_SetOrientation, "s s s s s s s s", true),
     H(0x0021b2a2, IDirectSound_SetPosition, "s s s s s", true),
     H(0x0021b2d7, IDirectSound_SetRolloffFactor, "s s s", true),
-    HN(0x0021b2fb, "IDirectSound_SetVelocity", IDirectSound_Simple5, "s s s s s", true),
+    HN(0x0021b2fb, "IDirectSound_SetVelocity", IDirectSound_SetVelocity, "s s s s s", true),
     H(0x0021b330, IDirectSound_SetI3DL2Listener, "s s s", true),
     H(0x002182a0, IDirectSoundBuffer_Release, "s", true),
     HN(0x00219703, "IDirectSoundBuffer_SetVolume", Voice_SetVolume, "s s", true),
@@ -1540,7 +1614,7 @@ static const xd3d::Hle kNgbTable[] = {
 using Hle = xd3d::Hle;
 #include "auxtab/dsound_tables.inc"
 
-// DirectSoundUseFullHRTF (d3d_ngb.cpp): 3D voices through the library's HRTF from now on (hrtf_voice)
+// DirectSoundUseFullHRTF (d3d_ngb.cpp): 3D voices through the library's HRTF from now on (voice_3d)
 void use_full_hrtf()
 {
     std::lock_guard<std::recursive_mutex> lock(g_mutex);

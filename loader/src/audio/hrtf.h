@@ -36,7 +36,12 @@ void angles(const float rel[3], const float front[3], const float top[3], const 
 // fold: speakers set to surround or Dolby Digital (sources behind are folded to the front, the rear speakers carry them).
 void pick(float az, float el, bool fold, Filter &out);
 
-// Filters n mono samples into left / right, moving from the state's filter to the target over the n samples.
+// GetCenterVolume (CFullHRTFSource, x2.1 0x37D774): within 45 degrees of straight ahead a 3D voice's dry copy goes to
+// the centre bin and its HRTF front pair is turned down: millibels for the front pair (bins 6 / 7) and the centre (bin 2),
+// from the library's own tables. false: the tables were not found.
+bool centre(float az, float el, int32_t &front_mb, int32_t &centre_mb);
+
+// Filters n mono samples into left / right, moving from the state's filter to the target over the first 32 samples.
 void process(State &s, const Filter &target, const float *in, float *left, float *right, uint32_t n);
 
 } // namespace hrtf

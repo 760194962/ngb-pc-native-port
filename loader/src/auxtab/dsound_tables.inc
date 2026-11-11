@@ -68,10 +68,10 @@ static const Hle kAuxDsoundNG04TU[] = {
     {0x00364c07u, "IDirectSound_Release", (void *)&IDirectSound_Release, "s", true}, // x2.1 0x0037a947
     {0x00365914u, "IDirectSound_GetSpeakerConfig", (void *)&IDirectSound_GetSpeakerConfig, "s s", true}, // x2.1 0x0037b685
     {0x00365930u, "IDirectSound_DownloadEffectsImage", (void *)&IDirectSound_DownloadEffectsImage, "s s s s s", true}, // x2.1 0x0037b6a1
-    {0x00365957u, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_Simple3, "s s s", true}, // by name; x2.1 0x0037b6c8
+    {0x00365957u, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_SetMixBinHeadroom, "s s s", true}, // by name; x2.1 0x0037b6c8
     {0x00366c89u, "IDirectSound_CommitDeferredSettings", (void *)&IDirectSound_Simple1, "s", true}, // x2.1 0x0037c9de
     {0x00366f6au, "IDirectSound_SetPosition", (void *)&IDirectSound_SetPosition, "s s s s s", true}, // by name; x2.1 0x0037ccbf
-    {0x00366f9fu, "IDirectSound_SetVelocity", (void *)&IDirectSound_Simple5, "s s s s s", true}, // by name; x2.1 0x0037ccf4
+    {0x00366f9fu, "IDirectSound_SetVelocity", (void *)&IDirectSound_SetVelocity, "s s s s s", true}, // by name; x2.1 0x0037ccf4
     {0x00366fd4u, "IDirectSound_SetI3DL2Listener", (void *)&IDirectSound_SetI3DL2Listener, "s s s", true}, // by name; x2.1 0x0037cd29
     {0x00364c22u, "IDirectSoundBuffer_Release", (void *)&IDirectSoundBuffer_Release, "s", true}, // x2.1 0x0037a962
     {0x00365977u, "IDirectSoundBuffer_SetVolume", (void *)&Voice_SetVolume, "s s", true}, // by name; x2.1 0x0037b6e8
@@ -105,10 +105,10 @@ static const Hle kAuxDsoundNG04DISC[] = {
     {0x00350e67u, "IDirectSound_Release", (void *)&IDirectSound_Release, "s", true}, // x2.1 0x0037a947
     {0x00351b74u, "IDirectSound_GetSpeakerConfig", (void *)&IDirectSound_GetSpeakerConfig, "s s", true}, // x2.1 0x0037b685
     {0x00351b90u, "IDirectSound_DownloadEffectsImage", (void *)&IDirectSound_DownloadEffectsImage, "s s s s s", true}, // x2.1 0x0037b6a1
-    {0x00351bb7u, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_Simple3, "s s s", true}, // by name; x2.1 0x0037b6c8
+    {0x00351bb7u, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_SetMixBinHeadroom, "s s s", true}, // by name; x2.1 0x0037b6c8
     {0x00352ee9u, "IDirectSound_CommitDeferredSettings", (void *)&IDirectSound_Simple1, "s", true}, // x2.1 0x0037c9de
     {0x003531cau, "IDirectSound_SetPosition", (void *)&IDirectSound_SetPosition, "s s s s s", true}, // by name; x2.1 0x0037ccbf
-    {0x003531ffu, "IDirectSound_SetVelocity", (void *)&IDirectSound_Simple5, "s s s s s", true}, // by name; x2.1 0x0037ccf4
+    {0x003531ffu, "IDirectSound_SetVelocity", (void *)&IDirectSound_SetVelocity, "s s s s s", true}, // by name; x2.1 0x0037ccf4
     {0x00353234u, "IDirectSound_SetI3DL2Listener", (void *)&IDirectSound_SetI3DL2Listener, "s s s", true}, // by name; x2.1 0x0037cd29
     {0x00350e82u, "IDirectSoundBuffer_Release", (void *)&IDirectSoundBuffer_Release, "s", true}, // x2.1 0x0037a962
     {0x00351bd7u, "IDirectSoundBuffer_SetVolume", (void *)&Voice_SetVolume, "s s", true}, // by name; x2.1 0x0037b6e8
@@ -141,7 +141,7 @@ static const Hle kAuxDsoundNG04DL[] = {
     {0x0008b629u, "IDirectSound_CreateSoundBuffer", (void *)&IDirectSound_CreateSoundBuffer, "s s s s", true},
     {0x00088b7bu, "IDirectSound_Release", (void *)&IDirectSound_Release, "s", true},
     {0x0008a2c2u, "DirectSoundDoWork", (void *)&DirectSoundDoWork, "", false},
-    {0x0008a07au, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_Simple3, "s s s", true},
+    {0x0008a07au, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_SetMixBinHeadroom, "s s s", true},
     {0x0008b3c1u, "IDirectSound_CommitDeferredSettings", (void *)&IDirectSound_Simple1, "s", true},
     {0x0008b671u, "IDirectSound_SetI3DL2Listener", (void *)&IDirectSound_SetI3DL2Listener, "s s s", true},
     {0x00088b91u, "IDirectSoundBuffer_Release", (void *)&IDirectSoundBuffer_Release, "s", true},
@@ -179,7 +179,7 @@ static const Hle kAuxDsoundNG04UP[] = {
     {0x00059cc1u, "IDirectSound_CreateSoundBuffer", (void *)&IDirectSound_CreateSoundBuffer, "s s s s", true},
     {0x0005841cu, "IDirectSound_Release", (void *)&IDirectSound_Release, "s", true},
     {0x00058ff8u, "DirectSoundDoWork", (void *)&DirectSoundDoWork, "", false},
-    {0x00058ebcu, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_Simple3, "s s s", true},
+    {0x00058ebcu, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_SetMixBinHeadroom, "s s s", true},
     {0x00058437u, "IDirectSoundBuffer_Release", (void *)&IDirectSoundBuffer_Release, "s", true},
     {0x00058edcu, "IDirectSoundBuffer_SetVolume", (void *)&Voice_SetVolume, "s s", true},
     {0x00058ef8u, "IDirectSoundBuffer_SetHeadroom", (void *)&Voice_SetHeadroom, "s s", true},
@@ -202,7 +202,7 @@ static const Hle kAuxDsoundXOD[] = {
     {0x001023aau, "IDirectSound_Release", (void *)&IDirectSound_Release, "s", true},
     {0x00103496u, "DirectSoundDoWork", (void *)&DirectSoundDoWork, "", false},
     {0x0010330eu, "IDirectSound_SetEffectData", (void *)&IDirectSound_SetEffectData, "s s s s s s", true},
-    {0x00103338u, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_Simple3, "s s s", true},
+    {0x00103338u, "IDirectSound_SetMixBinHeadroom", (void *)&IDirectSound_SetMixBinHeadroom, "s s s", true},
     {0x001023c5u, "IDirectSoundBuffer_Release", (void *)&IDirectSoundBuffer_Release, "s", true},
     {0x00103358u, "IDirectSoundBuffer_SetVolume", (void *)&Voice_SetVolume, "s s", true},
     {0x00103374u, "IDirectSoundBuffer_SetHeadroom", (void *)&Voice_SetHeadroom, "s s", true},
