@@ -42,6 +42,10 @@ const Hle *hle_resource_table_aux(const char *xbe, size_t *count);
 const Hle *hle_dsound_table_aux(const char *xbe, size_t *count);
 const Hle *hle_input_table_aux(const char *xbe, size_t *count);
 const Hle *hle_ngb_extra_table_aux(const char *xbe, size_t *count);
+// Library functions DirectSound itself calls that are kept as the game has them (audio/dsound.cpp): the I3DL2
+// conversion. addr / size: the library functions of the hooked sections, before any is patched; returns how many
+// of them it put in keep (at most max).
+size_t dsound_native_code(const uint32_t *addr, const uint32_t *size, size_t n, uint32_t *keep, size_t max);
 
 bool install_d3d_hooks(const ::BuildProfile &profile);
 

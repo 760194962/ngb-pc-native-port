@@ -380,6 +380,12 @@ bool install_d3d_hooks(const BuildProfile &profile)
             if (fn && fn != 0xFFFFFFFF) initializers.push_back(fn);
         }
     }
+    std::vector<uint32_t> keep(64);
+    {
+        std::vector<uint32_t> addr, size;
+        for (const LibFunc &f : g_funcs) addr.push_back(f.addr), size.push_back(f.size);
+        keep.resize(dsound_native_code(addr.data(), size.data(), addr.size(), keep.data(), keep.size()));
+    }
     int replaced = 0, stopped = 0, traps = 0, native = 0;
     for (size_t i = 0; i < g_funcs.size(); i++) {
         const LibFunc &f = g_funcs[i];
@@ -387,6 +393,10 @@ bool install_d3d_hooks(const BuildProfile &profile)
         const Hle *h = nullptr;
         for (const Hle &r : all)
             if (r.addr == f.addr) h = &r;
+        if (!h && std::find(keep.begin(), keep.end(), f.addr) != keep.end()) {
+            native++;
+            continue;
+        }
         if (!h && std::find(initializers.begin(), initializers.end(), f.addr) != initializers.end()) {
             native++;
             continue;

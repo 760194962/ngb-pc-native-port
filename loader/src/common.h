@@ -131,6 +131,8 @@ struct Config {
     bool reverb = true;        // mix the I3DL2 reverb send (--no-reverb to compare)
     bool hrtf = true;          // 3D voices through the Xbox HRTF when the game asks for it (audio/hrtf.h); black.ini hrtf,
                                // press-file "cfg:hrtf:0/1"
+    bool gpfx = true;          // the console's DSP effects for the 3D bins and the reverb (audio/gp_effects.h) when the game
+                               // loads the XDK's standard image; black.ini gpfx, press-file "cfg:gpfx:0/1"
     float reverb_gain = 1.0f;  // --reverb-gain: overall reverb level
     bool background = false;   // --background (tests): window minimised without focus, audio muted
     bool trace_fog_ps = false; // --trace-fog-ps (diagnosis): trace the frame after the first fogged pixel-shader draw

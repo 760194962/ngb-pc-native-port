@@ -329,6 +329,7 @@ void read_press_file(uint32_t now_ms)
                     else if (k == "shadowpulls") g_cfg.shadow_pull_slope = atoi(line.c_str() + c + 1);
                     else if (k == "shadowpcf") g_cfg.shadow_pcf = std::clamp(atoi(line.c_str() + c + 1), 0, 2);
                     else if (k == "hrtf") g_cfg.hrtf = v;
+                    else if (k == "gpfx") g_cfg.gpfx = v;
                     else if (k == "rhwtexmat") g_cfg.rhw_tex_matrix = v;
                     else if (k == "vsnap") g_cfg.vs_snap = v;
                     else if (k == "shadowpull") g_cfg.shadow_pull = atoi(line.c_str() + c + 1); // N times the pull (0 off)

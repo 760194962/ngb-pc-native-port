@@ -4,6 +4,7 @@
 // folded to the speakers, and the library's 3D model (distance, HRTF, doppler) for 3D voices. The output clock drives
 // play positions and stream packet completion, so the game's audio/music/video code runs as on the Xbox.
 // Without a host audio device the same mixer runs on a timer and the result is discarded.
+#include "audio/gp_effects.h"
 #include "audio/hrtf.h"
 #include "audio/reverb.h"
 #include "audio/output.h"
@@ -12,6 +13,7 @@
 #include "xthread.h"
 
 #include <algorithm>
+#include <intrin.h>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -21,6 +23,7 @@
 #include <vector>
 
 namespace xdsound {
+uint32_t g_i3dl2_convert; // the library's I3DL2 conversion, kept as the game has it (dsound_native_code)
 namespace {
 
 // ---- Xbox structures ----
@@ -196,6 +199,7 @@ struct VoiceLock {
 };
 VoiceLock g_mutex;
 uint64_t g_hold_ticks, g_hold_max; // the mixer's time holding it (mix_block)
+uint64_t g_gp_ticks, g_gp_max, g_gp_blocks; // the GP effects' time (mix_block)
 std::vector<Buffer *> g_buffers;
 std::vector<Stream *> g_streams;
 Object g_dsound;
@@ -351,6 +355,15 @@ Vec3 cross(Vec3 a, Vec3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.
 // BLACK's BkXboxFx.bin feeds bin 11 (FXSEND_0) to its effect 16; Ninja Gaiden Black's dsstdfx.bin (the XDK's
 // standard image) feeds bin 10 (I3DL2) to its effect 4. 11 until an image is downloaded.
 uint32_t g_reverb_bin = 11;
+// The console's GP effects (DownloadEffectsImage, mix_block): the model, what the I3DL2 conversion reads of the reverb's
+// state (words 0-0x45, as GetEffectData returns them: updated by the mixer), and a converted parameter set waiting
+// for the next frame. g_gp_lock: game thread (download, SetI3DL2Listener) against the mixer.
+std::mutex g_gp_lock;
+gpfx::Gp g_gp;
+bool g_gp_ready;
+uint32_t g_gp_head[0x46];
+uint32_t g_gp_params[0x42];
+bool g_gp_pending;
 
 // ---- The voice processor and DirectSound's speaker mix, as the console does them (docs/05 §10 of the port project) ----
 //
@@ -564,6 +577,8 @@ void lagrange_init()
 
 float g_send[audio_out::BLOCK]; // reverb input of the block being mixed
 float g_src[5][audio_out::BLOCK]; // the block's route sources (see Routes::src)
+float g_bins[11][audio_out::BLOCK]; // with the console's GP effects: the block's mix bins 0-10 (1.0 = full scale)
+bool g_gp_active;                   // this block goes through them (g_gp_ready and black.ini gpfx)
 
 // Mixes one voice into out (outs channels: 2, or 6 for FL FR C LFE BL BR) and the reverb send.
 template <typename Fetch> bool mix_voice(Voice &v, float *out, uint32_t outs, Fetch fetch)
@@ -632,7 +647,10 @@ template <typename Fetch> bool mix_voice(Voice &v, float *out, uint32_t outs, Fe
         const float *s = g_src[r.src[k]];
         float w[6] = {}, *dst = nullptr;
         bool wet = r.bin[k] == g_reverb_bin;
-        if (wet) {
+        if (g_gp_active) { // into the bin; the GP's effects read 6-10 (mix_block), no effect of this image reads 11 up
+            if (r.bin[k] > 10 || (r.bin[k] == 10 && !g_cfg.reverb)) continue;
+            dst = g_bins[r.bin[k]];
+        } else if (wet) {
             if (!g_cfg.reverb) continue;
             dst = g_send;
         } else if (outs == 2) {
@@ -697,6 +715,8 @@ void mix_report(const float *out, uint32_t samples)
          send_peak, g_reverb_bin, first.empty() ? "" : "; e.g. ", first.c_str());
     static double tick_us = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return 1e6 / (double)f.QuadPart; }();
     uint64_t wn = g_wait_n.exchange(0), wt = g_wait_ticks.exchange(0), wm = g_wait_max.exchange(0);
+    if (g_gp_blocks) logf("[dsound] GP effects: %.1f us a 480-sample block on average (longest %.1f)", g_gp_ticks * tick_us / g_gp_blocks, g_gp_max * tick_us);
+    g_gp_ticks = g_gp_max = g_gp_blocks = 0;
     logf("[dsound] lock: the mixer held it %.1f us a block on average (longest %.1f); the game waited %llu times, "
          "%.1f us in all, longest %.1f us", g_hold_ticks * tick_us / every, g_hold_max * tick_us, (unsigned long long)wn,
          wt * tick_us, wm * tick_us);
@@ -718,6 +738,8 @@ void mix_block(float *out, std::vector<Completion> &done)
 {
     memset(out, 0, sizeof(float) * audio_out::BLOCK * (g_mix6 ? 6 : 2));
     memset(g_send, 0, sizeof g_send);
+    g_gp_active = g_gp_ready && g_cfg.gpfx;
+    if (g_gp_active) memset(g_bins, 0, sizeof g_bins);
     LARGE_INTEGER t0, t1;
     g_mutex.lock();
     QueryPerformanceCounter(&t0);
@@ -743,7 +765,40 @@ void mix_block(float *out, std::vector<Completion> &done)
     g_mutex.unlock();
     g_hold_ticks += (uint64_t)(t1.QuadPart - t0.QuadPart);
     g_hold_max = std::max<uint64_t>(g_hold_max, (uint64_t)(t1.QuadPart - t0.QuadPart));
-    if (g_cfg.reverb) {
+    if (g_gp_active) {
+        // The console's GP, a 32-sample frame at a time (audio/gp_effects.h): bins 0-10 into its mix buffer as 24-bit
+        // words (the voice processor's; past full scale they saturate), effects 0-5, then the speaker bins 0-5 out: as
+        // they are for 5.1, or folded for two speakers as the image's EP downmix does (bin_stereo: the front pair at 1,
+        // the centre to both and the back pair to its side at -3 dB, no LFE).
+        auto to24 = [](float f) {
+            float v = f * 8388608.0f;
+            v = v > 8388607.0f ? 8388607.0f : v < -8388608.0f ? -8388608.0f : v;
+            return (uint32_t)_mm_cvtss_si32(_mm_set_ss(v)) & 0xFFFFFF; // round to nearest even, as lrintf (MXCSR default), without the CRT call
+        };
+        const float kSide = 0.70710678f, inv = 1.0f / 8388608.0f;
+        const float rv_gain = g_cfg.reverb_gain; // the launcher's reverb level, on the reverb's input (1: as the console)
+        LARGE_INTEGER g0, g1;
+        QueryPerformanceCounter(&g0);
+        std::lock_guard<std::mutex> g(g_gp_lock);
+        if (g_gp_pending) g_gp.set_reverb_params(g_gp_params), g_gp_pending = false;
+        for (uint32_t f0 = 0; f0 < audio_out::BLOCK; f0 += gpfx::FRAME) {
+            for (uint32_t b = 0; b < 11; b++)
+                for (uint32_t i = 0; i < gpfx::FRAME; i++) g_gp.mix[gpfx::FRAME * b + i] = to24(g_bins[b][f0 + i] * (b == 10 ? rv_gain : 1.0f));
+            g_gp.frame();
+            for (uint32_t i = 0; i < gpfx::FRAME; i++) {
+                float sp[6];
+                for (int c = 0; c < 6; c++) sp[c] = (float)((int32_t)(g_gp.mix[gpfx::FRAME * c + i] << 8) >> 8) * inv;
+                float *o = out + (g_mix6 ? 6 : 2) * (f0 + i);
+                if (g_mix6) memcpy(o, sp, sizeof sp);
+                else o[0] = sp[FL] + kSide * (sp[FC] + sp[BL]), o[1] = sp[FR] + kSide * (sp[FC] + sp[BR]);
+            }
+        }
+        memcpy(g_gp_head, &g_gp.x[0xF0], sizeof g_gp_head); // the reverb's words 0-0x45, for the next conversion
+        memcpy(g_send, g_bins[10], sizeof g_send);          // for the mixer log
+        QueryPerformanceCounter(&g1);
+        g_gp_ticks += (uint64_t)(g1.QuadPart - g0.QuadPart), g_gp_blocks++;
+        g_gp_max = std::max<uint64_t>(g_gp_max, (uint64_t)(g1.QuadPart - g0.QuadPart));
+    } else if (g_cfg.reverb) {
         static float applied = -1.0f; // the menu can change the level while running
         if (applied != g_cfg.reverb_gain) reverb::set_gain(applied = g_cfg.reverb_gain);
         if (!g_mix6) reverb::process(g_send, out, audio_out::BLOCK);
@@ -1124,6 +1179,30 @@ HRESULT __stdcall IDirectSound_DownloadEffectsImage(Object *pThis, void *pvImage
 {
     STRACE("%p, %p, %u, %p, %p", pThis, pvImage, size, pImageLoc, ppDesc);
     int bin = reverb_bin_from_image((const uint8_t *)pvImage, size);
+    { // The XDK's standard effects image (dsstdfx.bin; every supported build loads this one, byte for byte): its effects
+      // run as the console's GP runs them (audio/gp_effects.h), from the states the image holds (not scrambled)
+        const uint8_t *img = (const uint8_t *)pvImage;
+        uint64_t h = 0xCBF29CE484222325ull;
+        for (uint32_t i = 0; i < size; i++) h = (h ^ img[i]) * 0x100000001B3ull;
+        if (size == 15308 && h == 0xCEFCEFE5E0F055F4ull) {
+            uint32_t code = *(const uint32_t *)(img + 0x804), other = *(const uint32_t *)(img + 0x80C);
+            uint32_t desc = 0x818 + (code + other) * 4;
+            const uint32_t *st[6];
+            uint32_t words[6];
+            for (uint32_t e = 0; e < 6; e++) {
+                const uint32_t *m = (const uint32_t *)(img + desc + 8 + 32 * e);
+                st[e] = (const uint32_t *)(img + m[2]);
+                words[e] = m[3] / 4;
+            }
+            std::lock_guard<std::mutex> g(g_gp_lock);
+            g_gp = gpfx::Gp();
+            g_gp.load(st, words);
+            for (uint32_t i = 0; i < 0x46; i++) g_gp_head[i] = st[4][i] & 0xFFFFFF;
+            g_gp_pending = false;
+            g_gp_ready = true;
+            logf("[dsound] effects image: the XDK's standard one: its effects 0-5 run as on the console (gpfx %d)", g_cfg.gpfx ? 1 : 0);
+        }
+    }
     if (bin >= 0) g_reverb_bin = (uint32_t)bin;
     logf("[dsound] effects image (%u bytes): the I3DL2 reverb reads mix bin %u%s", size, g_reverb_bin,
          bin >= 0 ? "" : " (not found in the image: default)");
@@ -1185,6 +1264,26 @@ HRESULT __stdcall IDirectSound_SetI3DL2Listener(Object *pThis, const I3dl2Listen
              "reverb %d delay %.3f, diffusion %.0f density %.0f hf ref %.0f",
              p->lRoom, p->lRoomHF, p->flRoomRolloffFactor, p->flDecayTime, p->flDecayHFRatio, p->lReflections,
              p->flReflectionsDelay, p->lReverb, p->flReverbDelay, p->flDiffusion, p->flDensity, p->flHFReference);
+    // The console's reverb: the library's own conversion (CDirectSound's commit FUN_0037E5CC: the state's words 0-0x45
+    // as GetEffectData reads them, FUN_0037B4E5 on the listener's settings behind their dirty flags, then words
+    // 0x46-0x87 and the "changed" flag written back) and the result handed to the mixer for its next frame. Ninja
+    // Gaiden Black always applies at once (apply 0); a deferred set is converted here too, which only moves the moment.
+    if (p && g_gp_ready && g_i3dl2_convert) {
+        static uint32_t buf[0x224 / 4];
+        memset(buf, 0, sizeof buf);
+        {
+            std::lock_guard<std::mutex> g(g_gp_lock);
+            memcpy(buf, g_gp_head, sizeof g_gp_head);
+        }
+        struct { uint32_t flags; I3dl2Listener l; } in = {0xFFF, *p};
+        ((void(__stdcall *)(const void *, void *))(uintptr_t)g_i3dl2_convert)(&in, buf);
+        std::lock_guard<std::mutex> g(g_gp_lock);
+        for (uint32_t i = 0; i < 0x42; i++) g_gp_params[i] = buf[0x46 + i] & 0xFFFFFF;
+        g_gp_pending = true;
+        static int shown;
+        if (shown++ < 20) logf("[dsound] I3DL2 converted by the library: taps %06x %06x %06x, gains %06x %06x%s", buf[0x46], buf[0x4C],
+                               buf[0x54], buf[0x67], buf[0x68], apply & 1 ? " (deferred: applied now)" : "");
+    }
     if (p) {
         reverb::Params r;
         r.room = p->lRoom;
@@ -1674,5 +1773,45 @@ const Hle *hle_dsound_table_ngb(size_t *count)
 {
     *count = sizeof xdsound::kNgbTable / sizeof xdsound::kNgbTable[0];
     return xdsound::kNgbTable;
+}
+size_t dsound_native_code(const uint32_t *addr, const uint32_t *size, size_t n, uint32_t *keep, size_t max)
+{
+    // The library's I3DL2 conversion (x2.1 FUN_0037B4E5, called by CDirectSound's commit FUN_0037E5CC): found by its
+    // code, the rel32 fields skipped; found in all seven supported builds once (Ninja Gaiden Black's six, 2004's).
+    static const int16_t kPattern[] = {0x55, 0x8B, 0xEC, 0x51, 0x8D, 0x4D, 0x0C, 0xE8, -1, -1, -1, -1, 0x83, 0x3D, -1, -1, -1, -1,
+                                       0x00, 0x74, 0x08, 0x8D, 0x4D, 0xFC, 0xE8, -1, -1, -1, -1, 0xFF, 0x75, 0x0C, 0x8D, 0x4D, 0xFC,
+                                       0xFF, 0x75, 0x08, 0xE8, -1, -1, -1, -1, 0x8D, 0x4D, 0x0C, 0xE8, -1, -1, -1, -1, 0xC9, 0xC2, 0x08, 0x00};
+    const size_t plen = sizeof kPattern / sizeof kPattern[0];
+    auto is_function = [&](uint32_t a) {
+        for (size_t i = 0; i < n; i++)
+            if (addr[i] == a) return i;
+        return n;
+    };
+    size_t count = 0;
+    for (size_t i = 0; i < n && !count; i++) {
+        if (size[i] < plen) continue;
+        const uint8_t *p = (const uint8_t *)(uintptr_t)addr[i];
+        size_t k = 0;
+        while (k < plen && (kPattern[k] < 0 || p[k] == kPattern[k])) k++;
+        if (k == plen) keep[count++] = addr[i];
+    }
+    if (!count) return 0;
+    xdsound::g_i3dl2_convert = keep[0];
+    // its callees: every call (E8 rel32) in a kept function to the start of a library function, until none is new
+    for (size_t j = 0; j < count; j++) {
+        size_t f = is_function(keep[j]);
+        if (f == n) continue;
+        const uint8_t *p = (const uint8_t *)(uintptr_t)addr[f];
+        for (uint32_t o = 0; o + 5 <= size[f]; o++) {
+            if (p[o] != 0xE8) continue;
+            int32_t rel;
+            memcpy(&rel, p + o + 1, 4);
+            uint32_t t = addr[f] + o + 5 + (uint32_t)rel;
+            if (is_function(t) == n || std::find(keep, keep + count, t) != keep + count || count >= max) continue;
+            keep[count++] = t;
+        }
+    }
+    logf("[dsound] I3DL2 conversion: the library's own code at %08x, %zu functions kept", xdsound::g_i3dl2_convert, count);
+    return count;
 }
 } // namespace xd3d
