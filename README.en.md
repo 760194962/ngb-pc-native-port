@@ -146,7 +146,9 @@ port. The scripts are in `tools/`; the patches come with the release (new code, 
     Ultimate Tech Camera reads that count to tell an Ultimate Technique is on, so the left stick does not move the
     camera before essence is absorbed.
 - **Ninja Gaiden (2004) 1.06** (`tools/ng04_camera_menu.py`): the third-person free camera options in CONTROLLER
-  SETTINGS.
+  SETTINGS (on at start by default). The release's patch is made against the Redump disc's 1.02 `default.xbe` and
+  gives the 1.06 update with these options, run from the disc folder; on the launcher's 2004 Install page, choose it
+  as the Patch and it is applied once the image is unpacked.
 
 ## Status
 

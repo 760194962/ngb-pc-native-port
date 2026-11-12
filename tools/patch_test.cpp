@@ -1,5 +1,6 @@
 // Checks the launcher's patching (launcher/src/patch.cpp) from the command line: configure with -DNGB_PATCH_TEST=ON.
 //   ngb_patch_test <image: base iso or Redump disc> <patch.xdelta> <out.iso>
+//   ngb_patch_test --file <in> <patch.xdelta> <out>       (one file, as the 2004 install patches default.xbe)
 #include "../launcher/src/patch.h"
 
 #include <windows.h>
@@ -9,8 +10,14 @@
 
 int wmain(int argc, wchar_t **argv)
 {
+    if (argc == 5 && !wcscmp(argv[1], L"--file")) { // one file (2004's patch of the disc's default.xbe)
+        std::wstring err;
+        bool ok = patch::apply_file(argv[2], argv[3], argv[4], &err);
+        wprintf(L"%s %s\n", ok ? L"done" : L"FAILED", err.c_str());
+        return ok ? 0 : 1;
+    }
     if (argc != 4) {
-        fwprintf(stderr, L"usage: ngb_patch_test image patch.xdelta out.iso\n");
+        fwprintf(stderr, L"usage: ngb_patch_test image patch.xdelta out.iso\n       ngb_patch_test --file in patch.xdelta out\n");
         return 2;
     }
     std::wstring why;

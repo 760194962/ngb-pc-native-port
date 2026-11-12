@@ -25,4 +25,8 @@ bool apply(const std::wstring &image, const std::wstring &xdelta, const std::wst
 // The base image's size: the room a patched image needs before it is unpacked
 uint64_t image_bytes();
 
+// One file patched (a few MB, in memory): out written from src and the xdelta file (Ninja Gaiden 2004: an xdelta
+// made against the 1.06 update's default.xbe). *error: why not; out is not left behind on failure.
+bool apply_file(const std::wstring &src, const std::wstring &xdelta, const std::wstring &out, std::wstring *error);
+
 } // namespace patch

@@ -590,11 +590,12 @@ void choose_image()
     g.offer_delete = false;
 }
 
-// Black: the Hurricane patch to apply (the translator's .xdelta), or none
+// The patch to apply: Black's Hurricane patch (the translator's .xdelta, to the disc image), 2004's to the disc's
+// default.xbe once unpacked; or none
 void choose_patch()
 {
     std::wstring p;
-    COMDLG_FILTERSPEC f = {S(Str::PatchFilter), L"*.xdelta"};
+    COMDLG_FILTERSPEC f = {S(ng04() ? Str::PatchFilterNg04 : Str::PatchFilter), L"*.xdelta"};
     if (installing() || !pick(false, &p, &f)) return;
     g.patch = p;
     g.status.clear();
@@ -665,10 +666,30 @@ void start_install()
     g.prog.state = 1;
     g.status.clear();
     g.offer_delete = false;
-    std::wstring iso = g.iso, dest = g.dest, xd = ng04() ? std::wstring() : g.patch;
-    g.worker = std::thread([iso, dest, xd] {
+    std::wstring iso = g.iso, dest = g.dest, xd = g.patch;
+    bool file_patch = ng04();
+    g.worker = std::thread([iso, dest, xd, file_patch] {
         if (xd.empty()) {
             install::extract(iso, dest, g.prog);
+            return;
+        }
+        if (file_patch) {
+            // 2004: the image unpacked as it is, then its default.xbe patched (an xdelta made against the Redump
+            // disc's 1.02 default.xbe, e.g. one giving the 1.06 update with the camera menu, run from the game folder)
+            install::extract(iso, dest, g.prog);
+            if (g.prog.state != 2) return;
+            std::wstring xbe = dest + L"\\default.xbe", tmp = xbe + L".patching", err;
+            {
+                std::lock_guard<std::mutex> l(g.prog.lock);
+                size_t s = xd.find_last_of(L"\\/");
+                g.prog.message = xd.substr(s == std::wstring::npos ? 0 : s + 1);
+            }
+            if (!patch::apply_file(xbe, xd, tmp, &err) || !MoveFileExW(tmp.c_str(), xbe.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+                DeleteFileW(tmp.c_str());
+                std::lock_guard<std::mutex> l(g.prog.lock);
+                g.prog.message = err.empty() ? L"cannot replace default.xbe" : err;
+                g.prog.state = 3;
+            }
             return;
         }
         // The patch first, into an image beside the game folder (the US Redump disc or the patches' base image), then
@@ -777,6 +798,7 @@ void switch_module(int m)
     check_game();
     g.iso.clear();
     g.iso_need = 0;
+    g.patch.clear(); // Black's and 2004's patches are for different images
     g.status.clear();
     g.offer_delete = false;
     g.saves_read = false;
@@ -1853,9 +1875,12 @@ struct Painter {
         text(S(Str::NavInstall), {x, 64, x + 700, 116}, 32, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({x, 120, x + 36, 122}, kBlood);
 
-        // from an image
-        const float extra = ng04() ? 0.0f : 42.0f; // Black: the patch row
-        D2D1_RECT_F c = {x, 146, x + w, 146 + 214 + extra};
+        // from an image, and a patch row: Black's Hurricane patch, applied to the US Redump disc or the patches' base
+        // image before unpacking; 2004's patch, applied to the unpacked default.xbe. 2004's page has the Hurricane Packs'
+        // card below as well, so its rows are packed closer.
+        const bool tight = ng04();
+        const float step = tight ? 36.0f : 42.0f, gap = tight ? 12.0f : 22.0f;
+        D2D1_RECT_F c = {x, 146, x + w, 146 + 214 + (tight ? 24.0f : 42.0f)};
         float y = card(c, S(Str::FromImage), kHitHelpImage);
         bool busy = installing();
         auto row = [&](const wchar_t *label, const std::wstring &value, int hit, const wchar_t *btn) {
@@ -1864,18 +1889,18 @@ struct Painter {
                  value.empty() ? kAsh : kBone, value.empty() ? 0.7f : 1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
                  DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
             button(hit, {c.right - 136, y + 3, c.right - 20, y + 33}, btn, false, !busy);
-            y += 42;
+            y += step;
         };
         row(S(Str::Image), g.iso, kHitPickIso, S(Str::Choose));
-        if (!ng04()) { // a Hurricane patch, applied to the US Redump disc or the patches' base image before unpacking
-            size_t s = g.patch.find_last_of(L"\/");
+        {
+            size_t s = g.patch.find_last_of(L"\\/");
             std::wstring name = g.patch.empty() ? std::wstring(S(Str::NoPatch)) : g.patch.substr(s == std::wstring::npos ? 0 : s + 1);
             text(S(Str::PatchRow), {c.left + 26, y, c.left + 110, y + 36}, 13.5f, kAsh);
             text(name, {c.left + 112, y, c.right - 260, y + 36}, 13.5f, g.patch.empty() ? kAsh : kBone, g.patch.empty() ? 0.7f : 1.0f,
                  DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
             button(kHitClearPatch, {c.right - 246, y + 3, c.right - 146, y + 33}, S(Str::ClearPatch), false, !busy && !g.patch.empty());
             button(kHitPickPatch, {c.right - 136, y + 3, c.right - 20, y + 33}, S(Str::ChoosePatch), false, !busy);
-            y += 42;
+            y += step;
         }
         uint64_t avail = free_space(g.dest);
         bool room = g.iso_need && avail >= space_needed();
@@ -1885,7 +1910,7 @@ struct Painter {
             text(std::wstring(b) + (room ? L"" : std::wstring(L"  \x00B7  ") + S(Str::NoSpace)), {c.left + 112, y, c.right - 20, y + 26},
                  12.5f, room ? kAsh : kBlood);
         }
-        y += 34;
+        y += tight ? 30.0f : 34.0f;
         if (busy) { // progress
             double f = g.prog.total ? std::min(1.0, (double)g.prog.done / (double)g.prog.total) : 0.0;
             D2D1_RECT_F bar = {c.left + 26, y + 6, c.right - 150, y + 14};
@@ -1913,7 +1938,7 @@ struct Painter {
             button(kHitDeleteIso, {c.left + 26, c.bottom - 46, c.left + 286, c.bottom - 16}, S(Str::DeleteImage), false);
 
         // the game folder: where an install goes and where the game starts from
-        D2D1_RECT_F c2 = {x, 382 + extra, x + w, 382 + extra + 128};
+        D2D1_RECT_F c2 = {x, c.bottom + gap, x + w, c.bottom + gap + 128};
         float y2 = card(c2, S(Str::InstalledGame), kHitHelpInstalled);
         bool have = exists(g.game);
         text(folder_of(g.game), {c2.left + 26, y2, c2.right - 270, y2 + 30}, 13.5f, kBone, 1.0f, DWRITE_FONT_WEIGHT_NORMAL,
@@ -1940,7 +1965,7 @@ struct Painter {
             g.content = install::installed_content(save_hdd());
             g.dlc_read = true;
         }
-        D2D1_RECT_F c3 = {x, 526, x + w, 526 + 142};
+        D2D1_RECT_F c3 = {x, c2.bottom + 12, x + w, c2.bottom + 12 + 142};
         float y3 = card(c3, S(Str::DlcCard), kHitHelpDlc);
         text(S(Str::DlcFolder), {c3.left + 26, y3, c3.left + 110, y3 + 36}, 13.5f, kAsh);
         text(g.dlc_dir.empty() ? S(Str::NotChosen) : g.dlc_dir, {c3.left + 112, y3, c3.right - 150, y3 + 36}, 13.5f,

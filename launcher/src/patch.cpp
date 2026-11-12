@@ -345,4 +345,42 @@ bool apply(const std::wstring &image, const std::wstring &xdelta, const std::wst
     return true;
 }
 
+bool apply_file(const std::wstring &src, const std::wstring &xdelta, const std::wstring &out, std::wstring *error)
+{
+    auto slurp = [](const std::wstring &p, std::vector<uint8_t> &v) {
+        File f;
+        if (!f.open(p)) return false;
+        uint64_t n = f.size();
+        if (n > (256u << 20)) return false;
+        v.resize((size_t)n);
+        return n == 0 || f.read(0, v.data(), (uint32_t)n);
+    };
+    std::vector<uint8_t> s, d;
+    if (!slurp(src, s)) {
+        *error = L"cannot read " + base_name(src);
+        return false;
+    }
+    if (!slurp(xdelta, d)) {
+        *error = L"cannot read " + base_name(xdelta);
+        return false;
+    }
+    std::vector<uint8_t> o(s.size() * 2 + (16u << 20));
+    usize_t got = 0;
+    int r = xd3_decode_memory(d.data(), (usize_t)d.size(), s.data(), (usize_t)s.size(), o.data(), &got, (usize_t)o.size(),
+                              0);
+    if (r) {
+        *error = L"xdelta3: the patch does not fit this file (" + base_name(xdelta) + L")";
+        return false;
+    }
+    HANDLE h = CreateFileW(out.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    DWORD put = 0;
+    bool ok = h != INVALID_HANDLE_VALUE && WriteFile(h, o.data(), (DWORD)got, &put, nullptr) && put == got;
+    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+    if (!ok) {
+        DeleteFileW(out.c_str());
+        *error = L"cannot write " + out;
+    }
+    return ok;
+}
+
 } // namespace patch

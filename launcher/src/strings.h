@@ -418,6 +418,7 @@ enum class Str {
     AskRebuild,
     GameUnverified, // a default.xbe of the game but not a known build (install.cpp check_game): followed by its hash
     PatchRow, NoPatch, ClearPatch, PatchFilter, ChoosePatch, // Black's Install page: a Hurricane patch applied first (patch.cpp)
+    PatchFilterNg04, // 2004's Install page: a patch of the disc's default.xbe, applied once unpacked
     Count
 };
 

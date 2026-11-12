@@ -133,7 +133,9 @@ Redump 的「Ninja Gaiden (USA, Asia) (En,Ja)」也支持：同一个 1.02.04，
     拿不了）。交差之法改由 Intercept 选项在读档时补上。这个文件不在 xbe 补丁里，release 的镜像补丁保留美版原样。
   - **注意**：开启 Essence-Only Charging 后，原地蓄力时奥义计数保持为 0，而奥义镜头靠这个计数判断是否在发动，
     所以吸魂之前左摇杆镜头不会生效。
-- **忍者龙剑传（2004）1.06**（`tools/ng04_camera_menu.py`）：CONTROLLER SETTINGS 里的第三人称自由镜头选项。
+- **忍者龙剑传（2004）1.06**（`tools/ng04_camera_menu.py`）：CONTROLLER SETTINGS 里的第三人称自由镜头选项（默认开局开启）。
+  release 的补丁以 Redump 光盘的 1.02 `default.xbe` 为底，打完就是带这些选项的 1.06，从光盘目录直接运行；启动器 2004 的
+  「安装」页可以在「补丁」一栏选它，解包后自动打上。
 
 ## 现状
 
