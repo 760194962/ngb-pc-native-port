@@ -304,8 +304,8 @@ main monitor's shape to `aspect`. Shapes wider than 16:9 are experimental; 1.5:1
 such as 32:9 are not.
 
 **Keyboard and controller**: the game itself reads only its controller; each key presses one controller input (by
-default WASD to move, arrows for the camera, J / K to attack, L to jump, Space for the right trigger, B for Start...). The launcher's Controls
-page changes them and can remap the controller's buttons. In `black.ini`: `kb_<input> = Key[,Key]` and
+default WASD to move, arrows for the camera, J / K to attack, L to jump, Space for the left trigger, Q for the
+right, B for Start...). The launcher's Controls page changes them and can remap the controller's buttons. In `black.ini`: `kb_<input> = Key[,Key]` and
 `padmap_<input> = <input>`. Keys do not reach the game while Alt is held.
 
 **Supported controllers**: Xbox and other XInput controllers are read through Windows' XInput; the rest through the
