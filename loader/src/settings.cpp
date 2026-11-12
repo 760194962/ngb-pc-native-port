@@ -96,6 +96,10 @@ void load_file()
         else if (k == "autoaim") g_cfg.autoaim = v != 0;
         else if (k == "fov") g_cfg.fov = std::clamp(v, 50.0f, 120.0f);
         else if (k == "skipanymovie") g_cfg.skip_movies = v != 0;
+        else if (k == "ng04_cam") g_cfg.ng04_cam = v != 0;
+        else if (k == "ng04_cam_global") g_cfg.ng04_cam_global = v != 0;
+        else if (k == "ng04_cam_invert_y") g_cfg.ng04_cam_invert_y = v != 0;
+        else if (k == "ng04_cam_invert_x") g_cfg.ng04_cam_invert_x = v != 0;
         else if (k == "language") g_cfg.language = std::clamp(atoi(val), 1, 9);
         else if (k == "audio_mode") g_cfg.audio_mode = !strcmp(val, "mono") ? 1 : !strcmp(val, "surround") ? 2 : 0;
         else if (k == "audio_ac3") g_cfg.audio_ac3 = v != 0;
@@ -197,6 +201,8 @@ void write_all(FILE *f)
     fprintf(f, "autoaim = %d\n", g_cfg.autoaim ? 1 : 0);
     fprintf(f, "fov = %.1f\n", g_cfg.fov);
     fprintf(f, "skipanymovie = %d\n", g_cfg.skip_movies ? 1 : 0);
+    fprintf(f, "ng04_cam = %d\nng04_cam_invert_y = %d\nng04_cam_invert_x = %d\n", g_cfg.ng04_cam ? 1 : 0,
+            g_cfg.ng04_cam_invert_y ? 1 : 0, g_cfg.ng04_cam_invert_x ? 1 : 0);
     fprintf(f, "language = %d\n", g_cfg.language);
     fprintf(f, "audio_mode = %s\naudio_ac3 = %d\naudio_dts = %d\n",
             g_cfg.audio_mode == 1 ? "mono" : g_cfg.audio_mode == 2 ? "surround" : "stereo", g_cfg.audio_ac3 ? 1 : 0,

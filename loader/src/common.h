@@ -97,6 +97,11 @@ struct Config {
     bool audio_ac3 = false;    // digital output: Dolby Digital / DTS on (audio_ac3 / audio_dts): the mix goes out as 5.1
     bool audio_dts = false;
     bool skip_movies = true;   // A / START skip any movie, also unseen ones (input/movies.cpp; --no-movie-skip, PC SETTINGS)
+    // Ninja Gaiden (2004) title update: the Hurricane Packs' right-stick camera (ng04_camera.cpp)
+    bool ng04_cam = false;          // the third-person camera on at start instead of after R3 (black.ini ng04_cam; --ng04-cam)
+    bool ng04_cam_global = false;   // that camera in every stage, not only the Hurricane Packs' (black.ini ng04_cam_global)
+    bool ng04_cam_invert_y = false; // the right stick's up / down inverted (black.ini ng04_cam_invert_y)
+    bool ng04_cam_invert_x = false; // its left / right inverted (black.ini ng04_cam_invert_x)
     // Online play through Insignia (net/online.cpp, project/docs/09): off unless black.ini online = 1 (or --online-eeprom
     // and --online-hdd) names the player's registered xemu EEPROM and hard disk image; both are only read.
     bool online = false;
@@ -228,6 +233,10 @@ void log_init(const std::wstring &path);
 void logf(const char *fmt, ...); // the log file (and the console with --verbose)
 void install_ngb_exitmenu();      // the main menu's EXIT GAME row for Ninja Gaiden Black x2.1 (ngb_exitmenu.cpp)
 void install_ng04_exitmenu();     // the title menu's EXIT GAME row for Ninja Gaiden (2004) (ng04_exitmenu.cpp)
+void install_ng04_camera();       // Ninja Gaiden (2004) title update: right-stick camera on at start, inversion (ng04_camera.cpp)
+void ng04_camera_set_invert(int bits); // bit 0 up / down, bit 1 left / right; takes effect the next frame
+void ng04_camera_apply();         // g_cfg's ng04_cam* into the game's code, at once (ng04_camera.cpp)
+void ng04_camera_set_on(bool on); // ng04_cam changed in play: the camera's state follows
 void install_ngb_aspect();        // black.ini aspect 16:10 / 21:9 for Ninja Gaiden Black x2.1 (ngb_aspect.cpp)
 void install_ngb_livedash();      // Ⓐ cancels Ranking's Xbox Live boxes instead of opening the dashboard (ngb_livedash.cpp)
 void install_ng04_livedash();     // the same in Ninja Gaiden (2004)'s Master Ninja Tournament (ngb_livedash.cpp)

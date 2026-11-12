@@ -3,6 +3,8 @@
 #include "fiber.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <vector>
 
 #include "build_profile.h"
@@ -137,6 +139,7 @@ void usage()
            "  --audio M         the console's audio: stereo (default), mono, surround (Dolby Surround: rear matrixed\n"
            "                    into the two channels), ac3 or dts (Dolby Digital / DTS: 5.1 out) (black.ini audio_mode...)\n"
            "  --no-movie-skip   movies skip only as in the original (default: A / START skip every movie)\n"
+           "  --ng04-cam        Ninja Gaiden (2004) update: the right-stick camera on from the start (black.ini ng04_cam)\n"
            "  --no-sdl-pads     XInput controllers only (default: also DualShock, DualSense, Switch and DirectInput pads)\n"
            "  --online-eeprom F --online-hdd F  online play through Insignia with this registered EEPROM and xemu disk\n"
            "                    image (both only read; black.ini online = 1, online_eeprom, online_hdd); --offline: off\n"
@@ -351,6 +354,8 @@ bool parse_args()
         } else if (a == L"--press-file") {
             if (!next(g_cfg.press_file)) return false;
         } else if (a == L"--no-movie-skip") { g_cfg.skip_movies = false; settings_mark_cli("skipanymovie"); }
+        else if (a == L"--ng04-cam") { g_cfg.ng04_cam = true; settings_mark_cli("ng04_cam"); }
+        else if (a == L"--ng04-cam-global") { g_cfg.ng04_cam_global = true; settings_mark_cli("ng04_cam_global"); }
         else if (a == L"--no-sdl-pads") g_cfg.sdl_pads = false;
         else if (a == L"--no-pc-menus") g_cfg.pc_menus = false;
         else if (a == L"--timer-vblank") g_cfg.timer_vblank = true;
@@ -653,6 +658,47 @@ void startup_error(const std::string &text)
     if (!g_cfg.background) MessageBoxW(nullptr, widen(text).c_str(), L"Ninja Gaiden Black", MB_OK | MB_ICONERROR);
 }
 
+// A build of a known game that is not a known build (a newer or the player's own patch of x2.1, say): the known build
+// whose layout it has, or nullptr. Patches of Ninja Gaiden Black keep the US release's sections and addresses and
+// leave its libraries as they are (build_profile.h), so a profile holds when everything it names is where it says:
+// the title id, the replaced library sections, an rdtsc (0F 31) at each trapped site, the initializer tables inside
+// the image, SwitchToFiber reading its TLS index, the 16/9 float. Every game patch of the port checks its own bytes
+// first (expect()), so one that no longer fits stays off. Ninja Gaiden Black's builds all pass alike: one with x2.1's
+// HANZI section runs as x2.1, another as the US release.
+const BuildProfile *profile_by_shape(const Xbe &x)
+{
+    auto fits = [&](const BuildProfile &p) {
+        if (p.title_id != x.title_id || !p.sha256) return false;
+        for (const char *const *s = p.hooked_sections; *s; s++)
+            if (!x.section_named(*s)) return false;
+        for (int i = 0; i < p.rdtsc_site_count; i++) {
+            const uint8_t *b = x.at_va(p.rdtsc_sites[i], 2);
+            if (!b || b[0] != 0x0F || b[1] != 0x31) return false;
+        }
+        for (const InitTableRange &r : p.init_tables)
+            if (r.end > r.begin && !x.at_va(r.begin, r.end - r.begin)) return false;
+        if (p.switch_to_fiber) { // mov edx, [tls index]
+            const uint8_t *b = x.at_va(p.switch_to_fiber, 6);
+            uint32_t idx;
+            if (!b || b[0] != 0x8B || (memcpy(&idx, b + 2, 4), idx) != p.fiber_tls_index) return false;
+        }
+        if (p.aspect_const) {
+            const uint8_t *b = x.at_va(p.aspect_const, 4);
+            float f;
+            if (!b || std::fabs((memcpy(&f, b, 4), f) - 16.0f / 9.0f) > 1e-6f) return false;
+        }
+        return true;
+    };
+    const BuildProfile *first = nullptr;
+    for (const BuildProfile *p : kProfiles) {
+        if (!fits(*p)) continue;
+        if (p == &kProfileNgbHurricaneX21 || p == &kProfileNgbUs)
+            return x.section_named("HANZI") ? &kProfileNgbHurricaneX21 : &kProfileNgbUs;
+        if (!first) first = p;
+    }
+    return first;
+}
+
 int run(void *reserve, unsigned reserve_size)
 {
     if (!parse_args()) {
@@ -715,7 +761,8 @@ int run(void *reserve, unsigned reserve_size)
         std::wstring tu = host_full_path(g_cfg.hdd_dir) + L"\\Partition1\\TDATA\\54430003\\$u\\" + file;
         Xbe update;
         std::string why;
-        if (update.load(tu, why) && sha256_hex(update.data) == disc_prog->sha256) {
+        // the update itself, or a patch of it (tools/ng04_camera_menu.py) that keeps its layout
+        if (update.load(tu, why) && (sha256_hex(update.data) == disc_prog->sha256 || profile_by_shape(update) == disc_prog)) {
             logf("xbe: Ninja Gaiden 2004's disc program 1.02.04; the title update on the hard disk runs instead (%s)", narrow(tu).c_str());
             g_xbe = std::move(update);
             g_cfg.xbe_path = tu;
@@ -726,6 +773,9 @@ int run(void *reserve, unsigned reserve_size)
         }
     }
     const BuildProfile *profile = build_profile_for(hash.c_str());
+    if (!profile && (profile = profile_by_shape(g_xbe)))
+        logc("xbe: sha256 %s is not a known build; it has the layout of %s and runs as that (unchecked)", hash.c_str(),
+             profile->name);
     bool known_build = profile != nullptr;
     g_cfg.known_build = known_build;
     g_cfg.profile = profile;
@@ -788,6 +838,7 @@ int run(void *reserve, unsigned reserve_size)
     else g_cfg.aspect_w = 16, g_cfg.aspect_h = 9;
     if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
     install_ng04_exitmenu(); // Ninja Gaiden (2004)'s title menu: the same, its own way
+    install_ng04_camera();   // Ninja Gaiden (2004) update: the right-stick camera at start, inversion
     if (profile && !black && !profile->aux) install_music51_fix(); // the music player's six channels at -96 dB
     // Ⓐ in Ranking's Live boxes (and Ninja Gaiden (2004)'s Master Ninja Tournament): the port's Xbox Live dashboard when it
     // can run (dashboard.cpp), else cancel as Ⓑ

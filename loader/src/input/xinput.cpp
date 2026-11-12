@@ -299,6 +299,10 @@ void read_press_file(uint32_t now_ms)
                     if (k == "aa") g_cfg.aa = v;
                     else if (k == "seamfill") g_cfg.seam_fill = v;
                     else if (k == "perfhud") g_cfg.perfhud = v; // the performance overlay (black.ini perfhud)
+                    else if (k == "ng04invy" || k == "ng04invx" || k == "ng04global") { // Ninja Gaiden (2004)'s camera
+                        (k == "ng04invy" ? g_cfg.ng04_cam_invert_y : k == "ng04invx" ? g_cfg.ng04_cam_invert_x : g_cfg.ng04_cam_global) = v;
+                        ng04_camera_apply();
+                    } else if (k == "ng04cam") ng04_camera_set_on(v);
                     else if (k == "aniso") { // anisotropic filtering N (black.ini aniso), sent again with every sampler state
                         g_cfg.aniso = std::clamp(atoi(line.c_str() + c + 1), 1, 16);
                         xd3d::forget_sent_state();
