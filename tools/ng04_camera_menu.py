@@ -6,7 +6,7 @@ console (an emulator or a console that runs unsigned programs) as well as in the
 
 What the patch does (the reasons: loader/src/ng04_camera.cpp and project notes, 2026-11-12):
 - Controller Settings gets two rows, after "Controls While in Water":
-    3rd Person Camera         Off at Start / On at Start    options +0x14
+    3rd Person Camera         On at Start / Off at Start    options +0x14 (0 is On: new saves start with it on)
     3rd Person Camera Stages  Hurricane Packs / All Stages  options +0x15
   and "1st Person Camera Control" becomes "Camera Control" (Normal / Reverse, options +0x0B), now for both cameras as
   Ninja Gaiden Black x2.1 has it: Normal turns the right stick's third-person camera the other way round on both
@@ -240,9 +240,10 @@ def main():
             mov byte ptr [{S(OPT_ALL)}], 0
             ret
 
-        cave_cam:                       ; where the game turns the camera off: the option's choice
+        cave_cam:                       ; where the game turns the camera off: the option's choice (0 is On)
             push eax
             mov al, [{S(OPT_START)}]
+            xor al, 1
             mov [{CAMVAR:#x}], al
             pop eax
             ret
@@ -336,7 +337,7 @@ def main():
         put('labels', struct.pack('<8I', *LABELS))
         put('step', struct.pack('<i', ROW_STEP))
         put('help', struct.pack('<8H', *HELP))
-        put('v4', struct.pack('<2I', 0x20108, 0x20109))
+        put('v4', struct.pack('<2I', 0x20109, 0x20108))  # 0 On at Start (a new save's and Default Settings'), 1 Off
         put('v5', struct.pack('<2I', 0x2010A, 0x2010B))
         rows = bytearray(rows_old[:4 * 28])
         for rid in (4, 5):
