@@ -9,7 +9,8 @@ struct Pair {
 };
 
 const Pair kText[(int)Str::Count] = {
-    {L"忍者龙剑传 黑之章 PC 原生移植 启动器", L"Ninja Gaiden Black PC Launcher"},
+    {L"忍者龙剑传 黑之章 · PC 原生移植 启动器", L"Ninja Gaiden Black · native PC port launcher"},
+    {L"忍者龙剑传（2004）· PC 原生移植 启动器", L"Ninja Gaiden (2004) · native PC port launcher"},
     {L"PC 原生移植", L"Native PC port"},
     {L"开始游戏", L"Play"},
     {L"安装", L"Install"},
@@ -77,16 +78,16 @@ const Pair kText[(int)Str::Count] = {
      L"Once the check passes you can move the image to the Recycle Bin to save space, and restore it from there later."},
     {L"这里是游戏所在的文件夹：从镜像安装时装到这里，开始游戏时也从这里启动。\n\n"
      L"点「更改…」选一个文件夹：如果里面已经有解包好的游戏（有 default.xbe），就直接使用，不需要重新安装；"
-     L"如果是空文件夹，就可以从上方的镜像安装到这里。「默认路径」会改回启动器旁边的 game 文件夹。\n\n"
-     L"核对会计算 default.xbe 与附带程序的 SHA-256：金色的「已核对」表示是支持的版本（飓风版 x2.1 中英 / 日英、基本版 x2、美版原版）；红色表示缺少文件或是别的版本，"
+     L"如果是空文件夹，就可以从上方的镜像安装到这里。「默认路径」会改回启动器旁边的 game 文件夹（2004 是 game_ng04）。\n\n"
+     L"核对会计算 default.xbe 与附带程序的 SHA-256：金色的「已核对」表示是支持的版本（黑之章：飓风版 x2.1 中英 / 日英、基本版 x2、美版原版；2004：光盘版 1.02，Redump 版也可以）；红色表示缺少文件或是别的版本，"
      L"游戏可能无法启动。\n\n"
      L"存档不在游戏文件夹里，更换路径不会影响存档。",
      L"This is the game's folder: an install from an image goes here, and the game starts from here.\n\n"
      L"Choose a folder with \"Change\": if the game is already extracted there (a folder with default.xbe in it), it "
      L"is used as it is, with no need to install again; if the folder is empty, install into it from an image above. "
-     L"\"Default\" goes back to the game folder next to the launcher.\n\n"
+     L"\"Default\" goes back to the game folder next to the launcher (game_ng04 for 2004).\n\n"
      L"The check computes the SHA-256 of default.xbe and the bundled programs: a gold \"Checked\" line means a "
-     L"supported build (Hurricane x2.1, basic x2 or the US release); red means a file is missing or another build, and the game may not start.\n\n"
+     L"supported build (Black: Hurricane x2.1, basic x2 or the US release; 2004: the disc\u2019s 1.02, Redump\u2019s too); red means a file is missing or another build, and the game may not start.\n\n"
      L"Saved games are not kept in the game folder, so changing it does not touch them."},
     {L"知道了", L"Got it"},
     {L"覆盖已安装的游戏？", L"Replace the installed game?"},
@@ -203,10 +204,10 @@ const Pair kText[(int)Str::Count] = {
      L"Replace the saves here with xRevive\u2019s?\n\nThe saves here are not deleted: they are first moved into a new backup (\u201Csaves before an import\u201D)."},
     {L"用这里的存档替换 xRevive 的存档吗？\n\nxRevive 原有的存档不会被删除，会先移到这里的备份文件夹（标注「导出前 xRevive 原有的存档」）。",
      L"Replace xRevive\u2019s saves with the ones here?\n\nxRevive\u2019s saves are not deleted: they are first moved into the backups here (\u201CxRevive\u2019s saves before an export\u201D)."},
-    {L"游戏把存档写在模拟的 Xbox 硬盘里：位置下的 Partition1\\UDATA\\5443000d（每个存档格一个文件夹）与 TDATA\\5443000d（系统存档）。"
+    {L"游戏把存档写在模拟的 Xbox 硬盘里：位置下的 Partition1\\UDATA\\5443000d（每个存档格一个文件夹）与 TDATA\\5443000d（系统存档）；2004 是 54430003。"
      L"位置在 launcher.ini 的 hdd 里设定，默认是启动器旁的 savedata 文件夹。\n\n存档是标准 Xbox 格式；复制整个 savedata 文件夹就是完整备份。",
      L"The game writes its saves to the emulated Xbox hard disk: Partition1\\UDATA\\5443000d under the location (one folder "
-     L"per slot) and TDATA\\5443000d (the system save). The location is launcher.ini\u2019s hdd, by default the savedata "
+     L"per slot) and TDATA\\5443000d (the system save); 54430003 for 2004. The location is launcher.ini\u2019s hdd, by default the savedata "
      L"folder beside the launcher.\n\nThe saves are in the standard Xbox format; a copy of the whole savedata folder is a full backup."},
     {L"忍者龙剑传 黑之章 / 忍者龙剑传（2004）· PC 原生移植", L"Ninja Gaiden Black / Ninja Gaiden (2004) \u00B7 native PC port"},
     {L"《忍者龙剑传 黑之章》与《忍者龙剑传》（2004）（均为初代 Xbox）的非官方 Windows 原生移植，在左上角切换。"
@@ -220,7 +221,7 @@ const Pair kText[(int)Str::Count] = {
     {L"网站", L"Website"},
     {L"作者", L"Author"},
     {L"发布页", L"Downloads"},
-    {L"GitHub", L"GitHub"},
+    {L"源码", L"Source"},
     {L"B 站", L"bilibili"},
     {L"邮箱", L"Email"},
     {L"打开网站", L"Open"},
@@ -245,7 +246,7 @@ const Pair kText[(int)Str::Count] = {
     {L"单核（默认）", L"One core (default)"},
     {L"自动分配（实验性）", L"Automatic (experimental)"},
     {L"单核最接近 Xbox，也最稳定。自动分配让游戏线程分到多个性能核上，但游戏的主要计算集中在一个线程，不会更快，实测还略慢一点（第一章约 0.5 毫秒），也可能出现原版没有的问题；遇到异常请改回单核。下次启动游戏时生效。",
-     L"One core is closest to the Xbox and the most stable. Automatic spreads the game's threads over the performance cores, but most of the game's work is on one thread: it is no faster, measured a little slower (about 0.5 ms a frame in chapter 1), and it may show problems the console never had; switch back if anything goes wrong. Applies from the next start."},
+     L"One core is closest to the Xbox and the most stable. Automatic spreads the game's threads over the performance cores, but most of its work is on one thread: no faster (about 0.5 ms a frame slower in chapter 1), and it may bring problems the console never had; if so, switch back. Applies from the next start."},
     {L"清理着色器缓存", L"Clear shader cache"},
     {L"删除着色器缓存。下次启动游戏会重新编译，可能需要多等一会儿。", L"Delete the shader cache. The next start will compile the shaders again and may take a little longer."},
     {L"删除启动器目录下的着色器缓存？下次启动游戏会重新编译着色器，可能需要多等一会儿。", L"Delete the shader cache in the launcher folder? The next start will compile the shaders again and may take a little longer."},
@@ -274,8 +275,8 @@ const Pair kText[(int)Str::Count] = {
     {L"左边是游戏收到的按钮，右边选择由手柄的哪个按钮触发。十字键与摇杆不能重映射。",
      L"On the left the button the game gets, on the right the controller button that presses it. The D-pad and sticks cannot be remapped."},
     {L"已改动", L"Changed"},
-    {L"把「控制」页恢复为默认：键盘用默认键位（WASD 移动、方向键视角、J/K 攻击、空格跳……），手柄按钮不重映射。\n\n按「保存」后才会生效；其他页的设定不受影响。",
-     L"Back to the Controls page\u2019s defaults: the default keys (WASD to move, arrows for the camera, J/K to attack, Space to jump\u2026) and no remapped controller buttons.\n\nIt takes effect once saved; the other pages keep their settings."},
+    {L"把「控制」页恢复为默认：键盘用默认键位（WASD 移动、方向键视角、J/K 攻击、L 跳……），手柄按钮不重映射。\n\n按「保存」后才会生效；其他页的设定不受影响。",
+     L"Back to the Controls page\u2019s defaults: the default keys (WASD to move, arrows for the camera, J/K to attack, L to jump\u2026) and no remapped controller buttons.\n\nIt takes effect once saved; the other pages keep their settings."},
     {L"游戏本身只认手柄。这里的每个按键会直接按下手柄上对应的输入：按钮、扳机、十字键，或把摇杆推到底。每个输入可以设两个键。"
      L"键盘与手柄可以同时使用；只有游戏窗口在最前面时按键才有效。\n\n性能：没有影响（按键状态在游戏读手柄时一起读取，开销可以忽略）。",
      L"The game itself only reads its controller. Each key here simply presses that controller input: a button, a trigger, a D-pad "
@@ -438,8 +439,8 @@ const Pair kText[(int)Str::Count] = {
      L"Insignia website"},
     {L"联网关闭，DNS 查询方式改回「Insignia 公网 DNS」。选好的 EEPROM 与硬盘镜像保留。",
      L"Online off and lookups back to Insignia’s public DNS. The chosen EEPROM and hard disk image stay."},
-    {L"用你自己的 Insignia 账号在游戏「排行榜」里登录、查看真实榜单。移植版用的是你在 xemu 里注册好的那台「主机」：点「从 xemu 导入」，它的主机身份（EEPROM）和账号会复制进存档目录（online_eeprom.bin、online_accounts.bin），游戏只读这两个文件。以后在 xemu 里新建了账号，再导入一次就会补进来，本机已有的账号不受影响。xemu 的文件只读，不会被修改，也不会上传到别处。\n\n存档目录里的 online_eeprom.bin 就是你的主机身份：不要把它发给别人。\n\n默认关闭；关闭时游戏看不到网络，和以前完全一样。xemu 在运行时不会开联网，因为同一台主机不能同时登录两次。\n\n性能：集成显卡第 1 章实测，开与关都是 97.7% 的游戏速度，网络只在进入排行榜后才启动。",
-     L"Sign in with your own Insignia account in the game’s Ranking menu and see the real leaderboards. The port uses the “console” you registered in xemu: Import copies its identity (the EEPROM) and its accounts into the save folder (online_eeprom.bin, online_accounts.bin), and the game reads only those. Accounts you make in xemu later come over with another Import; the ones here stay as they are. xemu’s files are only read, never changed or sent anywhere.\n\nonline_eeprom.bin in the save folder is your console’s identity: do not give it to anyone.\n\nOff by default; off, the game sees no network, exactly as before. While xemu runs the port stays offline, since one console cannot sign in twice.\n\nPerformance: measured on integrated graphics in chapter 1, 97.7% game speed both on and off; the network only starts once you open Ranking."},
+    {L"用你自己的 Insignia 账号在游戏「排行榜」里登录、查看真实榜单。游戏用的是存档目录里的主机身份（online_eeprom.bin）和账号（online_accounts.bin），有两种来源：在本页「新建主机」再「注册主机」；或点「从 xemu 导入」，复制你在 xemu 里注册好的那台主机和它的账号（以后在 xemu 里新建了账号，再导入一次就会补进来，本机已有的账号不受影响；xemu 的文件只读，不会被修改，也不会上传到别处）。\n\n存档目录里的 online_eeprom.bin 就是你的主机身份：不要把它发给别人。\n\n默认关闭；关闭时游戏看不到网络，和以前完全一样。用的是从 xemu 导入的主机时，xemu 在运行就不会开联网，因为同一台主机不能同时登录两次；本机新建的主机不受影响。\n\n性能：集成显卡第 1 章实测，开与关都是 97.7% 的游戏速度，网络只在进入排行榜后才启动。",
+     L"Sign in with your own Insignia account in the game’s Ranking menu and see the real leaderboards. The game uses the console identity (online_eeprom.bin) and accounts (online_accounts.bin) in the save folder, from either of two places: New console, then Register, on this page; or Import, which copies the console you registered in xemu and its accounts (accounts you make in xemu later come over with another Import, the ones here stay as they are; xemu’s files are only read, never changed or sent anywhere).\n\nonline_eeprom.bin in the save folder is your console’s identity: do not give it to anyone.\n\nOff by default; off, the game sees no network, exactly as before. With a console imported from xemu, the port stays offline while xemu runs, since one console cannot sign in twice; a console made here is not affected.\n\nPerformance: measured on integrated graphics in chapter 1, 97.7% game speed both on and off; the network only starts once you open Ranking."},
     {L"游戏登录前要先用 DNS 查到 Insignia 服务器的地址。下面两个名字很像，但不是一回事：\n"
      L"· Insignia 公网 DNS：Insignia 架在网上的 DNS 服务器（46.101.64.175），什么都不用装。\n"
      L"· 本地 InsigniaDNS.exe：从 Insignia 下载、在你电脑上运行的小程序，在这台电脑的局域网地址（如 192.168.x.x）上回答查询，127.0.0.1 不行。\n\n"
@@ -540,7 +541,7 @@ const Pair kText[(int)Str::Count] = {
     {L"飓风包（可选）", L"Hurricane Packs (optional)"},
     {L"安装包", L"Installer"},
     {L"安装飓风包", L"Install"},
-    {L"未安装：运行光盘原版 1.02（没有飓风包和锦标赛）", L"Not installed: the disc\u2019s 1.02 runs (no Hurricane Packs, no tournament)"},
+    {L"未安装：运行光盘原版 1.02", L"Not installed: the disc\u2019s 1.02 runs"},
     {L"已安装：", L"Installed: "},
     {L"更新 1.06", L"update 1.06"},
     {L"飓风包 1", L"Hurricane Pack 1"},
@@ -611,7 +612,7 @@ const Pair kText[(int)Str::Count] = {
     {L"还不能联网：按「注册步骤」先注册",
      L"Not ready to play online yet: register first (How to register)"},
     {L"导入账号时才用到；不选也能用本机账号联网。",
-     L"Only needed to import accounts; the accounts here play online without them."},
+     L"Only for importing accounts; not needed to play online."},
     {L"（会转到本机主机）",
      L" (moved onto this console)"},
     {L"：",

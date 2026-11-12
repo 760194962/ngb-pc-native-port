@@ -225,9 +225,10 @@ const int kAnisoLevels[5] = {1, 2, 4, 8, 16};
 const int kShadowScales[4] = {1, 4, 8, 16};
 // The project's site (the author's; About page)
 const wchar_t kSite[] = L"https://akirahayabusa.github.io/ngb-hurricane-patch/";
-// The author's links on the About page (the user, 2026-10-22): signed "bilibili 哈雅布撒", with the open-source repository
-// and contacts. Clicking one opens it (kHitWebsite + index).
-const wchar_t *const kLinks[5] = {kSite, L"https://github.com/akirahayabusa/ngb-pc-native-port-release", L"https://github.com/akirahayabusa",
+// The author's links on the About page (the user, 2026-10-22): signed "bilibili 哈雅布撒", with the release and source
+// repositories (the source public since 2026-11-11, GPL) and contacts. Clicking one opens it (kHitWebsite + index).
+const wchar_t *const kLinks[5] = {kSite, L"https://github.com/akirahayabusa/ngb-pc-native-port-release",
+                                  L"https://github.com/akirahayabusa/ngb-pc-native-port",
                                   L"https://space.bilibili.com/20292587", L"mailto:2682557218@qq.com"};
 // Brightness and gamma sliders: the loader's range (settings.cpp clamps gain and gamma to 0.5 - 3.0), 0.05 steps
 constexpr float kSliderMin = 0.5f, kSliderMax = 3.0f, kSliderW = 260;
@@ -760,6 +761,8 @@ void set_game_folder(const std::wstring &dir)
     check_game();
 }
 
+void update_title(); // the window's title (below)
+
 // The game shown (the switch under the brand): its folder, check, saves and install page
 void switch_module(int m)
 {
@@ -767,6 +770,7 @@ void switch_module(int m)
     g.module = m;
     ini_set(L"module", m ? L"ng04" : L"black");
     saves::set_title(m ? L"54430003" : L"5443000d");
+    update_title();
     g.game = ini_get(game_key(), (default_game_folder() + L"\\default.xbe").c_str());
     set_dest(folder_of(g.game));
     g.checked_game.clear();
@@ -1569,6 +1573,9 @@ struct Painter {
             text(S(ng04() ? Str::TitleNg04 : Str::Title), {x + 1.0f + i, 132.0f + 2 + i, x + 760, 196.0f + 2 + i}, 46, 0x000000, 0.28f,
                  DWRITE_FONT_WEIGHT_BLACK, L"Microsoft YaHei UI");
         text(S(ng04() ? Str::TitleNg04 : Str::Title), {x, 132, x + 760, 196}, 46, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, L"Microsoft YaHei UI");
+        // the subtitle and the not-ready note cross the 2004 key art's logo: a shadow like the title's, and a dark plate
+        for (int i = 0; i < 2; i++)
+            text(S(ng04() ? Str::SubtitleNg04 : Str::Subtitle), {x + 1.0f + i, 201.0f + i, x + 761 + i, 229.0f + i}, 17, 0x000000, 0.55f);
         text(S(ng04() ? Str::SubtitleNg04 : Str::Subtitle), {x, 200, x + 760, 228}, 17, kAsh);
 
         // the start button
@@ -1587,7 +1594,10 @@ struct Painter {
              icon_font());
         text(S(Str::Play), {b.left + 58, b.top, b.right - 16, b.bottom}, 20, ready ? kBone : kAsh, 1.0f, DWRITE_FONT_WEIGHT_BOLD,
              nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, g_lang == Lang::Zh ? 4.0f : 1.0f);
-        if (!ready) text(S(Str::NotReady), {b.right + 20, b.top, b.right + 420, b.bottom}, 13.5f, kAsh);
+        if (!ready) {
+            fill({b.right + 10, b.top, b.right + 430, b.bottom}, kInk, 0.78f, 4);
+            text(S(Str::NotReady), {b.right + 20, b.top, b.right + 420, b.bottom}, 13.5f, kAsh);
+        }
 
         // the summary card
         D2D1_RECT_F c = {x, 372, x + 620, 372 + 3 * 46 + 24};
@@ -1608,8 +1618,8 @@ struct Painter {
         // (experimental). Saved at once: this page has no Save button.
         float cy = c.bottom + 22;
         text(S(Str::CpuMode), {x, cy, x + 130, cy + 30}, 13.5f, kAsh);
-        segmented(kHitCpuMode, x + 130, cy, {S(Str::CpuSingle), S(Str::CpuAuto)}, black_ini("multicore") == "1" ? 1 : 0, 150);
-        text(S(Str::CpuNote), {x + 130, cy + 36, x + 760, cy + 76}, 12, kAsh, 0.8f);
+        segmented(kHitCpuMode, x + 130, cy, {S(Str::CpuSingle), S(Str::CpuAuto)}, black_ini("multicore") == "1" ? 1 : 0, 170);
+        text(S(Str::CpuNote), {x + 130, cy + 38, x + 760, cy + 94}, 12, kAsh, 0.8f); // three lines (the footer is below at kH - 44)
 
         wchar_t foot[160];
         swprintf(foot, 160, S(Str::Footer), L"" GAME_VERSION);
@@ -2908,10 +2918,17 @@ int hit_at(float x, float y)
     return -1;
 }
 
+// The window's title: the game shown (Black | 2004) in the language chosen
+void update_title()
+{
+    if (g.hwnd) SetWindowTextW(g.hwnd, S(ng04() ? Str::WindowTitleNg04 : Str::WindowTitle));
+}
+
 void set_lang(Lang l)
 {
     g_lang = l;
     ini_set(L"lang", l == Lang::Zh ? L"zh" : L"en");
+    update_title();
 }
 
 // A dragged slider follows the mouse: x (in DIPs) over its track, in 0.05 steps
@@ -3576,7 +3593,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
             g.game = std::wstring(argv[i + 1]) + L"\\default.xbe";
             set_dest(argv[i + 1]);
         }
-        if (!wcscmp(argv[i], L"--module") && i + 1 < argc) switch_module(!wcscmp(argv[i + 1], L"ng04") ? 1 : 0); // with --snap
+        if (!wcscmp(argv[i], L"--module") && i + 1 < argc) { // with --snap; the saved choice stays as it was
+            std::wstring keep = ini_get(L"module", L"black");
+            switch_module(!wcscmp(argv[i + 1], L"ng04") ? 1 : 0);
+            ini_set(L"module", keep);
+        }
         if (!wcscmp(argv[i], L"--lang") && i + 1 < argc) g_lang = !wcscmp(argv[i + 1], L"en") ? Lang::En : Lang::Zh;
         if (!wcscmp(argv[i], L"--scroll") && i + 1 < argc) g.page_scroll = g.scroll_target = (float)_wtof(argv[i + 1]); // with --snap: the page scrolled down
         if (!wcscmp(argv[i], L"--help-scroll") && i + 1 < argc) g.help_for = g.help, g.help_scroll = g.help_target = (float)_wtof(argv[i + 1]); // with --snap, after --show-help
@@ -3610,7 +3631,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
     RECT work;
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     int w = r.right - r.left, hgt = r.bottom - r.top;
-    g.hwnd = CreateWindowExW(0, wc.lpszClassName, S(Str::WindowTitle), style, work.left + std::max(0, (int)(work.right - work.left - w) / 2),
+    g.hwnd = CreateWindowExW(0, wc.lpszClassName, S(ng04() ? Str::WindowTitleNg04 : Str::WindowTitle), style, work.left + std::max(0, (int)(work.right - work.left - w) / 2),
                              work.top + std::max(0, (int)(work.bottom - work.top - hgt) / 2), w, hgt, nullptr, nullptr, inst, nullptr);
     ShowWindow(g.hwnd, show);
     MSG m;

@@ -177,7 +177,7 @@ struct Config {
     bool hud_centre = false;   // black.ini hud_centre = 1 / press-file "cfg:hudcentre:1": on a 21:9 or 16:10 screen the whole HUD
                                // about the middle 16:9, as before 2.2.12 (d3d/draw.cpp wide_hud_place)
     bool quad_grad = false;    // press-file "cfg:quadgrad:1": QuadSnap's four texel reads with explicit gradients, as before 2.2.5 (comparison; d3d/ffp_ps.cpp)
-    bool resolve = true;       // press-file "cfg:resolve:0": the frame to the window by the old chain (seam fill, ramp and FXAA at the frame's size, then a bilinear scale; d3d/device.cpp present_backbuffer)
+    int resolve = 1;           // press-file "cfg:resolve:2": the tap resolve (kResolvePS) instead of the box resolve; "cfg:resolve:0": the frame to the window by the old chain (seam fill, ramp and FXAA at the frame's size, then a bilinear scale; d3d/device.cpp present_backbuffer)
     bool rhw_offset = true;    // press-file "cfg:rhwoffset:0": XYZRHW positions ignore the screen-space offset (comparison)
     bool zview8 = false;       // press-file "cfg:zview8:1": depth views back to A8R8G8B8 (8-bit depth) for comparison
     bool api_count = false;    // --api-count (diagnosis): Direct3D 9 calls by kind per frame (d3d/apicount.cpp)

@@ -639,7 +639,7 @@ IDirect3DPixelShader9 *resolve_ps(int n, int *got)
         if (!g_resolve_ps[n] && !g_resolve_tried[n]) {
             g_resolve_tried[n] = true;
             std::string src = "#define RN " + std::to_string(n) + "\n" + kResolvePS;
-            g_resolve_ps[n] = compile_ps(src.c_str(), "resolve", n > 2 ? "ps_2_a" : "ps_2_0");
+            g_resolve_ps[n] = compile_ps(src.c_str(), "resolve", n > 1 ? "ps_2_a" : "ps_2_0"); // 2x2: 88 arithmetic slots, over ps_2_0's 64 (it fell to 1x1 before 2.2.24)
         }
         if (g_resolve_ps[n]) {
             *got = n;
@@ -647,6 +647,55 @@ IDirect3DPixelShader9 *resolve_ps(int n, int *got)
         }
     }
     return nullptr;
+}
+
+// The box resolve (2.2.24): each picture pixel the exact area average of the frame pixels under its footprint, every
+// frame pixel weighted by how much of it the footprint covers. kResolvePS's taps sat at fixed fractions of the
+// footprint, so the weight a frame pixel got swung with where it fell (10x on 1440 lines, 3.33 frame pixels a picture
+// pixel: 0.125 for a pixel under the centre, 0.94 for its neighbours, an even 0.56 one picture pixel further on):
+// aliasing and a pixelated look at high scales (a player, 2026-11-12), and between 1 and 2 frame pixels a plain
+// bilinear scale. Here, per axis, the frame pixels the footprint touches (at most ceil(footprint) + 1) are taken in
+// pairs, one bilinear tap placed between the two in proportion to their coverage, so AT taps cover 2 AT pixels with
+// their exact weights. Each tap goes through the game's ramp before the averaging, as in kResolvePS.
+const char kAreaPS[] = "sampler2D f : register(s0);\n"
+                       "sampler2D ramp : register(s1);\n"
+                       "float4 g : register(c0);\n"  // x = 1/gamma, y = gain
+                       "float4 fp : register(c1);\n" // xy: a picture pixel's footprint in frame pixels; zw: 1 / frame size
+                       "float3 shown(float3 v) {\n"
+                       "  float3 i = saturate(v) * (255.0 / 256.0) + 0.5 / 256.0;\n"
+                       "  float3 c = float3(tex2D(ramp, float2(i.r, 0.5)).r, tex2D(ramp, float2(i.g, 0.5)).g, tex2D(ramp, float2(i.b, 0.5)).b);\n"
+                       "  return pow(saturate(c * g.y), g.xxx);\n"
+                       "}\n"
+                       "float4 main(float2 uv : TEXCOORD0) : COLOR0 {\n"
+                       "  float2 x0 = uv / fp.zw - fp.xy * 0.5, x1 = x0 + fp.xy, i0 = floor(x0);\n" // footprint, frame pixels
+                       "  float2 p[AT], w[AT], tw = 0;\n"
+                       "  [unroll] for (int k = 0; k < AT; k++) {\n"
+                       "    float2 j = i0 + 2 * k;\n" // the pair j, j + 1
+                       "    float2 a = saturate(min(x1, j + 1) - max(x0, j)), b = saturate(min(x1, j + 2) - max(x0, j + 1));\n"
+                       "    w[k] = a + b; tw += w[k];\n"
+                       "    p[k] = (j + 0.5 + b / max(a + b, 1e-6)) * fp.zw;\n" // bilinear: b / (a + b) of the way to j + 1
+                       "  }\n"
+                       "  float3 s = 0;\n"
+                       "  [unroll] for (int y = 0; y < AT; y++)\n"
+                       "    [unroll] for (int x = 0; x < AT; x++)\n"
+                       "      s += w[x].x * w[y].y * shown(tex2D(f, float2(p[x].x, p[y].y)).rgb);\n"
+                       "  return float4(s / (tw.x * tw.y), 1);\n"
+                       "}\n";
+// AT taps per axis cover a footprint of up to 2 AT - 1 frame pixels; larger ones (or a variant that does not compile)
+// go to kResolvePS
+constexpr int kAreaMax = 5;
+IDirect3DPixelShader9 *g_area_ps[kAreaMax + 1];
+bool g_area_tried[kAreaMax + 1];
+
+IDirect3DPixelShader9 *area_ps(int n)
+{
+    if (n < 1 || n > kAreaMax) return nullptr;
+    if (!g_area_ps[n] && !g_area_tried[n]) {
+        g_area_tried[n] = true;
+        std::string src = "#define AT " + std::to_string(n) + "\n" + kAreaPS;
+        g_area_ps[n] = compile_ps(src.c_str(), "box resolve", n > 1 ? "ps_2_a" : "ps_2_0");
+    }
+    return g_area_ps[n];
 }
 
 // The picture's size, for the anti-aliasing filter after the resolve (made again when the window's size changes)
@@ -820,20 +869,25 @@ void present_backbuffer()
         }
     }
     // The resolve (kResolvePS): into the picture directly, or with FXAA into a picture-sized target first
-    int taps = std::clamp((int)ceilf(foot / 2.0f - 0.01f), 1, kResolveMax);
-    IDirect3DPixelShader9 *resolve = ramp && !legacy ? resolve_ps(taps, &taps) : nullptr;
+    // The box resolve when its variant exists (ceil(footprint) + 1 frame pixels per axis at most, in pairs), else
+    // kResolvePS. Press-file "cfg:resolve:2": kResolvePS always, for comparison.
+    const int area_taps = ((int)ceilf(foot - 0.001f) + 2) / 2;
+    IDirect3DPixelShader9 *area = ramp && !legacy && g_cfg.resolve != 2 ? area_ps(area_taps) : nullptr;
+    int taps = area ? area_taps : std::clamp((int)ceilf(foot / 2.0f - 0.01f), 1, kResolveMax);
+    IDirect3DPixelShader9 *resolve = area ? area : ramp && !legacy ? resolve_ps(taps, &taps) : nullptr;
     IDirect3DTexture9 *aa0 = legacy && want_aa && g_fxaa_ps ? aa_target(0, bb.w, bb.h) : nullptr,
                       *aa1 = legacy && want_aa && g_fxaa_ps ? aa_target(1, bb.w, bb.h) : nullptr;
     IDirect3DTexture9 *pic_tex = resolve && want_aa && g_fxaa_ps ? picture_target(pw, ph) : nullptr;
     static int shown_taps = -1;
-    if (resolve && shown_taps != taps) {
-        shown_taps = taps;
-        logf("[d3d] resolve: frame %ux%u into the picture %ux%u (%.2f x %.2f frame pixels each): %dx%d taps, %s", bb.w, bb.h, pw, ph,
-             fx, fy, taps, taps, pic_tex ? "FXAA after it" : want_aa ? "FXAA not available" : "no FXAA (the averaging is the anti-aliasing)");
+    if (resolve && shown_taps != taps + (area ? 100 : 0)) {
+        shown_taps = taps + (area ? 100 : 0);
+        logf("[d3d] resolve: frame %ux%u into the picture %ux%u (%.2f x %.2f frame pixels each): %s %dx%d taps, %s", bb.w, bb.h, pw, ph,
+             fx, fy, area ? "box" : "spread", taps, taps, pic_tex ? "FXAA after it" : want_aa ? "FXAA not available" : "no FXAA (the averaging is the anti-aliasing)");
     }
     if (resolve) {
         float c[4] = {1.0f / g_cfg.gamma, g_cfg.gain, 0, 0};
         float f[4] = {1.0f / pw, 1.0f / ph, 0, 0}; // a picture pixel's footprint in the frame's uv
+        if (area) f[0] = fx, f[1] = fy, f[2] = 1.0f / bb.w, f[3] = 1.0f / bb.h; // the box: in frame pixels
         if (pic_tex) {
             IDirect3DSurface9 *sp = nullptr;
             pic_tex->GetSurfaceLevel(0, &sp);
@@ -2072,6 +2126,11 @@ void release_loader_shaders()
         if (g_resolve_ps[n]) g_resolve_ps[n]->Release();
         g_resolve_ps[n] = nullptr;
         g_resolve_tried[n] = false;
+    }
+    for (int n = 0; n <= kAreaMax; n++) {
+        if (g_area_ps[n]) g_area_ps[n]->Release();
+        g_area_ps[n] = nullptr;
+        g_area_tried[n] = false;
     }
 }
 

@@ -6,6 +6,7 @@ extern Lang g_lang;
 
 enum class Str {
     WindowTitle,
+    WindowTitleNg04,
     Edition,
     NavStart, // the navigation, in page order
     NavInstall,
