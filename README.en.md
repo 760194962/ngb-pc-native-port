@@ -175,8 +175,9 @@ These also happen on the Xbox; the port fixes them. Each fix can be switched bac
 - Opening the Xbox Live dashboard from Ninja Gaiden 2004's Master Ninja Tournament and coming back to the game has not
   been tested yet (Black's Ranking has).
 - Ninja Gaiden 2004's Xbox Live downloader has no sound.
-- Running `NinjaFCJ.xbe` directly, without launch data, crashes (players entering from the main menu never take this
-  path).
+- Running the SNES trilogy's `NinjaFCJ.xbe` / `NinjaFCU.xbe` directly, not from the main menu, crashes: without the launch
+  data the main menu passes, the program's own code uses an object it has not made yet (a null read at 0x1AD7ED), the
+  original program's behaviour. Entering from the main menu never takes this path; the arcade version runs fine on its own.
 - A few anti-virus engines flag the game program as a trojan (on VirusTotal 2.2.22's game program scores 5/71, all
   machine-learning or generic heuristics such as Elastic, Malwarebytes and VBA32, none naming a malware family). It is
   a false positive: the game program is only a small stub holding the Xbox's memory range, the original code is put
