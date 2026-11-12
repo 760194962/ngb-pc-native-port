@@ -428,6 +428,30 @@ swaps the phone book for Insignia's.
 
 Details and evidence: `project/docs/09_联网_Insignia.md`.
 
+## Steam Deck / Linux
+
+There is no separate Linux build; run the Windows build through Steam's Proton.
+
+**Steam Deck**:
+
+1. In Desktop Mode, unzip the package and get your game image ready as above.
+2. Steam → Add a Game → Add a Non-Steam Game, and pick `Ninja Gaiden Black Any Launcher.exe`.
+3. Right-click it → Properties → Compatibility, tick "Force the use of a specific Steam Play compatibility tool" and
+   pick Proton (11.0-2 is the one tried; Experimental is fine too).
+4. Start it, install or point the launcher at the game, then play. From then on it starts from the library in Game
+   Mode.
+5. The Deck's controls are an Xbox controller under Proton. The screen is 16:10; pick "Widescreen (16:10
+   screens)" in the launcher's Aspect ratio.
+
+**Other Linux**: with Steam, the same as steps 2–4; without it, Lutris, Bottles or plain Wine, preferably after
+`winetricks dxvk` (the game uses Direct3D 9, faster through DXVK than Wine's own translation).
+
+**Where it stands**: in 1.1.x a Deck player ran it under Proton 11.0-2, and two differences between Proton and Windows
+were fixed (1.1.3 "dirty disc" at boot, 1.1.4 a crash after the warning screen); later versions have no Deck reports
+yet. The game compiles its shaders with Wine/Proton's own `d3dcompiler_47`; if parts of the picture are missing, try
+`winetricks d3dcompiler_47`. The launcher and online play have not been checked under Wine. If something goes wrong,
+post `logs\black.log` from the game folder in an issue.
+
 ## Building
 
 The project is built with Visual Studio 2017 (x86 C++ tools) and CMake, as a 32-bit program:
