@@ -324,7 +324,7 @@ void read_press_file(uint32_t now_ms)
                     else if (k == "quadweight") g_cfg.quad_weight = v;
                     else if (k == "quadgrad") g_cfg.quad_grad = v;
                     else if (k == "hudcentre") g_cfg.hud_centre = v;
-                    else if (k == "resolve") g_cfg.resolve = v;
+                    else if (k == "resolve") g_cfg.resolve = atoi(line.c_str() + c + 1);
                     else if (k == "shadowpullc") g_cfg.shadow_pull_bias = atoi(line.c_str() + c + 1);
                     else if (k == "shadowpulls") g_cfg.shadow_pull_slope = atoi(line.c_str() + c + 1);
                     else if (k == "shadowpcf") g_cfg.shadow_pcf = std::clamp(atoi(line.c_str() + c + 1), 0, 2);
