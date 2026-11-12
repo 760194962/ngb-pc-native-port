@@ -245,7 +245,7 @@ const Pair kText[(int)Str::Count] = {
     {L"单核（默认）", L"One core (default)"},
     {L"自动分配（实验性）", L"Automatic (experimental)"},
     {L"单核最接近 Xbox，也最稳定。自动分配让游戏线程分到多个性能核上，但游戏的主要计算集中在一个线程，不会更快，实测还略慢一点（第一章约 0.5 毫秒），也可能出现原版没有的问题；遇到异常请改回单核。下次启动游戏时生效。",
-     L"One core is closest to the Xbox and the most stable. Automatic spreads the game's threads over the performance cores, but most of the game's work is on one thread: it is no faster, measured a little slower (about 0.5 ms a frame in chapter 1), and it may show problems the console never had; switch back if anything goes wrong. Applies from the next start."},
+     L"One core is closest to the Xbox and the most stable. Automatic spreads the game's threads over the performance cores, but most of its work is on one thread: no faster (about 0.5 ms a frame slower in chapter 1), and it may bring problems the console never had; if so, switch back. Applies from the next start."},
     {L"清理着色器缓存", L"Clear shader cache"},
     {L"删除着色器缓存。下次启动游戏会重新编译，可能需要多等一会儿。", L"Delete the shader cache. The next start will compile the shaders again and may take a little longer."},
     {L"删除启动器目录下的着色器缓存？下次启动游戏会重新编译着色器，可能需要多等一会儿。", L"Delete the shader cache in the launcher folder? The next start will compile the shaders again and may take a little longer."},

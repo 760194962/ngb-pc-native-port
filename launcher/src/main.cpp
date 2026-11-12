@@ -1573,8 +1573,8 @@ struct Painter {
         // (experimental). Saved at once: this page has no Save button.
         float cy = c.bottom + 22;
         text(S(Str::CpuMode), {x, cy, x + 130, cy + 30}, 13.5f, kAsh);
-        segmented(kHitCpuMode, x + 130, cy, {S(Str::CpuSingle), S(Str::CpuAuto)}, black_ini("multicore") == "1" ? 1 : 0, 150);
-        text(S(Str::CpuNote), {x + 130, cy + 36, x + 760, cy + 76}, 12, kAsh, 0.8f);
+        segmented(kHitCpuMode, x + 130, cy, {S(Str::CpuSingle), S(Str::CpuAuto)}, black_ini("multicore") == "1" ? 1 : 0, 170);
+        text(S(Str::CpuNote), {x + 130, cy + 38, x + 760, cy + 94}, 12, kAsh, 0.8f); // three lines (the footer is below at kH - 44)
 
         wchar_t foot[160];
         swprintf(foot, 160, S(Str::Footer), L"" GAME_VERSION);
