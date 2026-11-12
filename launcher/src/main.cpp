@@ -726,6 +726,8 @@ void set_game_folder(const std::wstring &dir)
     check_game();
 }
 
+void update_title(); // the window's title (below)
+
 // The game shown (the switch under the brand): its folder, check, saves and install page
 void switch_module(int m)
 {
@@ -733,6 +735,7 @@ void switch_module(int m)
     g.module = m;
     ini_set(L"module", m ? L"ng04" : L"black");
     saves::set_title(m ? L"54430003" : L"5443000d");
+    update_title();
     g.game = ini_get(game_key(), (default_game_folder() + L"\\default.xbe").c_str());
     set_dest(folder_of(g.game));
     g.checked_game.clear();
@@ -2867,10 +2870,17 @@ int hit_at(float x, float y)
     return -1;
 }
 
+// The window's title: the game shown (Black | 2004) in the language chosen
+void update_title()
+{
+    if (g.hwnd) SetWindowTextW(g.hwnd, S(ng04() ? Str::WindowTitleNg04 : Str::WindowTitle));
+}
+
 void set_lang(Lang l)
 {
     g_lang = l;
     ini_set(L"lang", l == Lang::Zh ? L"zh" : L"en");
+    update_title();
 }
 
 // A dragged slider follows the mouse: x (in DIPs) over its track, in 0.05 steps
@@ -3571,7 +3581,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
     RECT work;
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     int w = r.right - r.left, hgt = r.bottom - r.top;
-    g.hwnd = CreateWindowExW(0, wc.lpszClassName, S(Str::WindowTitle), style, work.left + std::max(0, (int)(work.right - work.left - w) / 2),
+    g.hwnd = CreateWindowExW(0, wc.lpszClassName, S(ng04() ? Str::WindowTitleNg04 : Str::WindowTitle), style, work.left + std::max(0, (int)(work.right - work.left - w) / 2),
                              work.top + std::max(0, (int)(work.bottom - work.top - hgt) / 2), w, hgt, nullptr, nullptr, inst, nullptr);
     ShowWindow(g.hwnd, show);
     MSG m;

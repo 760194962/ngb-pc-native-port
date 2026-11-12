@@ -9,7 +9,8 @@ struct Pair {
 };
 
 const Pair kText[(int)Str::Count] = {
-    {L"忍者龙剑传 黑之章 PC 原生移植 启动器", L"Ninja Gaiden Black PC Launcher"},
+    {L"忍者龙剑传 黑之章 · PC 原生移植 启动器", L"Ninja Gaiden Black · native PC port launcher"},
+    {L"忍者龙剑传（2004）· PC 原生移植 启动器", L"Ninja Gaiden (2004) · native PC port launcher"},
     {L"PC 原生移植", L"Native PC port"},
     {L"开始游戏", L"Play"},
     {L"安装", L"Install"},
