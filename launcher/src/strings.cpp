@@ -684,6 +684,12 @@ const Pair kText[(int)Str::Count] = {
      L"This console’s files are damaged or do not match and cannot be used.\n\n"
      L"Rebuild renames the old files to .old in the save folder and makes a new console. It has to be registered again (Register, then the dashboard’s connection test); earlier gamertags are recovered in the dashboard as Insignia’s website explains.\n\n"
      L"Played online in xemu before? Import from xemu below is simpler, with no rebuild."},
+    {L"未核对的版本（启动时按内容匹配已知版本，可能不兼容）：", L"Not a checked build (matched to a known one by its layout at start; may not work): "},
+    {L"补丁", L"Patch"},
+    {L"不打补丁（美版原版）", L"None (the US release as it is)"},
+    {L"清除", L"Clear"},
+    {L"汉化 / 飓风版补丁 (*.xdelta)", L"Translation / Hurricane patch (*.xdelta)"},
+    {L"选择补丁…", L"Choose…"},
 };
 
 } // namespace

@@ -3,6 +3,9 @@ game/
 *.xbe
 *.iso
 *.xiso
+# The translator's patches carry game code (private sharing only): kept locally for the launcher's tests
+*.xdelta
+Hurricane Patch Installer*/
 *.bin.bak
 
 # Third-party tooling is cloned/built locally, not vendored

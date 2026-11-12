@@ -186,6 +186,25 @@ const struct {
 
 } // namespace
 
+// The title id in an XBE's certificate (header: base 0x104, certificate address 0x118; the id at +8), or 0
+static uint32_t xbe_title_id(const std::wstring &path)
+{
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    uint8_t head[0x1000];
+    DWORD got = 0;
+    bool ok = ReadFile(h, head, sizeof head, &got, nullptr);
+    CloseHandle(h);
+    uint32_t base, cert;
+    if (!ok || got < 0x120 || memcmp(head, "XBEH", 4)) return 0;
+    memcpy(&base, head + 0x104, 4);
+    memcpy(&cert, head + 0x118, 4);
+    if (cert < base || cert - base + 12 > got) return 0;
+    uint32_t id;
+    memcpy(&id, head + (cert - base) + 8, 4);
+    return id;
+}
+
 uint64_t image_size(const std::wstring &iso, std::wstring *error)
 {
     std::vector<Entry> files;
@@ -207,8 +226,15 @@ bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition)
     std::string hash = sha256_file(xbe);
     const auto *build = std::find_if(std::begin(kBuilds), std::end(kBuilds), [&](const auto &b) { return hash == b.sha256; });
     if (build == std::end(kBuilds)) {
-        *detail = L"default.xbe: another build";
-        return false;
+        // Another build of either game (its certificate's title id): accepted unchecked, the programs it launches too
+        uint32_t id = xbe_title_id(xbe);
+        if (id != 0x5443000D && id != 0x54430003) {
+            *detail = L"default.xbe: another build";
+            return false;
+        }
+        *detail = L"SHA-256 " + std::wstring(hash.begin(), hash.begin() + 16);
+        if (edition) *edition = id == 0x54430003 ? Edition::Ng04Other : Edition::NgbOther;
+        return true;
     }
     if (build->edition == Edition::Ng04) {
         for (const auto &f : kNg04Files) {

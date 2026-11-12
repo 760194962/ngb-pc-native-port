@@ -172,6 +172,47 @@ target_compile_definitions(launcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN
   GAME_VERSION="${NGB_VERSION_STRING}") # the game program's release number, for the About page
 target_compile_options(launcher PRIVATE /W3 /utf-8 /EHsc)
 target_link_libraries(launcher PRIVATE d2d1 dwrite windowscodecs ole32 shell32 user32 advapi32 bcrypt dxgi ws2_32 iphlpapi)
+
+# The Hurricane patches (xdelta3 / VCDIFF with LZMA secondary compression) applied by the launcher itself
+# (launcher/src/patch.cpp): xdelta3's library (GPLv2, as this project) and liblzma (xz, 0BSD), both linked statically.
+set(XZ_TOOL_XZ OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_XZDEC OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_LZMADEC OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_LZMAINFO OFF CACHE BOOL "" FORCE)
+set(XZ_TOOL_SCRIPTS OFF CACHE BOOL "" FORCE)
+set(XZ_DOC OFF CACHE BOOL "" FORCE)
+set(XZ_NLS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(xz
+  URL https://github.com/tukaani-project/xz/releases/download/v5.8.1/xz-5.8.1.tar.gz
+  URL_HASH SHA256=507825b599356c10dca1cd720c9d0d0c9d5400b9de300af00e4d1ea150795543
+  EXCLUDE_FROM_ALL)
+set(_ngb_shared ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF)
+FetchContent_MakeAvailable(xz)
+set(BUILD_SHARED_LIBS ${_ngb_shared})
+FetchContent_Declare(xdelta3
+  URL https://github.com/jmacd/xdelta-gpl/releases/download/v3.1.0/xdelta3-3.1.0.tar.gz
+  URL_HASH SHA256=114543336ab6cee3764e3c03202701ef79d7e5e8e4863fe64811e4d9e61884dc)
+FetchContent_GetProperties(xdelta3)
+if(NOT xdelta3_POPULATED)
+  FetchContent_Populate(xdelta3)
+endif()
+add_library(xdelta3 STATIC "${xdelta3_SOURCE_DIR}/xdelta3.c")
+target_include_directories(xdelta3 PUBLIC "${xdelta3_SOURCE_DIR}" "${xz_SOURCE_DIR}/src/liblzma/api")
+target_compile_definitions(xdelta3 PUBLIC SIZEOF_SIZE_T=4 SIZEOF_UNSIGNED_LONG_LONG=8 XD3_USE_LARGEFILE64=1
+  SECONDARY_LZMA=1 SECONDARY_DJW=1 SECONDARY_FGK=1 LZMA_API_STATIC)
+target_compile_options(xdelta3 PUBLIC "/FI${CMAKE_CURRENT_SOURCE_DIR}/../launcher/src/xdelta3_msvc.h")
+target_compile_options(xdelta3 PRIVATE /W0)
+target_link_libraries(xdelta3 PUBLIC liblzma)
+target_sources(launcher PRIVATE ../launcher/src/patch.cpp)
+target_link_libraries(launcher PRIVATE xdelta3)
+option(NGB_PATCH_TEST "Build ngb_patch_test (tools/patch_test.cpp): the launcher's patching from the command line" OFF)
+if(NGB_PATCH_TEST)
+  add_executable(ngb_patch_test ../tools/patch_test.cpp ../launcher/src/patch.cpp)
+  target_compile_definitions(ngb_patch_test PRIVATE UNICODE _UNICODE NOMINMAX)
+  target_compile_options(ngb_patch_test PRIVATE /W3 /utf-8 /EHsc)
+  target_link_libraries(ngb_patch_test PRIVATE xdelta3)
+endif()
 if(PORT_ICON AND EXISTS "${PORT_ICON}")
   target_sources(launcher PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc") # the same icon as the game
 endif()

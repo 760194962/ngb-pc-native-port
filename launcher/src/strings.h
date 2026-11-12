@@ -415,6 +415,8 @@ enum class Str {
     RebuildConsole, // the button, for a console whose files are damaged or do not match
     AskRebuildTitle,
     AskRebuild,
+    GameUnverified, // a default.xbe of the game but not a known build (install.cpp check_game): followed by its hash
+    PatchRow, NoPatch, ClearPatch, PatchFilter, ChoosePatch, // Black's Install page: a Hurricane patch applied first (patch.cpp)
     Count
 };
 

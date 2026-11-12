@@ -29,7 +29,11 @@ uint64_t image_size(const std::wstring &iso, std::wstring *error);
 // The supported builds (loader/src/build_profile.h): the user's Hurricane edition x2.1 in Chinese / English and in
 // Japanese / English, the basic edition x2 (Chinese / English) and the original US release they are all made from;
 // and Ninja Gaiden (2004)'s disc (Ng04), a game of its own in the launcher.
-enum class Edition { None, X21, X21Jp, BasicX2, Us, Ng04 };
+// NgbOther / Ng04Other: a default.xbe of another build whose certificate says Ninja Gaiden Black (5443000D) or Ninja
+// Gaiden 2004 (54430003), e.g. a newer patch: installed and started anyway, the loader matching it to a known build by
+// its layout (loader/src/build_profile.h build_profile_by_shape).
+enum class Edition { None, X21, X21Jp, BasicX2, Us, Ng04, NgbOther, Ng04Other };
+inline bool is_ng04(Edition e) { return e == Edition::Ng04 || e == Edition::Ng04Other; }
 
 // Whether dir holds a supported build: default.xbe and the programs it launches, with their known SHA-256 (the
 // Hurricane editions: four; the basic edition and the US release: the two NES trilogies). *detail: what was found (or

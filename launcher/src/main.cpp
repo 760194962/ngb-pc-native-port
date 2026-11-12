@@ -5,6 +5,7 @@
 // --snap OUT.png [PAGE]: draw the window at 1180x700 into OUT.png and exit (screenshots for review).
 // --extract IMAGE DEST: install from IMAGE into DEST without the window (tests); the result on the console.
 #include "install.h"
+#include "patch.h"
 #include "keys.h"
 #include "saves.h"
 #include "resource.h"
@@ -82,6 +83,7 @@ struct App {
 
     // the install page
     std::wstring iso, dest;        // the chosen image, where it goes
+    std::wstring patch;            // Black: a Hurricane patch (.xdelta) to apply first (patch.cpp), or empty
     uint64_t iso_need = 0;         // bytes of its files (0: not an image)
     std::wstring status;           // the last result line
     bool status_bad = false;
@@ -141,7 +143,7 @@ App g;
 enum {
     kHitStart = 100, kHitLangZh, kHitLangEn, kHitPickIso, kHitPickDest, kHitInstall, kHitCancel, kHitDeleteIso, kHitPickGame,
     kHitHelpImage, kHitHelpInstalled, kHitHelpClose, kHitAskYes, kHitAskNo, kHitDefaultPath, kHitResetPage,
-    kHitSave, kHitDiscard, kHitAskAlt,
+    kHitSave, kHitDiscard, kHitAskAlt, kHitPickPatch, kHitClearPatch,
     kHitHelpSet = 400, // + the setting's index in kSettingHelp: its "?"
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
     kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370, kHitCpuMode = 380,
@@ -534,7 +536,7 @@ void check_game()
     g.checked_game = dir;
     g.game_ok = exists(g.game) && install::check_game(dir, &g.game_detail, &g.game_edition);
     if (!exists(g.game)) g.game_detail.clear();
-    g.game_other = g.game_ok && (g.game_edition == install::Edition::Ng04) != ng04();
+    g.game_other = g.game_ok && install::is_ng04(g.game_edition) != ng04();
     if (g.game_other) g.game_ok = false;
 }
 
@@ -587,6 +589,17 @@ void choose_image()
     g.offer_delete = false;
 }
 
+// Black: the Hurricane patch to apply (the translator's .xdelta), or none
+void choose_patch()
+{
+    std::wstring p;
+    COMDLG_FILTERSPEC f = {S(Str::PatchFilter), L"*.xdelta"};
+    if (installing() || !pick(false, &p, &f)) return;
+    g.patch = p;
+    g.status.clear();
+    g.status_bad = false;
+}
+
 // Bytes in a folder (all files below it)
 uint64_t folder_size(const std::wstring &dir)
 {
@@ -617,7 +630,11 @@ bool folder_empty(const std::wstring &dir)
 }
 
 // The space the install still needs: an existing copy's files are replaced in place
-uint64_t space_needed() { return g.iso_need > g.dest_size ? g.iso_need - g.dest_size : 0; }
+uint64_t space_needed()
+{
+    uint64_t files = g.iso_need > g.dest_size ? g.iso_need - g.dest_size : 0;
+    return files + (g.patch.empty() || ng04() ? 0 : patch::image_bytes()); // the patched image, removed once unpacked
+}
 
 void start_install();
 
@@ -647,8 +664,26 @@ void start_install()
     g.prog.state = 1;
     g.status.clear();
     g.offer_delete = false;
-    std::wstring iso = g.iso, dest = g.dest;
-    g.worker = std::thread([iso, dest] { install::extract(iso, dest, g.prog); });
+    std::wstring iso = g.iso, dest = g.dest, xd = ng04() ? std::wstring() : g.patch;
+    g.worker = std::thread([iso, dest, xd] {
+        if (xd.empty()) {
+            install::extract(iso, dest, g.prog);
+            return;
+        }
+        // The patch first, into an image beside the game folder (the US Redump disc or the patches' base image), then
+        // that image unpacked as any other and removed
+        std::wstring tmp = dest + L".patched.iso", err;
+        if (!patch::apply(iso, xd, tmp, g.prog, &err)) {
+            std::lock_guard<std::mutex> l(g.prog.lock);
+            g.prog.message = err;
+            g.prog.state = g.prog.cancel ? 4 : 3;
+            return;
+        }
+        g.prog.done = 0; // the unpacking's own count from here
+        g.prog.files = 0;
+        install::extract(tmp, dest, g.prog);
+        DeleteFileW(tmp.c_str());
+    });
     SetTimer(g.hwnd, kTimerInstall, 100, nullptr);
 }
 
@@ -1809,7 +1844,8 @@ struct Painter {
         fill({x, 120, x + 36, 122}, kBlood);
 
         // from an image
-        D2D1_RECT_F c = {x, 146, x + w, 146 + 214};
+        const float extra = ng04() ? 0.0f : 42.0f; // Black: the patch row
+        D2D1_RECT_F c = {x, 146, x + w, 146 + 214 + extra};
         float y = card(c, S(Str::FromImage), kHitHelpImage);
         bool busy = installing();
         auto row = [&](const wchar_t *label, const std::wstring &value, int hit, const wchar_t *btn) {
@@ -1821,6 +1857,16 @@ struct Painter {
             y += 42;
         };
         row(S(Str::Image), g.iso, kHitPickIso, S(Str::Choose));
+        if (!ng04()) { // a Hurricane patch, applied to the US Redump disc or the patches' base image before unpacking
+            size_t s = g.patch.find_last_of(L"\/");
+            std::wstring name = g.patch.empty() ? std::wstring(S(Str::NoPatch)) : g.patch.substr(s == std::wstring::npos ? 0 : s + 1);
+            text(S(Str::PatchRow), {c.left + 26, y, c.left + 110, y + 36}, 13.5f, kAsh);
+            text(name, {c.left + 112, y, c.right - 260, y + 36}, 13.5f, g.patch.empty() ? kAsh : kBone, g.patch.empty() ? 0.7f : 1.0f,
+                 DWRITE_FONT_WEIGHT_NORMAL, nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+            button(kHitClearPatch, {c.right - 246, y + 3, c.right - 146, y + 33}, S(Str::ClearPatch), false, !busy && !g.patch.empty());
+            button(kHitPickPatch, {c.right - 136, y + 3, c.right - 20, y + 33}, S(Str::ChoosePatch), false, !busy);
+            y += 42;
+        }
         uint64_t avail = free_space(g.dest);
         bool room = g.iso_need && avail >= space_needed();
         if (g.iso_need) {
@@ -1831,7 +1877,7 @@ struct Painter {
         }
         y += 34;
         if (busy) { // progress
-            double f = g.prog.total ? (double)g.prog.done / (double)g.prog.total : 0.0;
+            double f = g.prog.total ? std::min(1.0, (double)g.prog.done / (double)g.prog.total) : 0.0;
             D2D1_RECT_F bar = {c.left + 26, y + 6, c.right - 150, y + 14};
             fill(bar, kInk3, 1.0f, 4);
             if (f > 0) gradient({bar.left, bar.top, bar.left + (float)((bar.right - bar.left) * f), bar.bottom}, {bar.left, 0},
@@ -1857,7 +1903,7 @@ struct Painter {
             button(kHitDeleteIso, {c.left + 26, c.bottom - 46, c.left + 286, c.bottom - 16}, S(Str::DeleteImage), false);
 
         // the game folder: where an install goes and where the game starts from
-        D2D1_RECT_F c2 = {x, 382, x + w, 382 + 128};
+        D2D1_RECT_F c2 = {x, 382 + extra, x + w, 382 + extra + 128};
         float y2 = card(c2, S(Str::InstalledGame), kHitHelpInstalled);
         bool have = exists(g.game);
         text(folder_of(g.game), {c2.left + 26, y2, c2.right - 270, y2 + 30}, 13.5f, kBone, 1.0f, DWRITE_FONT_WEIGHT_NORMAL,
@@ -1867,6 +1913,8 @@ struct Painter {
         button(kHitPickGame, {c2.right - 136, y2 + 1, c2.right - 20, y2 + 31}, S(Str::Change), false, !busy);
         text(!have ? std::wstring(S(Str::NotInstalledHere))
                    : g.game_other ? std::wstring(S(ng04() ? Str::GameIsBlack : Str::GameIsNg04))
+                   : g.game_ok && (g.game_edition == install::Edition::NgbOther || g.game_edition == install::Edition::Ng04Other)
+                       ? std::wstring(S(Str::GameUnverified)) + g.game_detail
                    : g.game_ok ? std::wstring(S(g.game_edition == install::Edition::Ng04      ? Str::GameCheckedNg04
                                          : g.game_edition == install::Edition::Us        ? Str::GameCheckedUs
                                          : g.game_edition == install::Edition::X21Jp   ? Str::GameCheckedJp
@@ -3305,6 +3353,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
         else if (id == kHitDiscard) discard_settings();
         else if (id == kHitPickIso) choose_image();
+        else if (id == kHitPickPatch) choose_patch();
+        else if (id == kHitClearPatch) g.patch.clear();
         else if (id == kHitInstall) request_install();
         else if (id == kHitCancel) g.prog.cancel = true;
         else if (id == kHitDeleteIso && g.offer_delete) g.ask = kAskDelete;
