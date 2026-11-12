@@ -1877,10 +1877,10 @@ struct Painter {
 
         // from an image, and a patch row: Black's Hurricane patch, applied to the US Redump disc or the patches' base
         // image before unpacking; 2004's patch, applied to the unpacked default.xbe. 2004's page has the Hurricane Packs'
-        // card below as well, so its rows are packed closer.
+        // card below as well: its "delete the image" button sits beside Install instead of on a row of its own.
         const bool tight = ng04();
-        const float step = tight ? 36.0f : 42.0f, gap = tight ? 12.0f : 22.0f;
-        D2D1_RECT_F c = {x, 146, x + w, 146 + 214 + (tight ? 24.0f : 42.0f)};
+        const float step = 42.0f, gap = tight ? 14.0f : 22.0f;
+        D2D1_RECT_F c = {x, 146, x + w, 146 + (tight ? 222.0f : 256.0f)};
         float y = card(c, S(Str::FromImage), kHitHelpImage);
         bool busy = installing();
         auto row = [&](const wchar_t *label, const std::wstring &value, int hit, const wchar_t *btn) {
@@ -1910,7 +1910,7 @@ struct Painter {
             text(std::wstring(b) + (room ? L"" : std::wstring(L"  \x00B7  ") + S(Str::NoSpace)), {c.left + 112, y, c.right - 20, y + 26},
                  12.5f, room ? kAsh : kBlood);
         }
-        y += tight ? 30.0f : 34.0f;
+        y += 34;
         if (busy) { // progress
             double f = g.prog.total ? std::min(1.0, (double)g.prog.done / (double)g.prog.total) : 0.0;
             D2D1_RECT_F bar = {c.left + 26, y + 6, c.right - 150, y + 14};
@@ -1931,10 +1931,13 @@ struct Painter {
             button(kHitCancel, {c.right - 136, y - 6, c.right - 20, y + 26}, S(Str::Cancel), false);
         } else {
             button(kHitInstall, {c.left + 26, y - 6, c.left + 206, y + 34}, S(Str::StartInstall), true, room);
+            bool side = tight && g.offer_delete; // 2004: the delete button on this row, at its right
             if (!g.status.empty())
-                text(g.status, {c.left + 222, y - 6, c.right - 20, y + 34}, 13, g.status_bad ? kBlood : kBone, g.status_bad ? 1.0f : 0.9f);
+                text(g.status, {c.left + 222, y - 6, side ? c.right - 300 : c.right - 20, y + 34}, 13, g.status_bad ? kBlood : kBone,
+                     g.status_bad ? 1.0f : 0.9f);
+            if (side) button(kHitDeleteIso, {c.right - 286, y - 1, c.right - 20, y + 29}, S(Str::DeleteImage), false);
         }
-        if (g.offer_delete && !busy)
+        if (g.offer_delete && !busy && !tight)
             button(kHitDeleteIso, {c.left + 26, c.bottom - 46, c.left + 286, c.bottom - 16}, S(Str::DeleteImage), false);
 
         // the game folder: where an install goes and where the game starts from
@@ -1965,7 +1968,7 @@ struct Painter {
             g.content = install::installed_content(save_hdd());
             g.dlc_read = true;
         }
-        D2D1_RECT_F c3 = {x, c2.bottom + 12, x + w, c2.bottom + 12 + 142};
+        D2D1_RECT_F c3 = {x, c2.bottom + 14, x + w, c2.bottom + 14 + 142};
         float y3 = card(c3, S(Str::DlcCard), kHitHelpDlc);
         text(S(Str::DlcFolder), {c3.left + 26, y3, c3.left + 110, y3 + 36}, 13.5f, kAsh);
         text(g.dlc_dir.empty() ? S(Str::NotChosen) : g.dlc_dir, {c3.left + 112, y3, c3.right - 150, y3 + 36}, 13.5f,
