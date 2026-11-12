@@ -118,6 +118,23 @@ Redump 的「Ninja Gaiden (USA, Asia) (En,Ja)」也支持：同一个 1.02.04，
 - **退出游戏**：标题菜单最下面多了一项 EXIT GAME（字形取自游戏自己的菜单字），用游戏自己的确认框问「Exit the game?」。
 - 宽屏、21:9 下 CG 保持 16:9、读盘计时修正等黑之章的修复，2004 版本也有。
 
+## 菜单补丁（本分支）
+
+两个 xbe 补丁，把选项做进游戏自己的 OPTIONS 菜单；实机、模拟器和本移植都能用。生成脚本在 `tools/`，补丁文件随 release
+发布（只含新增代码、菜单数据和文字）。
+
+- **黑之章 飓风版 vb-jp-x2.1**（`tools/ngb_x21_menu.py`）
+  - GENERAL SETTINGS：
+    - Essence-Only Charging：只能吸魂充能奥义（同 2004 原版），原地蓄力不再计数。
+    - Skip Any Cutscene：没看过的过场也能按 START 跳过。
+    - Intercept：交差之法 Hurricane Pack / Black / Off。Off 时读档自动移除该道具，任务模式也一样。
+  - CONTROLLER SETTINGS：Ultimate Tech Camera，奥义发动时左摇杆转镜头：Off、Left / Right（只转左右）、All Directions（上下左右）。
+  - 第一章的尸体用原版的 `yasik_cmn.afs`（x2.1 改的只有这里：检查交差之法、并额外给它，已有交差之法时尸体会提示
+    拿不了）。交差之法改由 Intercept 选项在读档时补上。这个文件不在 xbe 补丁里，release 的镜像补丁保留美版原样。
+  - **注意**：开启 Essence-Only Charging 后，原地蓄力时奥义计数保持为 0，而奥义镜头靠这个计数判断是否在发动，
+    所以吸魂之前左摇杆镜头不会生效。
+- **忍者龙剑传（2004）1.06**（`tools/ng04_camera_menu.py`）：CONTROLLER SETTINGS 里的第三人称自由镜头选项。
+
 ## 现状
 
 逐项结论与证据见 `project/docs/06_功能验证矩阵.md`。

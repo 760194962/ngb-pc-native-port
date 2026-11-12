@@ -126,6 +126,28 @@ Redump's "Ninja Gaiden (USA, Asia) (En,Ja)" runs too: the same 1.02.04 with one 
   the game?" in the game's own box.
 - Black's fixes (widescreen, 16:9 movies on 21:9, the load timing) apply to 2004 as well.
 
+## Menu patches (this fork)
+
+Two XBE patches that put options into the game's own OPTIONS menu; they work on the console, in emulators and in this
+port. The scripts are in `tools/`; the patches come with the release (new code, menu data and text only).
+
+- **Ninja Gaiden Black Hurricane vb-jp-x2.1** (`tools/ngb_x21_menu.py`)
+  - GENERAL SETTINGS:
+    - Essence-Only Charging: Ultimate Techniques charge only from absorbed essence (as in the 2004 game); holding the
+      button no longer counts up.
+    - Skip Any Cutscene: START skips cutscenes not watched before.
+    - Intercept: Hurricane Pack / Black / Off. Off removes the item when a save loads, missions included.
+  - CONTROLLER SETTINGS: Ultimate Tech Camera, the left stick moves the camera during Ultimate Techniques: Off,
+    Left / Right (sideways only) or All Directions.
+  - The chapter 1 corpse uses the original `yasik_cmn.afs` (the only place x2.1 changed it: it checks for Intercept
+    and gives it besides the elixir, so an owned Intercept leaves the corpse "can't carry more"). Intercept comes from
+    the option when a save loads instead. That file is not in the XBE patch; the release's disc patch keeps the US one.
+  - **Note**: with Essence-Only Charging on, the Ultimate Technique count stays 0 while the button is held, and the
+    Ultimate Tech Camera reads that count to tell an Ultimate Technique is on, so the left stick does not move the
+    camera before essence is absorbed.
+- **Ninja Gaiden (2004) 1.06** (`tools/ng04_camera_menu.py`): the third-person free camera options in CONTROLLER
+  SETTINGS.
+
 ## Status
 
 Each item's verdict and evidence are in `project/docs/06_功能验证矩阵.md` (feature verification matrix).
