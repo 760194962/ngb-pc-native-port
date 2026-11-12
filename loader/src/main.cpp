@@ -692,8 +692,13 @@ const BuildProfile *profile_by_shape(const Xbe &x)
     const BuildProfile *first = nullptr;
     for (const BuildProfile *p : kProfiles) {
         if (!fits(*p)) continue;
-        if (p == &kProfileNgbHurricaneX21 || p == &kProfileNgbUs)
-            return x.section_named("HANZI") ? &kProfileNgbHurricaneX21 : &kProfileNgbUs;
+        if (p == &kProfileNgbHurricaneX21 || p == &kProfileNgbUs) {
+            // x2.1's HANZI section: 0x3000 bytes in the Chinese edition, 0x2000 in the Japanese one (its menus' text
+            // and EXIT GAME row follow the edition)
+            const XbeSection *h = x.section_named("HANZI");
+            if (!h) return &kProfileNgbUs;
+            return h->raw_size > 0x2000 ? &kProfileNgbHurricaneX21 : &kProfileNgbHurricaneJp;
+        }
         if (!first) first = p;
     }
     return first;
