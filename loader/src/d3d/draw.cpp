@@ -2126,8 +2126,14 @@ struct WideHud {
     int panel_count = 0;
     Box panel_box{}, panel_seen{};
     uint32_t frame = 0;
+    uint32_t pieces2d = 0; // this frame's squeezed 2D pieces that could be HUD (not centre-only)
 };
 WideHud g_wh;
+// A frame is in play when any 3D reached the back buffer before its 2D. Measured at 21:9 (2026-11-13, a save in play):
+// the title, main menu, loading and every menu (pause, items, weapons, ninpo) draw none, 0 in all their frames;
+// play drew 26..245, its fewest in first person facing an empty view. The 30 used before put those 26-draw
+// frames out of play, so the HUD jumped between the sides and the middle as the player turned.
+constexpr uint32_t kPlay3D = 1;
 
 void wide_hud_count(bool threed)
 {
@@ -2280,7 +2286,7 @@ void wide_hud_frame_end()
     // evidence: the elements whenever their sides change (a few dozen times a run at most)
     static int logged;
     static std::string last;
-    if (logged < 60 && s.threed >= 30) {
+    if (logged < 60 && s.threed >= kPlay3D) {
         std::string sig;
         for (const WideHud::Elem &e : elems) {
             char t[64];
@@ -2295,6 +2301,26 @@ void wide_hud_frame_end()
             last = sig;
         }
     }
+    {   // evidence: each change between in play (kPlay3D) and not while 2D is drawn, with each stretch's 3D draw counts
+        static int flips, mode = -1;
+        static uint32_t run_from, run_lo, run_hi, run_frames;
+        int now = s.pieces2d ? s.threed >= kPlay3D : -1;
+        if (now >= 0 && now != mode && flips < 400) {
+            flips++;
+            if (mode >= 0)
+                logf("[hud]   (the %s stretch from frame %u: %u frames, 3D draws %u..%u)", mode ? "sides" : "MIDDLE", run_from,
+                     run_frames, run_lo, run_hi);
+            logf("[hud] frame %u: %s, 3D draws into the back buffer %u, draws %u, 2D pieces %u", g_frame_count.load(),
+                 now ? "sides" : "MIDDLE", s.threed, s.draws, s.pieces2d);
+            mode = now;
+            run_from = g_frame_count.load(), run_lo = s.threed, run_hi = s.threed, run_frames = 0;
+        }
+        if (now >= 0 && now == mode) {
+            run_frames++;
+            run_lo = std::min(run_lo, s.threed), run_hi = std::max(run_hi, s.threed);
+        }
+    }
+    s.pieces2d = 0;
     s.elems.swap(elems);
     s.boxes.clear();
     s.draws = s.threed = s.last3d = 0;
@@ -2370,7 +2396,8 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
     // In play (3D drawn into the back buffer this frame before this 2D) the HUD's elements keep to their sides
     // (wide_hud_place); a picture over most of the screen there is a screen effect and fills it as drawn.
     float ax = w * 0.5f, ay = h * 0.5f;
-    if (!centre_only && g_wh.threed >= 30 && !g_cfg.hud_centre) {
+    if (!centre_only) g_wh.pieces2d++;
+    if (!centre_only && g_wh.threed >= kPlay3D && !g_cfg.hud_centre) {
         if (art && mxx - mnx >= 0.85f * w && mxy - mny >= 0.75f * h) return;
         wide_hud_place(mnx, mxx, mny, mxy, w, h, ax, ay);
         if (mxx - mnx < 0.89f * w && mxy - mny < 0.9f * h && g_wh.boxes.size() < 2048)
