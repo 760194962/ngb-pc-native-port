@@ -275,8 +275,8 @@ const Pair kText[(int)Str::Count] = {
     {L"左边是游戏收到的按钮，右边选择由手柄的哪个按钮触发。十字键与摇杆不能重映射。",
      L"On the left the button the game gets, on the right the controller button that presses it. The D-pad and sticks cannot be remapped."},
     {L"已改动", L"Changed"},
-    {L"把「控制」页恢复为默认：键盘用默认键位（WASD 移动、方向键视角、J/K 攻击、空格跳……），手柄按钮不重映射。\n\n按「保存」后才会生效；其他页的设定不受影响。",
-     L"Back to the Controls page\u2019s defaults: the default keys (WASD to move, arrows for the camera, J/K to attack, Space to jump\u2026) and no remapped controller buttons.\n\nIt takes effect once saved; the other pages keep their settings."},
+    {L"把「控制」页恢复为默认：键盘用默认键位（WASD 移动、方向键视角、J/K 攻击、L 跳……），手柄按钮不重映射。\n\n按「保存」后才会生效；其他页的设定不受影响。",
+     L"Back to the Controls page\u2019s defaults: the default keys (WASD to move, arrows for the camera, J/K to attack, L to jump\u2026) and no remapped controller buttons.\n\nIt takes effect once saved; the other pages keep their settings."},
     {L"游戏本身只认手柄。这里的每个按键会直接按下手柄上对应的输入：按钮、扳机、十字键，或把摇杆推到底。每个输入可以设两个键。"
      L"键盘与手柄可以同时使用；只有游戏窗口在最前面时按键才有效。\n\n性能：没有影响（按键状态在游戏读手柄时一起读取，开销可以忽略）。",
      L"The game itself only reads its controller. Each key here simply presses that controller input: a button, a trigger, a D-pad "

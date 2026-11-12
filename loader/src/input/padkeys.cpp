@@ -17,9 +17,9 @@ const char *const kIni[kInputs] = {"a",     "b",      "x",     "y",      "black"
 
 // Default keys (the user's layout can replace any of them from the launcher's Controls page)
 const uint16_t kDefaults[kInputs][2] = {
-    {VK_SPACE, VK_RETURN}, {'L', VK_BACK}, {'J', 0}, {'K', 0}, {'R', 0}, {'E', 0}, {'Q', 0}, {VK_LSHIFT, 0},
-    {VK_ESCAPE, 0}, {VK_TAB, 0}, {'C', 0}, {'V', 0},
-    {'1', 0}, {'2', 0}, {'3', 0}, {'4', 0},
+    {'L', 0}, {'I', 0}, {'J', 0}, {'K', 0}, {'Z', 0}, {'X', 0}, {'Q', 0}, {VK_SPACE, 0},
+    {'B', 0}, {'V', 0}, {'C', 0}, {'N', 0},
+    {'T', 0}, {'G', 0}, {'F', 0}, {'H', 0},
     {'W', 0}, {'S', 0}, {'A', 0}, {'D', 0}, {VK_UP, 0}, {VK_DOWN, 0}, {VK_LEFT, 0}, {VK_RIGHT, 0}};
 
 uint16_t g_keys[kInputs][2];
