@@ -2397,7 +2397,28 @@ struct Painter {
                  DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
         };
         // where the saves are
-        const float dup_h = g.same_number.empty() ? 0.0f : 20.0f + 44.0f * (float)std::min<size_t>(g.same_number.size(), 4); // the same-number warning: ~2 lines a group
+        // the same-number warning (saves.h same_number): each save's name, time and folder
+        std::wstring dup_msg;
+        if (!g.same_number.empty()) {
+            std::wstring groups;
+            for (const auto &grp : g.same_number) {
+                std::wstring list;
+                for (const saves::Slot &sl : grp) {
+                    wchar_t e[512];
+                    swprintf(e, 512, S(Str::SavesDupSlot), sl.name.c_str(), when(sl.time).c_str(), sl.folder.c_str());
+                    list += (list.empty() ? L"" : L" / ") + std::wstring(e);
+                }
+                wchar_t b[2048];
+                swprintf(b, 2048, S(Str::SavesDupGroup), (int)wcstol(grp[0].name.c_str(), nullptr, 10), list.c_str());
+                groups += (groups.empty() ? L"" : L"; ") + std::wstring(b);
+            }
+            dup_msg.assign(groups.size() + 512, L' ');
+            dup_msg.resize(swprintf(&dup_msg[0], dup_msg.size(), S(Str::SavesDup), groups.c_str()));
+        }
+        // its height from its length: 12.5 px text, a CJK character a full em, others about half, 22 px a line
+        float dup_units = 0;
+        for (wchar_t ch : dup_msg) dup_units += ch >= 0x2E80 ? 1.0f : 0.47f;
+        const float dup_h = dup_msg.empty() ? 0.0f : 10.0f + 22.0f * std::ceil(dup_units / ((w - 60.0f) / 12.5f));
         D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 2 * 40 + 6 + dup_h};
         float y = card(c, S(Str::SavesCard), help_id(Str::SavesCard));
         text(S(Str::SavesWhere), {lx, y, vx - 10, y + 32}, 13.5f, kAsh);
@@ -2412,23 +2433,8 @@ struct Painter {
             sum = b;
         }
         value(sum, y, c.right - 20, g.slots.empty());
-        if (!g.same_number.empty()) {
-            std::wstring groups;
-            for (const auto &grp : g.same_number) {
-                std::wstring list;
-                for (const saves::Slot &sl : grp) {
-                    wchar_t e[512];
-                    swprintf(e, 512, S(Str::SavesDupSlot), sl.name.c_str(), when(sl.time).c_str(), sl.folder.c_str());
-                    list += (list.empty() ? L"" : L" / ") + std::wstring(e);
-                }
-                wchar_t b[2048];
-                swprintf(b, 2048, S(Str::SavesDupGroup), (int)wcstol(grp[0].name.c_str(), nullptr, 10), list.c_str());
-                groups += (groups.empty() ? L"" : L"; ") + std::wstring(b);
-            }
-            std::wstring msg(groups.size() + 512, L' ');
-            msg.resize(swprintf(&msg[0], msg.size(), S(Str::SavesDup), groups.c_str()));
-            text(msg, {lx, y + 38, c.right - 20, y + 38 + dup_h}, 12.5f, kBlood, 1.0f); // wraps
-        }
+        if (!dup_msg.empty())
+            text(dup_msg, {lx, y + 38, c.right - 20, y + 38 + dup_h}, 12.5f, kBlood, 1.0f); // wraps
         // backups
         const int shown = std::min<int>(3, (int)g.backups.size());
         D2D1_RECT_F c2 = {x, c.bottom + 12, x + w, c.bottom + 12 + 50 + 40 + std::max(1, shown) * 34 + 8};
