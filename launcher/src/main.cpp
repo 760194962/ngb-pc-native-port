@@ -2475,7 +2475,6 @@ struct Painter {
             const saves::Backup &bk = g.backups[i];
             Str kind = bk.note == L"before-restore" ? Str::NoteBeforeRestore : bk.note == L"before-import" ? Str::NoteBeforeImport
                      : bk.note == L"before-resign" ? Str::NoteBeforeResign
-                     : bk.note == L"before-remove-dup" ? Str::NoteBeforeRemoveDup
                      : bk.note == L"xrevive-before-export" ? Str::NoteXreviveBefore
                                                            : Str::NoteByHand;
             wchar_t b[64];
@@ -2997,13 +2996,13 @@ void saves_action(int what)
         ok = saves::replace(g.backups[g.restore_index].dir, ours, backup_root(), L"before-restore", &made, &err), done = Str::RestoreDone;
     if (what == kAskImport) ok = saves::replace(xr, ours, backup_root(), L"before-import", &made, &err), done = Str::ImportDone;
     if (what == kAskExport) ok = saves::replace(ours, xr, backup_root(), L"xrevive-before-export", &made, &err), done = Str::ExportDone;
-    if (what == kAskRemoveDup) { // one of the saves claiming a slot number: checked again on the disk, all backed up first
+    if (what == kAskRemoveDup) { // one of the saves claiming a slot number: checked again on the disk, to the Recycle Bin
         if (g.dup_pick < 0 || g.dup_pick >= (int)g.dup_rows.size()) return refresh_saves();
         const saves::Slot rm = g.dup_rows[g.dup_pick];
         bool changed = false;
-        ok = saves::remove_duplicate(ours, backup_root(), rm.folder, rm.name, &made, &err, &changed);
+        ok = saves::remove_duplicate(ours, rm.folder, rm.name, &err, &changed);
         wchar_t r[1024];
-        if (ok) swprintf(r, 1024, S(Str::RemoveDupDone), rm.name.c_str(), made.c_str());
+        if (ok) swprintf(r, 1024, S(Str::RemoveDupDone), rm.name.c_str(), rm.folder.c_str());
         else if (changed) swprintf(r, 1024, S(Str::RemoveDupChanged), err.c_str());
         else swprintf(r, 1024, S(Str::SavesFailed), err.c_str());
         saves_result(ok, r);

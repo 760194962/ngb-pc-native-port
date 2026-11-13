@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <bcrypt.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -261,10 +262,9 @@ bool signed_here(const std::wstring &root, const std::wstring &folder)
            !memcmp(sig, b.data(), 20);
 }
 
-bool remove_duplicate(const std::wstring &root, const std::wstring &backup_root, const std::wstring &folder,
-                      const std::wstring &name, std::wstring *made, std::wstring *error, bool *changed)
+bool remove_duplicate(const std::wstring &root, const std::wstring &folder, const std::wstring &name, std::wstring *error,
+                      bool *changed)
 {
-    made->clear();
     *changed = true; // until every check has passed
     // a folder name the game makes (0x328CCB: 12 hex digits), so nothing but a slot folder can be named here
     if (folder.size() != 12 || !std::all_of(folder.begin(), folder.end(), [](wchar_t c) { return iswxdigit(c) != 0; })) {
@@ -291,20 +291,18 @@ bool remove_duplicate(const std::wstring &root, const std::wstring &backup_root,
         return false;
     }
     *changed = false;
-    if (!backup(root, backup_root, L"before-remove-dup", made, error)) { // nothing removed; a part-made backup would only
-        std::error_code ec;                                              // mislead in the list (it is copies: new folder)
-        if (!made->empty()) fs::remove_all(*made, ec);
-        made->clear();
-        return false;
-    }
-    std::error_code ec;
-    for (const auto &e : fs::recursive_directory_iterator(dir, ec)) // read-only files would stop the removal
-        SetFileAttributesW(e.path().c_str(), FILE_ATTRIBUTE_NORMAL);
-    SetFileAttributesW(dir.c_str(), a & ~FILE_ATTRIBUTE_READONLY);
-    ec.clear();
-    fs::remove_all(dir, ec);
-    if (ec || GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) {
-        *error = dir.wstring() + (ec ? L": " + error_text(ec) : std::wstring());
+    // to the Recycle Bin, as the launcher's own image deletion: the player can take it back from there
+    std::wstring from = dir.wstring();
+    from.push_back(L'\0'); // a double-null-terminated list
+    SHFILEOPSTRUCTW op = {};
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.c_str();
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    int r = SHFileOperationW(&op);
+    if (r != 0 || op.fAnyOperationsAborted || GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        wchar_t b[32];
+        swprintf(b, 32, L" (0x%x)", r);
+        *error = dir.wstring() + b;
         return false;
     }
     return true;

@@ -45,10 +45,10 @@ bool signed_here(const std::wstring &root, const std::wstring &folder);
 // Removes one of those: the slot folder `folder` of root's UDATA\<title>, after checking, on the disk as it is now,
 // that the name is one the game makes (12 hex digits), that it is a real folder straight under UDATA\<title> (not a
 // link), that it still holds the save named `name`, and that its number still has another save, so a number's last
-// save is never removed; then root's saves are copied whole into a backup ("before-remove-dup", *made) and only then
-// the folder goes (read-only files too). *changed: the check failed (nothing was touched; read the saves again).
-bool remove_duplicate(const std::wstring &root, const std::wstring &backup_root, const std::wstring &folder,
-                      const std::wstring &name, std::wstring *made, std::wstring *error, bool *changed);
+// save is never removed; then the folder goes to the Recycle Bin (no backup: the user found those backups clutter, the
+// bin keeps it to take back). *changed: the check failed (nothing was touched; read the saves again).
+bool remove_duplicate(const std::wstring &root, const std::wstring &folder, const std::wstring &name, std::wstring *error,
+                      bool *changed);
 
 // A copy of root's saves in backup_root\<date>[_note]; *made = its folder
 bool backup(const std::wstring &root, const std::wstring &backup_root, const std::wstring &note, std::wstring *made,

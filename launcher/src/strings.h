@@ -357,7 +357,6 @@ enum class Str {
     AskRemoveDup,
     RemoveDupDone,
     RemoveDupChanged,
-    NoteBeforeRemoveDup,
     // Ninja Gaiden 2004: uninstalling content (the title update, the Hurricane Packs, what the game downloaded)
     UninstallBox,
     UninstallCount,
