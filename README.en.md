@@ -128,8 +128,13 @@ Redump's "Ninja Gaiden (USA, Asia) (En,Ja)" runs too: the same 1.02.04 with one 
 
 ## Menu patches (this fork)
 
-Two XBE patches that put options into the game's own OPTIONS menu; they work on the console, in emulators and in this
-port. The scripts are in `tools/`; the patches come with the release (new code, menu data and text only).
+Two patches that put options into the game's own OPTIONS menu; they work on the console, in emulators and in this
+port. The scripts are in `tools/`; the patches come with the release, both made against the Redump disc images, and
+install from the launcher's Install page.
+
+This branch (main) checks upstream for new releases every day (`.github/workflows/follow-upstream.yml`): a new upstream
+release is merged in, built and packed, and published as `v<version>-fork1` with the patches and notes of the previous
+fork release; older releases stay. A merge conflict or a failed build publishes nothing, and GitHub mails the failure.
 
 - **Ninja Gaiden Black Hurricane vb-jp-x2.1** (`tools/ngb_x21_menu.py`)
   - GENERAL SETTINGS:

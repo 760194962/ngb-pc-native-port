@@ -1,0 +1,101 @@
+# Follows upstream (akirahayabusa/ngb-pc-native-port) releases: when upstream has a release this fork has no
+# "-fork1" release for, upstream's release tag is merged into main, the port is built and packed
+# (tools/make_release.ps1), and a release v<version>-fork1 is published with the two zips, the menu patches and the
+# notes carried over from the previous fork release (its version numbers replaced). Older releases are kept.
+# A merge conflict or a failed build stops the run before anything is pushed or published; GitHub mails the failure.
+name: Follow upstream releases
+
+on:
+  schedule:
+    - cron: '17 3 * * *' # daily, 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: follow-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: akirahayabusa/ngb-pc-native-port
+
+jobs:
+  follow:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Upstream's latest release
+        id: up
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)
+          ver=${tag#v}
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          if gh release view "v$ver-fork1" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Already have v$ver-fork1: nothing to do"
+            echo "todo=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "Upstream $tag has no fork release yet"
+            echo "todo=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream's release into main
+        if: steps.up.outputs.todo == '1'
+        shell: bash
+        run: |
+          tag='${{ steps.up.outputs.tag }}'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream "https://github.com/$UPSTREAM.git"
+          git fetch --no-tags upstream "refs/tags/$tag:refs/tags/upstream-$tag"
+          if ! git merge --no-edit -m "Merge upstream $tag" "upstream-$tag"; then
+            git merge --abort
+            echo "::error::Upstream $tag does not merge cleanly into main: merge it by hand, then run this workflow again"
+            exit 1
+          fi
+
+      - name: Build
+        if: steps.up.outputs.todo == '1'
+        shell: pwsh
+        run: |
+          cmake -S loader -B build -A Win32
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build --config RelWithDebInfo --parallel
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Pack
+        if: steps.up.outputs.todo == '1'
+        shell: powershell
+        run: |
+          ./tools/make_release.ps1 -Bin build/RelWithDebInfo
+          $v = '${{ steps.up.outputs.ver }}'
+          Rename-Item "dist/ngb-hurricane-pc-$v-win32.zip" "ngb-hurricane-pc-$v-fork1-win32.zip"
+          Rename-Item "dist/ngb-hurricane-pc-$v-win32-symbols.zip" "ngb-hurricane-pc-$v-fork1-win32-symbols.zip"
+
+      - name: Push main and publish the release
+        if: steps.up.outputs.todo == '1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver='${{ steps.up.outputs.ver }}'
+          # the previous fork release: its patches and notes are carried over
+          prev=$(gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName,createdAt \
+                 --jq '[.[] | select(.tagName | test("-fork[0-9]+$"))] | sort_by(.createdAt) | last | .tagName')
+          if [ -z "$prev" ] || [ "$prev" = null ]; then echo "::error::no earlier fork release to carry over"; exit 1; fi
+          old=${prev#v}; old=${old%-fork*}; old_re=$(printf '%s' "$old" | sed 's/[.]/[.]/g')
+          gh release download "$prev" -R "$GITHUB_REPOSITORY" -p '*.xdelta' -D dist
+          gh release view "$prev" -R "$GITHUB_REPOSITORY" --json body --jq .body | sed "s/$old_re/$ver/g" > notes.md
+          title=$(gh release view "$prev" -R "$GITHUB_REPOSITORY" --json name --jq .name | sed "s/$old_re/$ver/g")
+          git push origin HEAD:main
+          gh release create "v$ver-fork1" -R "$GITHUB_REPOSITORY" --target main --title "$title" \
+            --notes-file notes.md --latest dist/*-fork1-win32*.zip dist/*.xdelta
+          echo "Published v$ver-fork1 (patches and notes from $prev)"
