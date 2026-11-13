@@ -77,7 +77,13 @@ bool g_reported_insertion;
 // frame while a charge builds). The game thread still reads the attached pads itself each poll, so input is as
 // fresh as before; it only skips the slots this thread has not found a pad in.
 std::atomic<uint32_t> g_pc_present{0};               // bit i: XInput slot i has a pad
-std::atomic<uint32_t> g_pc_motors{0xFFFFFFFFu};      // the game's latest speeds, left << 16 | right; all ones: none yet
+// The game's latest speeds, left << 16 | right, in 64 bits so that "none yet" cannot be a speed: 2.2.16-2.2.27 kept
+// them in 32 bits with all ones as "none yet", which is also both motors at full (65535, 65535), so a full rumble
+// never went out (2.2.15 sent it). Full on both is the game's 5-7 frame pulse in the user's box-kicking trace; both
+// players' 2.2.28-t2 logs show it set by the game and never sent, while weaker speeds went out: a player found that
+// box kicks stopped rumbling with 2.2.16.
+constexpr uint64_t kNoSpeeds = ~0ull;
+std::atomic<uint64_t> g_pc_motors{kNoSpeeds};
 HANDLE g_input_wake;                                 // set when the speeds change
 
 uint32_t probe_slots(uint32_t present)
@@ -98,7 +104,8 @@ DWORD WINAPI xinput_thread(void *)
         if (g_game_cpu && (proc & ~g_game_cpu)) SetThreadAffinityMask(GetCurrentThread(), proc & ~g_game_cpu);
     }
     ULONGLONG probed = GetTickCount64();
-    uint32_t sent = 0xFFFFFFFFu, sent_to = 0;
+    uint64_t sent = kNoSpeeds;
+    uint32_t sent_to = 0;
     for (;;) {
         // asleep until the speeds change or the next probe is due
         ULONGLONG since = GetTickCount64() - probed;
@@ -113,8 +120,9 @@ DWORD WINAPI xinput_thread(void *)
             }
             probed = now;
         }
-        uint32_t m = g_pc_motors.load(), present = g_pc_present.load();
-        if (g_pc_set && m != 0xFFFFFFFFu && (m != sent || (present & ~sent_to))) { // a change, or a pad that has not had it
+        uint64_t m = g_pc_motors.load();
+        uint32_t present = g_pc_present.load();
+        if (g_pc_set && m != kNoSpeeds && (m != sent || (present & ~sent_to))) { // a change, or a pad that has not had it
             PcVibration v = {(WORD)(m >> 16), (WORD)m};
             for (DWORD i = 0; i < 4; i++)
                 if (present & (1u << i)) g_pc_set(i, &v); // Xbox port 0 = every PC pad
@@ -677,7 +685,7 @@ uint32_t __stdcall XInputSetState(Device *h, uint8_t *pFeedback)
     // chapter 1, r119 perf), so a change only wakes xinput_thread, which sends it to the attached pads.
     if (h->port == 0) {
         uint32_t m = (uint32_t)v.wLeftMotorSpeed << 16 | v.wRightMotorSpeed;
-        if (g_pc_motors.exchange(m) != m) {
+        if (g_pc_motors.exchange(m) != (uint64_t)m) {
             if (g_input_wake) SetEvent(g_input_wake);
             sdlpad::rumble(v.wLeftMotorSpeed, v.wRightMotorSpeed);
             static int logged; // the first changes, as evidence in the log
