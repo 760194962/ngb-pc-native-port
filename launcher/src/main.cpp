@@ -98,6 +98,8 @@ struct App {
     // the Saves page: what is on disk (read when the page is opened and after each action), the backup to restore
     std::vector<saves::Slot> slots;
     std::vector<std::vector<saves::Slot>> same_number; // Black's slots claiming one slot number (saves.h)
+    std::vector<saves::Slot> dup_rows; // those, in the order shown: row i's Remove is kHitDupRemove + i
+    int dup_pick = -1;                 // the row whose removal is being confirmed (kAskRemoveDup)
     std::vector<saves::Backup> backups;
     bool saves_read = false;
     int ctl_tab = 0;      // the Controls page: 0 keyboard, 1 pad
@@ -135,7 +137,7 @@ struct App {
     bool dns_note_bad = false;
 };
 enum { kAskOverwrite = 1, kAskNonEmpty, kAskDelete, kAskReset, kAskUnsavedStart, kAskUnsavedClose, kAskRestore, kAskImport,
-       kAskExport, kAskResign, kAskUninstall, kAskNewConsole, kAskRebuildConsole };
+       kAskExport, kAskResign, kAskUninstall, kAskNewConsole, kAskRebuildConsole, kAskRemoveDup };
 App g;
 
 // Hit ids: 0..kPageCount-1 the navigation, then these
@@ -152,10 +154,13 @@ enum {
     kHitModule = 580, // + 0 Black, 1 Ninja Gaiden 2004
     kHitPickDlc = 585, kHitInstallDlc, kHitHelpDlc, kHitExportDlc,
     kHitResign = 590,
+    kHitDupRemove = 1900, // + row of the Saves page's same-number list (App::dup_rows): its Remove
     kHitUninstall = 2000, // Ninja Gaiden 2004's content to uninstall: its drop-down list (+ 1 + row)
 };
+constexpr int kDupRowsMax = 60; // same-number rows with a Remove button (30 numbers; more than two a number is rare)
 // Ids in a range must not run into the next fixed id (2.2.8's kHitClearCache once put Export on Open folder's 500).
 static_assert(kHitWebsite + 5 <= kHitClearCache && kHitClearCache < kHitOpenSaves && kHitExport < kHitRestore, "button ids overlap");
+static_assert(kHitPadMap + 16 * 16 + 16 < kHitDupRemove && kHitDupRemove + kDupRowsMax <= kHitUninstall, "button ids overlap");
 constexpr int kMsaaLevels[3] = {2, 4, 8}; // the anti-aliasing list's MSAA rows (black.ini msaa)
 // Render resolution: "the window's size" or 1x to 10x the game's 720x480 buffer (the game asks for 720x480 at
 // CreateDevice; black.log). Widescreen widens the width by 4/3 (anamorphic); a width is at most 8192, Direct3D 9's
@@ -1730,11 +1735,24 @@ struct Painter {
             swprintf(b, 1024, S(body), g.uninstall_name.c_str(), g.uninstall_size.c_str());
             body_text = b;
         }
+        if (g.ask == kAskRemoveDup && g.dup_pick >= 0 && g.dup_pick < (int)g.dup_rows.size()) {
+            title = Str::AskRemoveDupTitle;
+            const saves::Slot &rm = g.dup_rows[g.dup_pick];
+            long n = wcstol(rm.name.c_str(), nullptr, 10);
+            std::wstring keep; // the number's other saves, which stay
+            for (const saves::Slot &sl : g.dup_rows)
+                if (sl.folder != rm.folder && wcstol(sl.name.c_str(), nullptr, 10) == n)
+                    keep += (keep.empty() ? L"" : L"  /  ") + sl.name + (g_lang == Lang::Zh ? L"（" : L" (") + when(sl.time) +
+                            (g_lang == Lang::Zh ? L"）" : L")");
+            wchar_t b[2048];
+            swprintf(b, 2048, S(Str::AskRemoveDup), rm.name.c_str(), when(rm.time).c_str(), rm.folder.c_str(), keep.c_str());
+            body_text = b;
+        }
         const float pw = 560, ph = 300, px = (kW - pw) / 2, py = (kH - ph) / 2;
         D2D1_RECT_F p = {px, py, px + pw, py + ph};
         fill(p, 0x16141a, 0.98f, 6);
         stroke(p, kInk3, 1.0f, 6);
-        fill({p.left, p.top + 6, p.left + 3, p.bottom - 6}, g.ask == kAskDelete || g.ask == kAskUninstall ? kBlood : kGold, 0.85f);
+        fill({p.left, p.top + 6, p.left + 3, p.bottom - 6}, g.ask == kAskDelete || g.ask == kAskUninstall || g.ask == kAskRemoveDup ? kBlood : kGold, 0.85f);
         g_hits.push_back({0x7fff, p});
         text(S(title), {p.left + 34, p.top + 22, p.right - 30, p.top + 58}, 19, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({p.left + 34, p.top + 62, p.left + 64, p.top + 64}, kBlood);
@@ -1753,7 +1771,8 @@ struct Painter {
         button(unsaved_ask ? kHitAskAlt : kHitAskNo, {p.right - 34 - 120 - 12 - 160, p.bottom - 56, p.right - 34 - 120 - 12, p.bottom - 20},
                S(unsaved_ask ? Str::DontSave : Str::Cancel), false);
         button(kHitAskYes, {p.right - 34 - 120, p.bottom - 56, p.right - 34, p.bottom - 20},
-               S(g.ask == kAskDelete ? Str::MoveToBin : g.ask == kAskReset ? Str::ResetYes : unsaved_ask ? Str::Save : Str::Continue), true);
+               S(g.ask == kAskDelete ? Str::MoveToBin : g.ask == kAskReset ? Str::ResetYes : unsaved_ask ? Str::Save
+                 : g.ask == kAskRemoveDup ? Str::SavesDupRemove : Str::Continue), true);
     }
 
     // The "?" panel over the window
@@ -2397,26 +2416,13 @@ struct Painter {
                  DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
         };
         // where the saves are
-        // the same-number warning (saves.h same_number): each save's name, time and folder
-        std::wstring dup_msg; // the advice, then each number and its saves on lines of their own
-        int dup_lines = 0;
-        if (!g.same_number.empty()) {
-            dup_msg = S(Str::SavesDup);
-            dup_lines = 1;
-            for (const auto &grp : g.same_number) {
-                wchar_t b[64];
-                swprintf(b, 64, S(Str::SavesDupGroup), (int)wcstol(grp[0].name.c_str(), nullptr, 10));
-                dup_msg += L"\n" + std::wstring(b);
-                dup_lines++;
-                for (const saves::Slot &sl : grp) {
-                    wchar_t e[512];
-                    swprintf(e, 512, S(Str::SavesDupSlot), sl.name.c_str(), when(sl.time).c_str(), sl.folder.c_str());
-                    dup_msg += L"\n" + std::wstring(e);
-                    dup_lines++;
-                }
-            }
-        }
-        const float dup_h = dup_lines ? 10.0f + 16.5f * dup_lines : 0.0f; // 12.5 px text: about 16.5 px a line
+        // the same-number warning (saves.h same_number): the advice, then each number on a line and under it each of its
+        // saves (name, time, folder, signed elsewhere) with its Remove
+        const float dup_text_w = w - 46.0f - 96.0f; // the save lines leave room for their button
+        const float dup_head_h = g.dup_rows.empty() ? 0.0f
+            : 16.5f * std::ceil(measure(S(Str::SavesDup), 12.5f, DWRITE_FONT_WEIGHT_NORMAL) / (w - 46.0f) + 0.001f);
+        const float dup_h = g.dup_rows.empty() ? 0.0f
+            : 10.0f + dup_head_h + 20.0f * (float)g.same_number.size() + 26.0f * (float)g.dup_rows.size();
         D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 2 * 40 + 6 + dup_h};
         float y = card(c, S(Str::SavesCard), help_id(Str::SavesCard));
         text(S(Str::SavesWhere), {lx, y, vx - 10, y + 32}, 13.5f, kAsh);
@@ -2431,8 +2437,31 @@ struct Painter {
             sum = b;
         }
         value(sum, y, c.right - 20, g.slots.empty());
-        if (!dup_msg.empty())
-            text(dup_msg, {lx, y + 38, c.right - 20, y + 38 + dup_h}, 12.5f, kBlood, 1.0f); // wraps
+        if (!g.dup_rows.empty()) {
+            float dy = y + 40;
+            text(S(Str::SavesDup), {lx, dy, c.right - 20, dy + dup_head_h}, 12.5f, kBlood, 1.0f); // wraps
+            dy += dup_head_h;
+            size_t row = 0;
+            long number = -1;
+            for (; row < g.dup_rows.size(); row++) {
+                const saves::Slot &sl = g.dup_rows[row];
+                long n = wcstol(sl.name.c_str(), nullptr, 10);
+                if (n != number) { // the number's own line
+                    number = n;
+                    wchar_t b[64];
+                    swprintf(b, 64, S(Str::SavesDupGroup), (int)n);
+                    text(b, {lx, dy, c.right - 20, dy + 20}, 12.5f, kBlood, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+                    dy += 20;
+                }
+                wchar_t e[640];
+                swprintf(e, 640, S(Str::SavesDupSlot), sl.name.c_str(), when(sl.time).c_str(), sl.folder.c_str(),
+                         sl.here ? L"" : S(Str::SavesDupForeign));
+                text(e, {lx, dy, lx + dup_text_w, dy + 24}, 12.5f, kBlood, 1.0f, DWRITE_FONT_WEIGHT_NORMAL, nullptr,
+                     DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
+                button(kHitDupRemove + (int)row, {c.right - 20 - 84, dy + 1, c.right - 20, dy + 23}, S(Str::SavesDupRemove), false);
+                dy += 26;
+            }
+        }
         // backups
         const int shown = std::min<int>(3, (int)g.backups.size());
         D2D1_RECT_F c2 = {x, c.bottom + 12, x + w, c.bottom + 12 + 50 + 40 + std::max(1, shown) * 34 + 8};
@@ -2446,6 +2475,7 @@ struct Painter {
             const saves::Backup &bk = g.backups[i];
             Str kind = bk.note == L"before-restore" ? Str::NoteBeforeRestore : bk.note == L"before-import" ? Str::NoteBeforeImport
                      : bk.note == L"before-resign" ? Str::NoteBeforeResign
+                     : bk.note == L"before-remove-dup" ? Str::NoteBeforeRemoveDup
                      : bk.note == L"xrevive-before-export" ? Str::NoteXreviveBefore
                                                            : Str::NoteByHand;
             wchar_t b[64];
@@ -2937,6 +2967,14 @@ void refresh_saves()
     g.slots = saves::slots(saves::our_root(save_hdd()));
     g.same_number.clear(); // 2004 names its saves "SAVE GAME NO01": how it files them is not checked here
     if (!ng04()) g.same_number = saves::same_number(g.slots);
+    g.dup_rows.clear();
+    for (auto &grp : g.same_number)
+        for (saves::Slot &sl : grp) {
+            sl.here = saves::signed_here(saves::our_root(save_hdd()), sl.folder); // a hint which one was copied in
+            if ((int)g.dup_rows.size() < kDupRowsMax) g.dup_rows.push_back(sl);
+        }
+    g.dup_pick = -1; // rows may have moved: a confirmation open for one is closed
+    if (g.ask == kAskRemoveDup) g.ask = 0;
     g.backups = saves::backups(backup_root());
     g.saves_read = true;
 }
@@ -2959,6 +2997,19 @@ void saves_action(int what)
         ok = saves::replace(g.backups[g.restore_index].dir, ours, backup_root(), L"before-restore", &made, &err), done = Str::RestoreDone;
     if (what == kAskImport) ok = saves::replace(xr, ours, backup_root(), L"before-import", &made, &err), done = Str::ImportDone;
     if (what == kAskExport) ok = saves::replace(ours, xr, backup_root(), L"xrevive-before-export", &made, &err), done = Str::ExportDone;
+    if (what == kAskRemoveDup) { // one of the saves claiming a slot number: checked again on the disk, all backed up first
+        if (g.dup_pick < 0 || g.dup_pick >= (int)g.dup_rows.size()) return refresh_saves();
+        const saves::Slot rm = g.dup_rows[g.dup_pick];
+        bool changed = false;
+        ok = saves::remove_duplicate(ours, backup_root(), rm.folder, rm.name, &made, &err, &changed);
+        wchar_t r[1024];
+        if (ok) swprintf(r, 1024, S(Str::RemoveDupDone), rm.name.c_str(), made.c_str());
+        else if (changed) swprintf(r, 1024, S(Str::RemoveDupChanged), err.c_str());
+        else swprintf(r, 1024, S(Str::SavesFailed), err.c_str());
+        saves_result(ok, r);
+        refresh_saves();
+        return;
+    }
     if (what == kAskResign) {
         int n = 0;
         ok = saves::resign(ours, backup_root(), &n, &made, &err);
@@ -3275,7 +3326,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                     else PostMessageW(h, WM_CLOSE, 0, 0);
                 }
             } else if (id == kHitAskYes) {
-                if (ask == kAskRestore || ask == kAskImport || ask == kAskExport || ask == kAskResign) saves_action(ask);
+                if (ask == kAskRestore || ask == kAskImport || ask == kAskExport || ask == kAskResign || ask == kAskRemoveDup)
+                    saves_action(ask);
                 else if (ask == kAskDelete) delete_image();
                 else if (ask == kAskReset) reset_page(g.page);
                 else if (ask == kAskUninstall) uninstall_now();
@@ -3329,6 +3381,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
         else if (id == kHitBackupNow) saves_action(0);
         else if (id == kHitResign) g.ask = kAskResign;
+        else if (id >= kHitDupRemove && id < kHitDupRemove + (int)g.dup_rows.size()) {
+            if (game_running()) saves_result(false, S(Str::GameRunning)); // the game keeps its own list of the slots
+            else g.dup_pick = id - kHitDupRemove, g.ask = kAskRemoveDup;
+        }
         else if (id >= kHitRestore && id < kHitRestore + 3) {
             g.restore_index = id - kHitRestore;
             if (game_running()) saves_result(false, S(Str::GameRunning));
@@ -3574,6 +3630,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
             ini_set(L"module", keep);
         }
         if (!wcscmp(argv[i], L"--lang") && i + 1 < argc) g_lang = !wcscmp(argv[i + 1], L"en") ? Lang::En : Lang::Zh;
+        if (!wcscmp(argv[i], L"--dup-pick") && i + 1 < argc) { // with --snap: row N's Remove pressed (its confirmation)
+            refresh_saves();
+            g.dup_pick = _wtoi(argv[i + 1]), g.ask = kAskRemoveDup;
+        }
+        if (!wcscmp(argv[i], L"--dup-remove-now") && i + 1 < argc) { // with --snap: row N's removal confirmed
+            refresh_saves();
+            g.dup_pick = _wtoi(argv[i + 1]);
+            saves_action(kAskRemoveDup);
+        }
         if (!wcscmp(argv[i], L"--scroll") && i + 1 < argc) g.page_scroll = g.scroll_target = (float)_wtof(argv[i + 1]); // with --snap: the page scrolled down
         if (!wcscmp(argv[i], L"--help-scroll") && i + 1 < argc) g.help_for = g.help, g.help_scroll = g.help_target = (float)_wtof(argv[i + 1]); // with --snap, after --show-help
         if (!wcscmp(argv[i], L"--mouse") && i + 2 < argc) g.mouse_x = (float)_wtof(argv[i + 1]), g.mouse_y = (float)_wtof(argv[i + 2]); // with --snap: the mouse there (a cut text's tip)

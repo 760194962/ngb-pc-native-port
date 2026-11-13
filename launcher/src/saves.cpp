@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <cwctype>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -17,6 +18,18 @@ namespace {
 std::wstring g_title = L"5443000d";
 // UDATA (the slots) and TDATA (the system save) of the title
 std::vector<std::wstring> title_dirs() { return {L"UDATA\\" + g_title, L"TDATA\\" + g_title}; }
+
+// An error's text for the page. ec.message() is a new string each call: the old wstring(message().begin(),
+// message().end()) paired two of them and crashed (a copy that failed on a link, in a test, 2026-11-13). The text is
+// in the system's ANSI code page (Chinese on a Chinese Windows).
+std::wstring error_text(const std::error_code &ec)
+{
+    std::string m = ec.message();
+    int n = MultiByteToWideChar(CP_ACP, 0, m.data(), (int)m.size(), nullptr, 0);
+    std::wstring w(n > 0 ? n : 0, L'\0');
+    if (n > 0) MultiByteToWideChar(CP_ACP, 0, m.data(), (int)m.size(), &w[0], n);
+    return w;
+}
 
 // The title's downloadable content beside its system save (Ninja Gaiden 2004's update $u and packs $c)
 bool content_entry(const fs::path &p)
@@ -79,7 +92,7 @@ bool copy_saves(const fs::path &from, const fs::path &to, std::wstring *error)
             if (content_entry(e.path())) continue;
             fs::copy(e.path(), to / t / e.path().filename(), fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
             if (ec) {
-                *error = (to / t).wstring() + L": " + std::wstring(ec.message().begin(), ec.message().end());
+                *error = (to / t).wstring() + L": " + error_text(ec);
                 return false;
             }
         }
@@ -106,7 +119,7 @@ bool move_saves(const fs::path &root, const fs::path &to, std::wstring *error)
             fs::copy(src, dst, fs::copy_options::recursive, ec);
             if (!ec) fs::remove_all(src, ec); // only once the copy is complete
             if (ec) {
-                *error = src.wstring() + L": " + std::wstring(ec.message().begin(), ec.message().end());
+                *error = src.wstring() + L": " + error_text(ec);
                 return false;
             }
         }
@@ -238,6 +251,63 @@ std::vector<std::vector<Slot>> same_number(const std::vector<Slot> &slots)
         v.push_back(g);
     }
     return v;
+}
+
+bool signed_here(const std::wstring &root, const std::wstring &folder)
+{
+    std::vector<uint8_t> b;
+    uint8_t sig[20];
+    return read_all(fs::path(root) / title_dirs()[0] / folder / L"save000.dat", b) && port_signature(b, sig) &&
+           !memcmp(sig, b.data(), 20);
+}
+
+bool remove_duplicate(const std::wstring &root, const std::wstring &backup_root, const std::wstring &folder,
+                      const std::wstring &name, std::wstring *made, std::wstring *error, bool *changed)
+{
+    made->clear();
+    *changed = true; // until every check has passed
+    // a folder name the game makes (0x328CCB: 12 hex digits), so nothing but a slot folder can be named here
+    if (folder.size() != 12 || !std::all_of(folder.begin(), folder.end(), [](wchar_t c) { return iswxdigit(c) != 0; })) {
+        *error = folder;
+        return false;
+    }
+    const fs::path dir = fs::path(root) / title_dirs()[0] / folder;
+    DWORD a = GetFileAttributesW(dir.c_str());
+    if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY) || (a & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        *error = dir.wstring();
+        return false;
+    }
+    // the saves as they are now (the game or the player may have changed them since the page was drawn)
+    const std::vector<Slot> now = slots(root);
+    auto me = std::find_if(now.begin(), now.end(), [&](const Slot &s) { return !_wcsicmp(s.folder.c_str(), folder.c_str()); });
+    bool other = false;
+    if (me != now.end() && me->name == name) {
+        for (const auto &grp : same_number(now))
+            if (std::any_of(grp.begin(), grp.end(), [&](const Slot &s) { return !_wcsicmp(s.folder.c_str(), folder.c_str()); }))
+                other = grp.size() >= 2;
+    }
+    if (!other) {
+        *error = name;
+        return false;
+    }
+    *changed = false;
+    if (!backup(root, backup_root, L"before-remove-dup", made, error)) { // nothing removed; a part-made backup would only
+        std::error_code ec;                                              // mislead in the list (it is copies: new folder)
+        if (!made->empty()) fs::remove_all(*made, ec);
+        made->clear();
+        return false;
+    }
+    std::error_code ec;
+    for (const auto &e : fs::recursive_directory_iterator(dir, ec)) // read-only files would stop the removal
+        SetFileAttributesW(e.path().c_str(), FILE_ATTRIBUTE_NORMAL);
+    SetFileAttributesW(dir.c_str(), a & ~FILE_ATTRIBUTE_READONLY);
+    ec.clear();
+    fs::remove_all(dir, ec);
+    if (ec || GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        *error = dir.wstring() + (ec ? L": " + error_text(ec) : std::wstring());
+        return false;
+    }
+    return true;
 }
 
 std::vector<Backup> backups(const std::wstring &backup_root)

@@ -12,6 +12,7 @@ struct Slot {
     std::wstring name;   // SaveMeta.xbx "Name=": "18. CHAPTER 15 009:56" (slot, chapter, play time)
     long long time;      // last written, seconds since 1970
     std::wstring folder; // its folder in UDATA\<title> (12 hex digits: the game's hash of the whole name)
+    bool here = true;    // signed for this port (signed_here; filled only where it is shown)
 };
 
 struct Backup {
@@ -37,6 +38,17 @@ std::vector<Backup> backups(const std::wstring &backup_root); // newest first
 // 0x1DA1B0); they come from copying another save folder's slots in by hand: a slot's folder is a hash of its whole
 // name (0x328CCB), so two names with the same number but another chapter or time never collide as folders.
 std::vector<std::vector<Slot>> same_number(const std::vector<Slot> &slots);
+
+// Whether a slot's save000.dat is signed for this port (resign below): false for one from another Xbox, xemu or player
+bool signed_here(const std::wstring &root, const std::wstring &folder);
+
+// Removes one of those: the slot folder `folder` of root's UDATA\<title>, after checking, on the disk as it is now,
+// that the name is one the game makes (12 hex digits), that it is a real folder straight under UDATA\<title> (not a
+// link), that it still holds the save named `name`, and that its number still has another save, so a number's last
+// save is never removed; then root's saves are copied whole into a backup ("before-remove-dup", *made) and only then
+// the folder goes (read-only files too). *changed: the check failed (nothing was touched; read the saves again).
+bool remove_duplicate(const std::wstring &root, const std::wstring &backup_root, const std::wstring &folder,
+                      const std::wstring &name, std::wstring *made, std::wstring *error, bool *changed);
 
 // A copy of root's saves in backup_root\<date>[_note]; *made = its folder
 bool backup(const std::wstring &root, const std::wstring &backup_root, const std::wstring &note, std::wstring *made,
