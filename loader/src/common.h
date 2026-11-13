@@ -174,6 +174,7 @@ struct Config {
     bool quad_snap = true;     // press-file "cfg:quadsnap:0": 2D quads above 1x drawn as before (d3d/draw.cpp quad_snap)
     bool quad_weight = true;   // press-file "cfg:quadweight:0": QuadSnap without the alpha-weighted four-texel read (diagnosis)
     int msaa = 0;              // black.ini msaa: 0 off, 2 / 4 / 8 samples for the frame's targets (d3d/device.cpp)
+    bool hud_trace = false;    // --hud-trace: each new call chain of the 2D squeezed on a screen not 16:9, with its box (d3d/draw.cpp)
     bool hud_centre = false;   // black.ini hud_centre = 1 / press-file "cfg:hudcentre:1": on a 21:9 or 16:10 screen the whole HUD
                                // about the middle 16:9, as before 2.2.12 (d3d/draw.cpp wide_hud_place)
     bool quad_grad = false;    // press-file "cfg:quadgrad:1": QuadSnap's four texel reads with explicit gradients, as before 2.2.5 (comparison; d3d/ffp_ps.cpp)

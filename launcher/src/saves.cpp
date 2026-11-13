@@ -2,10 +2,12 @@
 
 #include <windows.h>
 #include <bcrypt.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <cwctype>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -17,6 +19,18 @@ namespace {
 std::wstring g_title = L"5443000d";
 // UDATA (the slots) and TDATA (the system save) of the title
 std::vector<std::wstring> title_dirs() { return {L"UDATA\\" + g_title, L"TDATA\\" + g_title}; }
+
+// An error's text for the page. ec.message() is a new string each call: the old wstring(message().begin(),
+// message().end()) paired two of them and crashed (a copy that failed on a link, in a test, 2026-11-13). The text is
+// in the system's ANSI code page (Chinese on a Chinese Windows).
+std::wstring error_text(const std::error_code &ec)
+{
+    std::string m = ec.message();
+    int n = MultiByteToWideChar(CP_ACP, 0, m.data(), (int)m.size(), nullptr, 0);
+    std::wstring w(n > 0 ? n : 0, L'\0');
+    if (n > 0) MultiByteToWideChar(CP_ACP, 0, m.data(), (int)m.size(), &w[0], n);
+    return w;
+}
 
 // The title's downloadable content beside its system save (Ninja Gaiden 2004's update $u and packs $c)
 bool content_entry(const fs::path &p)
@@ -79,7 +93,7 @@ bool copy_saves(const fs::path &from, const fs::path &to, std::wstring *error)
             if (content_entry(e.path())) continue;
             fs::copy(e.path(), to / t / e.path().filename(), fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
             if (ec) {
-                *error = (to / t).wstring() + L": " + std::wstring(ec.message().begin(), ec.message().end());
+                *error = (to / t).wstring() + L": " + error_text(ec);
                 return false;
             }
         }
@@ -106,7 +120,7 @@ bool move_saves(const fs::path &root, const fs::path &to, std::wstring *error)
             fs::copy(src, dst, fs::copy_options::recursive, ec);
             if (!ec) fs::remove_all(src, ec); // only once the copy is complete
             if (ec) {
-                *error = src.wstring() + L": " + std::wstring(ec.message().begin(), ec.message().end());
+                *error = src.wstring() + L": " + error_text(ec);
                 return false;
             }
         }
@@ -218,10 +232,80 @@ std::vector<Slot> slots(const std::wstring &root)
         fs::path meta = e.path() / L"SaveMeta.xbx", data = e.path() / L"save000.dat";
         std::wstring name = meta_name(meta);
         if (name.empty()) continue;
-        v.push_back({name, written(fs::exists(data, ec) ? data : meta)});
+        v.push_back({name, written(fs::exists(data, ec) ? data : meta), e.path().filename().wstring()});
     }
     std::sort(v.begin(), v.end(), [](const Slot &a, const Slot &b) { return a.time > b.time; });
     return v;
+}
+
+std::vector<std::vector<Slot>> same_number(const std::vector<Slot> &slots)
+{
+    std::vector<std::vector<Slot>> by_number(31);
+    for (const Slot &s : slots) {
+        long n = wcstol(s.name.c_str(), nullptr, 10); // as the game reads it
+        if (n >= 1 && n <= 30) by_number[n].push_back(s);
+    }
+    std::vector<std::vector<Slot>> v;
+    for (auto &g : by_number) {
+        if (g.size() < 2) continue;
+        std::sort(g.begin(), g.end(), [](const Slot &a, const Slot &b) { return a.time < b.time; });
+        v.push_back(g);
+    }
+    return v;
+}
+
+bool signed_here(const std::wstring &root, const std::wstring &folder)
+{
+    std::vector<uint8_t> b;
+    uint8_t sig[20];
+    return read_all(fs::path(root) / title_dirs()[0] / folder / L"save000.dat", b) && port_signature(b, sig) &&
+           !memcmp(sig, b.data(), 20);
+}
+
+bool remove_duplicate(const std::wstring &root, const std::wstring &folder, const std::wstring &name, std::wstring *error,
+                      bool *changed)
+{
+    *changed = true; // until every check has passed
+    // a folder name the game makes (0x328CCB: 12 hex digits), so nothing but a slot folder can be named here
+    if (folder.size() != 12 || !std::all_of(folder.begin(), folder.end(), [](wchar_t c) { return iswxdigit(c) != 0; })) {
+        *error = folder;
+        return false;
+    }
+    const fs::path dir = fs::path(root) / title_dirs()[0] / folder;
+    DWORD a = GetFileAttributesW(dir.c_str());
+    if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY) || (a & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        *error = dir.wstring();
+        return false;
+    }
+    // the saves as they are now (the game or the player may have changed them since the page was drawn)
+    const std::vector<Slot> now = slots(root);
+    auto me = std::find_if(now.begin(), now.end(), [&](const Slot &s) { return !_wcsicmp(s.folder.c_str(), folder.c_str()); });
+    bool other = false;
+    if (me != now.end() && me->name == name) {
+        for (const auto &grp : same_number(now))
+            if (std::any_of(grp.begin(), grp.end(), [&](const Slot &s) { return !_wcsicmp(s.folder.c_str(), folder.c_str()); }))
+                other = grp.size() >= 2;
+    }
+    if (!other) {
+        *error = name;
+        return false;
+    }
+    *changed = false;
+    // to the Recycle Bin, as the launcher's own image deletion: the player can take it back from there
+    std::wstring from = dir.wstring();
+    from.push_back(L'\0'); // a double-null-terminated list
+    SHFILEOPSTRUCTW op = {};
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.c_str();
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    int r = SHFileOperationW(&op);
+    if (r != 0 || op.fAnyOperationsAborted || GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        wchar_t b[32];
+        swprintf(b, 32, L" (0x%x)", r);
+        *error = dir.wstring() + b;
+        return false;
+    }
+    return true;
 }
 
 std::vector<Backup> backups(const std::wstring &backup_root)

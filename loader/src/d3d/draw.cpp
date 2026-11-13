@@ -2126,8 +2126,74 @@ struct WideHud {
     int panel_count = 0;
     Box panel_box{}, panel_seen{};
     uint32_t frame = 0;
+    uint32_t pieces2d = 0; // this frame's squeezed 2D pieces that could be HUD (not centre-only)
 };
 WideHud g_wh;
+// A frame is in play when any 3D reached the back buffer before its 2D. Measured at 21:9 (2026-11-13, a save in play):
+// the title, main menu, loading and every menu (pause, items, weapons, ninpo) draw none, 0 in all their frames;
+// play drew 26..245, its fewest in first person facing an empty view. The 30 used before put those 26-draw
+// frames out of play, so the HUD jumped between the sides and the middle as the player turned.
+constexpr uint32_t kPlay3D = 1;
+
+// In play, told by the game itself: its in-play HUD routine (Ninja Gaiden Black FUN_001FA210, every Black build;
+// Ninja Gaiden 2004 0x1DA290 disc, 0x1EB680 TU; named by ngbrecomp's src/hud.c) draws the HUD only when
+// [0xD6AF00] == 1, [0xDB5A63] >= 0x28 and the HUD is not hidden ([0xDB9C6E] == 0xFFFF; 2004 its own addresses), and that
+// branch alone ends `mov eax, 1` before its ret. That instruction becomes a call to a stub doing the same after
+// counting: a frame whose count moved is in play, whatever the 3D drawn. Builds without the routine keep kPlay3D.
+volatile LONG g_hud_shown;   // bumped by the game each time it draws its HUD
+LONG g_hud_shown_end;        // its value at the last frame's end
+bool g_hud_probe;            // the routine was found and its end redirected
+bool g_hud_seen_2d;          // this frame drew its first HUD-side 2D piece...
+bool g_hud_before_2d;        // ...after the game's HUD routine had run
+uint32_t g_hud_order[2];     // frames whose HUD routine ran after / before their first 2D piece (evidence)
+
+bool hud_in_play() { return g_hud_probe ? g_hud_shown != g_hud_shown_end : g_wh.threed >= kPlay3D; }
+
+// The routine is found by its tests (data addresses masked):
+//   cmp dword [a], 1 / jne +9 / cmp byte [b], 0x28 / jae +3 / xor eax,eax / ret / xor eax,eax / cmp word [c], 0xFFFF / jne
+// then, within its next 0x80 bytes, the shown branch's last call followed by `mov eax, 1; ret`.
+void install_hud_probe(uint8_t *text, uint32_t size)
+{
+    static const uint8_t pat[] = {0x83, 0x3D, 0, 0, 0, 0, 0x01, 0x75, 0x09, 0x80, 0x3D, 0, 0, 0, 0, 0x28, 0x73, 0x03,
+                                  0x33, 0xC0, 0xC3, 0x33, 0xC0, 0x66, 0x81, 0x3D, 0, 0, 0, 0, 0xFF, 0xFF, 0x75};
+    static const uint8_t any[sizeof pat] = {0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1};
+    uint8_t *hit = nullptr;
+    int hits = 0;
+    for (uint32_t i = 0; i + sizeof pat <= size; i++) {
+        uint32_t k = 0;
+        while (k < sizeof pat && (any[k] || text[i + k] == pat[k])) k++;
+        if (k == sizeof pat) hit = text + i, hits++;
+    }
+    uint8_t *end = nullptr;
+    if (hits == 1)
+        for (uint8_t *p = hit + sizeof pat; p < hit + sizeof pat + 0x80 && p + 6 <= text + size; p++)
+            if (p[-5] == 0xE8 && p[0] == 0xB8 && p[1] == 1 && !p[2] && !p[3] && !p[4] && p[5] == 0xC3) {
+                end = p;
+                break;
+            }
+    if (!end) {
+        logf("[hud] the game's in-play HUD routine not found (%d matches): in play told by the 3D drawn", hits);
+        return;
+    }
+    uint8_t *stub = (uint8_t *)VirtualAlloc(nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!stub) return;
+    // inc dword [g_hud_shown]; mov eax, 1; ret
+    uint32_t counter = (uint32_t)(uintptr_t)&g_hud_shown;
+    uint8_t code[] = {0xFF, 0x05, 0, 0, 0, 0, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3};
+    memcpy(code + 2, &counter, 4);
+    memcpy(stub, code, sizeof code);
+    FlushInstructionCache(GetCurrentProcess(), stub, sizeof code);
+    DWORD old;
+    VirtualProtect(end, 5, PAGE_EXECUTE_READWRITE, &old);
+    int32_t rel = (int32_t)((uintptr_t)stub - ((uintptr_t)end + 5));
+    end[0] = 0xE8; // call stub (the ret after it stays)
+    memcpy(end + 1, &rel, 4);
+    VirtualProtect(end, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), end, 5);
+    g_hud_probe = true;
+    logf("[hud] the game's in-play HUD routine (its tests at 0x%08x, its end at 0x%08x): in play as it says",
+         (uint32_t)(uintptr_t)hit, (uint32_t)(uintptr_t)end);
+}
 
 void wide_hud_count(bool threed)
 {
@@ -2280,7 +2346,7 @@ void wide_hud_frame_end()
     // evidence: the elements whenever their sides change (a few dozen times a run at most)
     static int logged;
     static std::string last;
-    if (logged < 60 && s.threed >= 30) {
+    if (logged < 60 && hud_in_play()) {
         std::string sig;
         for (const WideHud::Elem &e : elems) {
             char t[64];
@@ -2295,6 +2361,34 @@ void wide_hud_frame_end()
             last = sig;
         }
     }
+    {   // evidence: each change between in play (kPlay3D) and not while 2D is drawn, with each stretch's 3D draw counts
+        static int flips, mode = -1;
+        static uint32_t run_from, run_lo, run_hi, run_frames;
+        int now = s.pieces2d ? hud_in_play() : -1;
+        if (now >= 0 && now != mode && flips < 400) {
+            flips++;
+            if (mode >= 0)
+                logf("[hud]   (the %s stretch from frame %u: %u frames, 3D draws %u..%u)", mode ? "sides" : "MIDDLE", run_from,
+                     run_frames, run_lo, run_hi);
+            logf("[hud] frame %u: %s, 3D draws into the back buffer %u, draws %u, 2D pieces %u", g_frame_count.load(),
+                 now ? "sides" : "MIDDLE", s.threed, s.draws, s.pieces2d);
+            mode = now;
+            run_from = g_frame_count.load(), run_lo = s.threed, run_hi = s.threed, run_frames = 0;
+        }
+        if (now >= 0 && now == mode) {
+            run_frames++;
+            run_lo = std::min(run_lo, s.threed), run_hi = std::max(run_hi, s.threed);
+        }
+    }
+    s.pieces2d = 0;
+    if (g_hud_probe) { // evidence: does the HUD routine run before the frame's 2D (it must, for hud_in_play)
+        if (g_hud_seen_2d && g_hud_shown != g_hud_shown_end) g_hud_order[g_hud_before_2d]++;
+        uint32_t all = g_hud_order[0] + g_hud_order[1];
+        if (all && all % 3600 == 0 && all <= 36000)
+            logf("[hud] the game's HUD routine ran before the frame's 2D in %u of %u frames", g_hud_order[1], all);
+        g_hud_shown_end = g_hud_shown;
+    }
+    g_hud_seen_2d = false;
     s.elems.swap(elems);
     s.boxes.clear();
     s.draws = s.threed = s.last3d = 0;
@@ -2346,6 +2440,22 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
             const float *p = (const float *)&verts[(size_t)v * stride], *t = (const float *)&verts[(size_t)v * stride + uv];
             in_place = fabsf(t[0] - (p[0] + 0.5f) / w) < 0.01f && fabsf(t[1] - (p[1] + 0.5f) / h) < 0.01f;
         }
+        if (in_place && full_h && mnx <= 0.5f && mxx >= w - 2.0f && !hud_in_play()) {
+            // Out of play, the whole screen so is a picture of the game kept for a menu to be drawn over: the shop
+            // (Muramasa's) draws its still of the last frame of play (a 512x512 target filled as the shop opened,
+            // FUN_00325810 from the task list) and a glow of it, its own art over that. On a 16:9 screen the art
+            // covers it; wider, the still's sides showed the game and its HUD around the shop (the user, 2026-11-13,
+            // 21:9; trace r_shop frame 3137). Only its 16:9 middle is drawn, black beyond as by the menus that cover
+            // the screen with a plain quad (the pause menu's). In play (the underwater wobble) it stays as drawn.
+            float k = (16.0f / 9.0f) * g_cfg.aspect_h / g_cfg.aspect_w;
+            if (k < 1.0f) {
+                float c = w * 0.5f;
+                g_rhw_clip = {(LONG)((c - c * k) * sx + 0.5f), 0, (LONG)((c + c * k) * sx + 0.5f), (LONG)(h * sy + 0.5f)};
+            } else {
+                float c = h * 0.5f, ky = 1.0f / k;
+                g_rhw_clip = {0, (LONG)((c - c * ky) * sy + 0.5f), (LONG)(w * sx + 0.5f), (LONG)((c + c * ky) * sy + 0.5f)};
+            }
+        }
         if (in_place) return;
     }
     if (art && full_h && mnx <= 0.5f && mxx >= w - 2.0f) {
@@ -2369,8 +2479,22 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
     if (!squeeze) return;
     // In play (3D drawn into the back buffer this frame before this 2D) the HUD's elements keep to their sides
     // (wide_hud_place); a picture over most of the screen there is a screen effect and fills it as drawn.
+    if (g_cfg.hud_trace) { // which game routines draw the 2D: the call chain (8 return addresses) with its box
+        static std::set<std::string> seen;
+        uint32_t by[8] = {};
+        int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 8);
+        std::string key;
+        char t[16];
+        for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
+        // one line per chain (its first box), at most 3000
+        if (seen.size() < 3000 && seen.insert(key).second)
+            logf("[hudtrace] frame %u 3d %u%s%s box %.0f-%.0f,%.0f-%.0f:%s", g_frame_count.load(), g_wh.threed,
+                 centre_only ? " centre" : "", art ? " art" : "", mnx, mxx, mny, mxy, key.c_str());
+    }
     float ax = w * 0.5f, ay = h * 0.5f;
-    if (!centre_only && g_wh.threed >= 30 && !g_cfg.hud_centre) {
+    if (!centre_only) g_wh.pieces2d++;
+    if (!centre_only && !g_hud_seen_2d) g_hud_seen_2d = true, g_hud_before_2d = g_hud_shown != g_hud_shown_end;
+    if (!centre_only && hud_in_play() && !g_cfg.hud_centre) {
         if (art && mxx - mnx >= 0.85f * w && mxy - mny >= 0.75f * h) return;
         wide_hud_place(mnx, mxx, mny, mxy, w, h, ax, ay);
         if (mxx - mnx < 0.89f * w && mxy - mny < 0.9f * h && g_wh.boxes.size() < 2048)

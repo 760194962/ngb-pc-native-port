@@ -30,6 +30,9 @@
 #include "xbe.h"
 #include "xthread.h"
 
+namespace xd3d {
+void install_hud_probe(uint8_t *text, uint32_t size); // d3d/draw.cpp: the game's in-play HUD routine counts its frames
+}
 namespace xk {
 void load_launch_data(const std::wstring &file); // kernel/k_misc.cpp
 void set_image_file_name(const std::wstring &xbe_path, const std::wstring &game_dir); // kernel/k_misc.cpp
@@ -256,6 +259,7 @@ bool parse_args()
             g_cfg.game_cpu = _wtoi(v.c_str());
         }
         else if (a == L"--skip-videos") g_cfg.skip_videos = true;
+        else if (a == L"--hud-trace") g_cfg.hud_trace = true;
         else if (a == L"--normal-aspect") { g_cfg.widescreen = false; settings_mark_cli("widescreen"); }
         else if (a == L"--aspect") { // W:H widescreen shape (Ninja Gaiden Black: 16:9, 16:10, 21:9)
             std::wstring v;
@@ -845,6 +849,8 @@ int run(void *reserve, unsigned reserve_size)
     install_ng04_exitmenu(); // Ninja Gaiden (2004)'s title menu: the same, its own way
     install_ng04_camera();   // Ninja Gaiden (2004) update: the right-stick camera at start, inversion
     if (profile && !black && !profile->aux) install_music51_fix(); // the music player's six channels at -96 dB
+    if (profile && profile->wide2d) // the HUD's sides on a screen not 16:9: in play as the game's HUD routine says
+        if (const XbeSection *t = g_xbe.section_named(".text")) xd3d::install_hud_probe((uint8_t *)(uintptr_t)t->vaddr, t->vsize);
     // Ⓐ in Ranking's Live boxes (and Ninja Gaiden (2004)'s Master Ninja Tournament): the port's Xbox Live dashboard when it
     // can run (dashboard.cpp), else cancel as Ⓑ
     const bool live_dash = profile && profile != &kProfileXod && dashboard_available();

@@ -175,6 +175,12 @@ const Pair kText[(int)Str::Count] = {
     {L"内容", L"Contents"},
     {L"还没有存档。", L"No saves yet."},
     {L"共 %d 个存档，最近一次：%ls（%ls）", L"%d saves; the latest: %ls (%ls)"},
+    {L"存档号码重复，游戏每个号码只会显示其中一个。每个号码留一个，其余点「移除」（放进回收站）：",
+     L"Saves with the same slot number; the game shows only one of each. Keep one of each number and remove the others (to the Recycle Bin):"},
+    {L"%d 号：", L"No. %d:"},
+    {L"    · %ls（%ls，文件夹 %ls%ls）", L"    · %ls (%ls, folder %ls%ls)"},
+    {L"移除", L"Remove"},
+    {L"，签名不是本机：别处拷来的", L"; signed elsewhere: copied in"},
     {L"打开文件夹", L"Open folder"},
     {L"备份", L"Backups"},
     {L"立即备份", L"Back up now"},
@@ -205,10 +211,16 @@ const Pair kText[(int)Str::Count] = {
     {L"用这里的存档替换 xRevive 的存档吗？\n\nxRevive 原有的存档不会被删除，会先移到这里的备份文件夹（标注「导出前 xRevive 原有的存档」）。",
      L"Replace xRevive\u2019s saves with the ones here?\n\nxRevive\u2019s saves are not deleted: they are first moved into the backups here (\u201CxRevive\u2019s saves before an export\u201D)."},
     {L"游戏把存档写在模拟的 Xbox 硬盘里：位置下的 Partition1\\UDATA\\5443000d（每个存档格一个文件夹）与 TDATA\\5443000d（系统存档）；2004 是 54430003。"
-     L"位置在 launcher.ini 的 hdd 里设定，默认是启动器旁的 savedata 文件夹。\n\n存档是标准 Xbox 格式；复制整个 savedata 文件夹就是完整备份。",
+     L"位置在 launcher.ini 的 hdd 里设定，默认是启动器旁的 savedata 文件夹。\n\n存档是标准 Xbox 格式；复制整个 savedata 文件夹就是完整备份。\n\n"
+     L"号码重复：游戏按存档名开头的号码分配存档格（「2. CHAPTER 7 …」是 2 号），每个号码只显示一个存档。"
+     L"从别处手动拷进来的存档文件夹，可能带进一个号码已被占用的存档：游戏只会显示两个中的一个，覆盖它时另一个还留着，之后可能又顶替回来。"
+     L"本页会把这种存档标红列出来，每个后面有「移除」：每个号码留一个，其余移除；移除的会放进 Windows 回收站，删错了可以从回收站还原。游戏运行时不能移除。",
      L"The game writes its saves to the emulated Xbox hard disk: Partition1\\UDATA\\5443000d under the location (one folder "
      L"per slot) and TDATA\\5443000d (the system save); 54430003 for 2004. The location is launcher.ini\u2019s hdd, by default the savedata "
-     L"folder beside the launcher.\n\nThe saves are in the standard Xbox format; a copy of the whole savedata folder is a full backup."},
+     L"folder beside the launcher.\n\nThe saves are in the standard Xbox format; a copy of the whole savedata folder is a full backup.\n\n"
+     L"Same slot number: the game files each save under the number its name starts with (“2. CHAPTER 7 …” is No. 2) and shows one save per number. "
+     L"A save folder copied in by hand from another one can bring a second save with a number already used: the game then shows only one of the two, and "
+     L"overwriting it leaves the other, which can come back in its place. This page lists such saves in red, each with Remove: keep one of each number and remove the others; a removed one goes to the Windows Recycle Bin, to take back from there. Not while the game runs."},
     {L"忍者龙剑传 黑之章 / 忍者龙剑传（2004）· PC 原生移植", L"Ninja Gaiden Black / Ninja Gaiden (2004) \u00B7 native PC port"},
     {L"《忍者龙剑传 黑之章》与《忍者龙剑传》（2004）（均为初代 Xbox）的非官方 Windows 原生移植，在左上角切换。"
      L"黑之章支持的光盘镜像：美版原版（英文）；基本版 va\u2011zh\u2011x2（中英）；飓风版 vb\u2011zh\u2011x2.1（中英）、vb\u2011jp\u2011x2.1（日英）。"
@@ -557,6 +569,11 @@ const Pair kText[(int)Str::Count] = {
     {L"已重签 %d 个存档文件。原来的存档已备份到：%s", L"Re-signed %d save files. The saves before are backed up in: %s"},
     {L"所有存档的签名都正确，不需要重签。", L"Every save is signed right: nothing to re-sign."},
     {L"重签前自动备份", L"Before re-signing"},
+    {L"移除重复的存档", L"Remove a duplicate save"},
+    {L"移除：%ls（%ls，文件夹 %ls）\n保留：%ls\n\n移除的存档文件夹会放进 Windows 回收站，删错了可以从回收站还原。",
+     L"Remove: %ls (%ls, folder %ls)\nKeep: %ls\n\nThe removed save’s folder goes to the Windows Recycle Bin, to take back from there if need be."},
+    {L"已把 %ls 移进回收站（文件夹 %ls）。", L"Moved %ls to the Recycle Bin (folder %ls)."},
+    {L"存档已经变了（%ls），没有移除任何东西，请看一眼最新的列表再操作。", L"The saves have changed (%ls); nothing was removed. Check the list again first."},
     {L"卸载内容", L"Uninstall"},
     {L"%d 项", L"%d installed"},
     {L"没有已安装的内容", L"Nothing installed"},
