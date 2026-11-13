@@ -9,8 +9,9 @@
 namespace saves {
 
 struct Slot {
-    std::wstring name; // SaveMeta.xbx "Name=": "18. CHAPTER 15 009:56" (slot, chapter, play time)
-    long long time;    // last written, seconds since 1970
+    std::wstring name;   // SaveMeta.xbx "Name=": "18. CHAPTER 15 009:56" (slot, chapter, play time)
+    long long time;      // last written, seconds since 1970
+    std::wstring folder; // its folder in UDATA\<title> (12 hex digits: the game's hash of the whole name)
 };
 
 struct Backup {
@@ -28,6 +29,14 @@ std::wstring xrevive_root(const std::wstring &folder);    // <xRevive folder>\Sa
 bool has_saves(const std::wstring &root);                 // a slot or the system save there (not just icons)
 std::vector<Slot> slots(const std::wstring &root);        // newest first
 std::vector<Backup> backups(const std::wstring &backup_root); // newest first
+
+// Ninja Gaiden Black's slots that claim the same slot number, each group oldest first. The game files a slot under
+// the number its name starts with (x2.1 0x1DA220: wcstol(name) - 1 into a 30-entry table), a later one with the same
+// number replacing the earlier in the table, so only one of them is shown; overwriting it deletes only that one. The
+// game itself never makes two (a new save takes the first free number, 0x1DA0B0; an overwrite deletes the old first,
+// 0x1DA1B0); they come from copying another save folder's slots in by hand: a slot's folder is a hash of its whole
+// name (0x328CCB), so two names with the same number but another chapter or time never collide as folders.
+std::vector<std::vector<Slot>> same_number(const std::vector<Slot> &slots);
 
 // A copy of root's saves in backup_root\<date>[_note]; *made = its folder
 bool backup(const std::wstring &root, const std::wstring &backup_root, const std::wstring &note, std::wstring *made,

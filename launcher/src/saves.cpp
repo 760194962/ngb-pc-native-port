@@ -218,9 +218,25 @@ std::vector<Slot> slots(const std::wstring &root)
         fs::path meta = e.path() / L"SaveMeta.xbx", data = e.path() / L"save000.dat";
         std::wstring name = meta_name(meta);
         if (name.empty()) continue;
-        v.push_back({name, written(fs::exists(data, ec) ? data : meta)});
+        v.push_back({name, written(fs::exists(data, ec) ? data : meta), e.path().filename().wstring()});
     }
     std::sort(v.begin(), v.end(), [](const Slot &a, const Slot &b) { return a.time > b.time; });
+    return v;
+}
+
+std::vector<std::vector<Slot>> same_number(const std::vector<Slot> &slots)
+{
+    std::vector<std::vector<Slot>> by_number(31);
+    for (const Slot &s : slots) {
+        long n = wcstol(s.name.c_str(), nullptr, 10); // as the game reads it
+        if (n >= 1 && n <= 30) by_number[n].push_back(s);
+    }
+    std::vector<std::vector<Slot>> v;
+    for (auto &g : by_number) {
+        if (g.size() < 2) continue;
+        std::sort(g.begin(), g.end(), [](const Slot &a, const Slot &b) { return a.time < b.time; });
+        v.push_back(g);
+    }
     return v;
 }
 

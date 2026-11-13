@@ -97,6 +97,7 @@ struct App {
     int ask = 0;  // the confirmation open: 0 none, else kAsk*
     // the Saves page: what is on disk (read when the page is opened and after each action), the backup to restore
     std::vector<saves::Slot> slots;
+    std::vector<std::vector<saves::Slot>> same_number; // Black's slots claiming one slot number (saves.h)
     std::vector<saves::Backup> backups;
     bool saves_read = false;
     int ctl_tab = 0;      // the Controls page: 0 keyboard, 1 pad
@@ -2396,7 +2397,8 @@ struct Painter {
                  DWRITE_TEXT_ALIGNMENT_LEADING, 0.0f, true);
         };
         // where the saves are
-        D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 2 * 40 + 6};
+        const float dup_h = g.same_number.empty() ? 0.0f : 20.0f + 44.0f * (float)std::min<size_t>(g.same_number.size(), 4); // the same-number warning: ~2 lines a group
+        D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 2 * 40 + 6 + dup_h};
         float y = card(c, S(Str::SavesCard), help_id(Str::SavesCard));
         text(S(Str::SavesWhere), {lx, y, vx - 10, y + 32}, 13.5f, kAsh);
         value(save_hdd(), y, c.right - bw - 30, false);
@@ -2410,6 +2412,23 @@ struct Painter {
             sum = b;
         }
         value(sum, y, c.right - 20, g.slots.empty());
+        if (!g.same_number.empty()) {
+            std::wstring groups;
+            for (const auto &grp : g.same_number) {
+                std::wstring list;
+                for (const saves::Slot &sl : grp) {
+                    wchar_t e[512];
+                    swprintf(e, 512, S(Str::SavesDupSlot), sl.name.c_str(), when(sl.time).c_str(), sl.folder.c_str());
+                    list += (list.empty() ? L"" : L" / ") + std::wstring(e);
+                }
+                wchar_t b[2048];
+                swprintf(b, 2048, S(Str::SavesDupGroup), (int)wcstol(grp[0].name.c_str(), nullptr, 10), list.c_str());
+                groups += (groups.empty() ? L"" : L"; ") + std::wstring(b);
+            }
+            std::wstring msg(groups.size() + 512, L' ');
+            msg.resize(swprintf(&msg[0], msg.size(), S(Str::SavesDup), groups.c_str()));
+            text(msg, {lx, y + 38, c.right - 20, y + 38 + dup_h}, 12.5f, kBlood, 1.0f); // wraps
+        }
         // backups
         const int shown = std::min<int>(3, (int)g.backups.size());
         D2D1_RECT_F c2 = {x, c.bottom + 12, x + w, c.bottom + 12 + 50 + 40 + std::max(1, shown) * 34 + 8};
@@ -2912,6 +2931,8 @@ void open_folder(const std::wstring &dir) { ShellExecuteW(g.hwnd, L"open", dir.c
 void refresh_saves()
 {
     g.slots = saves::slots(saves::our_root(save_hdd()));
+    g.same_number.clear(); // 2004 names its saves "SAVE GAME NO01": how it files them is not checked here
+    if (!ng04()) g.same_number = saves::same_number(g.slots);
     g.backups = saves::backups(backup_root());
     g.saves_read = true;
 }

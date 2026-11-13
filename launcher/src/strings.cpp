@@ -175,6 +175,10 @@ const Pair kText[(int)Str::Count] = {
     {L"内容", L"Contents"},
     {L"还没有存档。", L"No saves yet."},
     {L"共 %d 个存档，最近一次：%ls（%ls）", L"%d saves; the latest: %ls (%ls)"},
+    {L"存档号码重复，游戏只会显示其中一个：%ls。先备份，再到存档文件夹（UDATA 下）删掉不要的那个文件夹。",
+     L"Saves with the same slot number; the game shows only one of each: %ls. Back up first, then delete the folder you do not want (under UDATA)."},
+    {L"%d 号：%ls", L"No. %d: %ls"},
+    {L"%ls（%ls，文件夹 %ls）", L"%ls (%ls, folder %ls)"},
     {L"打开文件夹", L"Open folder"},
     {L"备份", L"Backups"},
     {L"立即备份", L"Back up now"},
@@ -205,10 +209,16 @@ const Pair kText[(int)Str::Count] = {
     {L"用这里的存档替换 xRevive 的存档吗？\n\nxRevive 原有的存档不会被删除，会先移到这里的备份文件夹（标注「导出前 xRevive 原有的存档」）。",
      L"Replace xRevive\u2019s saves with the ones here?\n\nxRevive\u2019s saves are not deleted: they are first moved into the backups here (\u201CxRevive\u2019s saves before an export\u201D)."},
     {L"游戏把存档写在模拟的 Xbox 硬盘里：位置下的 Partition1\\UDATA\\5443000d（每个存档格一个文件夹）与 TDATA\\5443000d（系统存档）；2004 是 54430003。"
-     L"位置在 launcher.ini 的 hdd 里设定，默认是启动器旁的 savedata 文件夹。\n\n存档是标准 Xbox 格式；复制整个 savedata 文件夹就是完整备份。",
+     L"位置在 launcher.ini 的 hdd 里设定，默认是启动器旁的 savedata 文件夹。\n\n存档是标准 Xbox 格式；复制整个 savedata 文件夹就是完整备份。\n\n"
+     L"号码重复：游戏按存档名开头的号码分配存档格（「2. CHAPTER 7 …」是 2 号），每个号码只显示一个存档。"
+     L"从别处手动拷进来的存档文件夹，可能带进一个号码已被占用的存档：游戏只会显示两个中的一个，覆盖它时另一个还留着，之后可能又顶替回来。"
+     L"本页会把这种存档标红列出来，每个号码只留一个即可。",
      L"The game writes its saves to the emulated Xbox hard disk: Partition1\\UDATA\\5443000d under the location (one folder "
      L"per slot) and TDATA\\5443000d (the system save); 54430003 for 2004. The location is launcher.ini\u2019s hdd, by default the savedata "
-     L"folder beside the launcher.\n\nThe saves are in the standard Xbox format; a copy of the whole savedata folder is a full backup."},
+     L"folder beside the launcher.\n\nThe saves are in the standard Xbox format; a copy of the whole savedata folder is a full backup.\n\n"
+     L"Same slot number: the game files each save under the number its name starts with (“2. CHAPTER 7 …” is No. 2) and shows one save per number. "
+     L"A save folder copied in by hand from another one can bring a second save with a number already used: the game then shows only one of the two, and "
+     L"overwriting it leaves the other, which can come back in its place. This page lists such saves in red; keep one of each number."},
     {L"忍者龙剑传 黑之章 / 忍者龙剑传（2004）· PC 原生移植", L"Ninja Gaiden Black / Ninja Gaiden (2004) \u00B7 native PC port"},
     {L"《忍者龙剑传 黑之章》与《忍者龙剑传》（2004）（均为初代 Xbox）的非官方 Windows 原生移植，在左上角切换。"
      L"黑之章支持的光盘镜像：美版原版（英文）；基本版 va\u2011zh\u2011x2（中英）；飓风版 vb\u2011zh\u2011x2.1（中英）、vb\u2011jp\u2011x2.1（日英）。"
