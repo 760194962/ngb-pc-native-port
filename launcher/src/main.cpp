@@ -2398,27 +2398,25 @@ struct Painter {
         };
         // where the saves are
         // the same-number warning (saves.h same_number): each save's name, time and folder
-        std::wstring dup_msg;
+        std::wstring dup_msg; // the advice, then each number and its saves on lines of their own
+        int dup_lines = 0;
         if (!g.same_number.empty()) {
-            std::wstring groups;
+            dup_msg = S(Str::SavesDup);
+            dup_lines = 1;
             for (const auto &grp : g.same_number) {
-                std::wstring list;
+                wchar_t b[64];
+                swprintf(b, 64, S(Str::SavesDupGroup), (int)wcstol(grp[0].name.c_str(), nullptr, 10));
+                dup_msg += L"\n" + std::wstring(b);
+                dup_lines++;
                 for (const saves::Slot &sl : grp) {
                     wchar_t e[512];
                     swprintf(e, 512, S(Str::SavesDupSlot), sl.name.c_str(), when(sl.time).c_str(), sl.folder.c_str());
-                    list += (list.empty() ? L"" : L" / ") + std::wstring(e);
+                    dup_msg += L"\n" + std::wstring(e);
+                    dup_lines++;
                 }
-                wchar_t b[2048];
-                swprintf(b, 2048, S(Str::SavesDupGroup), (int)wcstol(grp[0].name.c_str(), nullptr, 10), list.c_str());
-                groups += (groups.empty() ? L"" : L"; ") + std::wstring(b);
             }
-            dup_msg.assign(groups.size() + 512, L' ');
-            dup_msg.resize(swprintf(&dup_msg[0], dup_msg.size(), S(Str::SavesDup), groups.c_str()));
         }
-        // its height from its length: 12.5 px text, a CJK character a full em, others about half, 22 px a line
-        float dup_units = 0;
-        for (wchar_t ch : dup_msg) dup_units += ch >= 0x2E80 ? 1.0f : 0.47f;
-        const float dup_h = dup_msg.empty() ? 0.0f : 10.0f + 22.0f * std::ceil(dup_units / ((w - 60.0f) / 12.5f));
+        const float dup_h = dup_lines ? 10.0f + 16.5f * dup_lines : 0.0f; // 12.5 px text: about 16.5 px a line
         D2D1_RECT_F c = {x, 116, x + w, 116 + 50 + 2 * 40 + 6 + dup_h};
         float y = card(c, S(Str::SavesCard), help_id(Str::SavesCard));
         text(S(Str::SavesWhere), {lx, y, vx - 10, y + 32}, 13.5f, kAsh);
