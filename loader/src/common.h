@@ -54,6 +54,8 @@ struct Config {
     bool verbose = false;      // --verbose: the whole log on the console too (default: only logc lines)
     bool log_sounds = false;   // --log-sounds: log every sound buffer Play (default: the first 60)
     bool tex_pool = true;      // --no-tex-pool: no textures made ahead (d3d/texture.cpp texture pool; comparisons, a way out)
+    bool ring_rotate = true;   // --ring-discard: one draw ring set renamed with D3DLOCK_DISCARD, made at the first draw, as
+                               // before 2.2.31 (comparisons; d3d/draw.cpp)
     bool strict = false;       // stop at the first call to an unimplemented kernel function
     bool multicore = false;    // default: pin to one CPU like the Xbox
     int game_cpu = -1;         // --game-cpu N: the logical CPU for the game threads (default: first CPU of the last core)

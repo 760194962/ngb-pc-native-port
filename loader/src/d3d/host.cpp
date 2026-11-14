@@ -16,6 +16,7 @@
 
 namespace xd3d {
 void texture_pool_start(IDirect3DDevice9 *dev); // texture.cpp: the texture pool filled to its targets
+void draw_ring_prepare(IDirect3DDevice9 *d);    // draw.cpp: the draw ring sets made and written at device creation
 }
 
 // Common controls 6 (themed message boxes): a manifest dependency the linker
@@ -637,6 +638,7 @@ bool create_device_here()
          g_intz ? "supported" : "NOT supported (depth-buffer reads return zero)");
     xd3d::prewarm_shaders(g_dev); // the cached shaders' objects now, not in the frame that first draws with them
     xd3d::texture_pool_start(g_dev); // textures made ahead by shape, not in the frame an area first shows them
+    if (g_cfg.ring_rotate) xd3d::draw_ring_prepare(g_dev); // the draw ring sets made and written now (draw.cpp)
     return true;
 }
 

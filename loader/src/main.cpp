@@ -185,6 +185,7 @@ bool parse_args()
         else if (a == L"--log-sounds") g_cfg.log_sounds = true;
         else if (a == L"--hitch-detail") perf::g_detail = true; // tests: where a [hitch] frame's time went (perf.h)
         else if (a == L"--no-tex-pool") g_cfg.tex_pool = false;
+        else if (a == L"--ring-discard") g_cfg.ring_rotate = false;
         else if (a == L"--trace-d3d") g_trace_d3d = true;
         else if (a == L"--screenshot") { if (!next(g_cfg.screenshot_dir)) return false; }
         else if (a == L"--watch") {

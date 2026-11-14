@@ -726,43 +726,93 @@ struct DrawTimer {
 
 // Indexed draws through dynamic ring buffers instead of DrawIndexedPrimitiveUP: D3D9On12 (the Iris Xe here) makes
 // an allocation and a copy for every UP call, ~6 ms of a 13 ms chapter-1 frame in r121. The vertices and indices are
-// appended with D3DLOCK_NOOVERWRITE and the buffers start over with D3DLOCK_DISCARD when full.
+// appended with D3DLOCK_NOOVERWRITE. A full set is not renamed with D3DLOCK_DISCARD any more: kRingSets sets are used
+// in turn, each written again only when an event query says the GPU is past its last draw, and all are made and
+// written through at device creation (draw_ring_prepare). Made at the first indexed draw and renamed when full (2.2.30
+// and before, --ring-discard), the frame the first 3D scene showed on the Iris Xe waited 22-39 ms in the appending
+// Locks (the new buffers' first writes) and the first renames 47-71 ms (D3D9On12 making new allocations for them),
+// at every start (2026-11-15).
 constexpr uint32_t kRingVB = 16u << 20, kRingIB = 4u << 20;
-IDirect3DVertexBuffer9 *g_ring_vb;
+IDirect3DVertexBuffer9 *g_ring_vb; // the set in use
 IDirect3DIndexBuffer9 *g_ring_ib;
 uint32_t g_ring_vpos, g_ring_ipos;
 bool g_ring_failed;
+// The sets used in turn, each with an event query issued when it is left (ring_next)
+constexpr int kRingSets = 3;
+IDirect3DVertexBuffer9 *g_ring_vbs[kRingSets];
+IDirect3DIndexBuffer9 *g_ring_ibs[kRingSets];
+IDirect3DQuery9 *g_ring_vq[kRingSets], *g_ring_iq[kRingSets];
+bool g_ring_vq_out[kRingSets], g_ring_iq_out[kRingSets]; // issued and not yet seen done
+int g_ring_vi, g_ring_ii;
+bool g_ring_rotating;
+
+bool ring_create(IDirect3DDevice9 *d)
+{
+    if (g_ring_vb) return true;
+    if (g_ring_failed) return false;
+    int64_t t0 = perf::g_detail ? perf::det_now() : 0; // --hitch-detail: how long making them took
+    int sets = g_cfg.ring_rotate ? kRingSets : 1;
+    bool ok = true;
+    for (int i = 0; i < sets && ok; i++) {
+        ok = SUCCEEDED(d->CreateVertexBuffer(kRingVB, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &g_ring_vbs[i], nullptr)) &&
+             SUCCEEDED(d->CreateIndexBuffer(kRingIB, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_DEFAULT,
+                                            &g_ring_ibs[i], nullptr));
+        if (ok && sets > 1)
+            ok = SUCCEEDED(d->CreateQuery(D3DQUERYTYPE_EVENT, &g_ring_vq[i])) && SUCCEEDED(d->CreateQuery(D3DQUERYTYPE_EVENT, &g_ring_iq[i]));
+    }
+    if (!ok) {
+        logf("[draw] dynamic ring buffers not available: indexed draws stay on DrawIndexedPrimitiveUP");
+        g_ring_failed = true;
+        release_draw_buffers();
+        return false;
+    }
+    g_ring_rotating = sets > 1;
+    g_ring_vi = g_ring_ii = 0;
+    g_ring_vb = g_ring_vbs[0];
+    g_ring_ib = g_ring_ibs[0];
+    g_ring_vpos = g_ring_ipos = 0;
+    logf("[draw] indexed draws through dynamic ring buffers (%u KB vertices, %u KB indices%s)%s", kRingVB >> 10, kRingIB >> 10,
+         sets > 1 ? ", 3 sets used in turn" : "",
+         t0 ? (", made in " + std::to_string(perf::det_ms(perf::det_now() - t0)) + " ms").c_str() : "");
+    return true;
+}
+
+// The next set of one kind, once the GPU is past the draws that last used it (the time waited is counted as perf
+// kDetRingDiscard, the wait it replaces)
+template <typename B>
+B *ring_next(B **bufs, IDirect3DQuery9 **q, bool *out, int &i)
+{
+    q[i]->Issue(D3DISSUE_END);
+    out[i] = true;
+    i = (i + 1) % kRingSets;
+    if (out[i]) {
+        perf::DetScope ds(perf::kDetRingDiscard);
+        while (q[i]->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) SwitchToThread();
+        out[i] = false;
+    }
+    return bufs[i];
+}
 
 bool ring_draw(D3DPRIMITIVETYPE type, uint32_t nverts, uint32_t prims, const uint16_t *idx, uint32_t nidx, const void *src,
                uint32_t stride)
 {
     IDirect3DDevice9 *d = host3d::dev();
-    if (!g_ring_vb) {
-        if (g_ring_failed) return false;
-        if (FAILED(d->CreateVertexBuffer(kRingVB, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &g_ring_vb, nullptr)) ||
-            FAILED(d->CreateIndexBuffer(kRingIB, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &g_ring_ib,
-                                        nullptr))) {
-            logf("[draw] dynamic ring buffers not available: indexed draws stay on DrawIndexedPrimitiveUP");
-            g_ring_failed = true;
-            release_draw_buffers();
-            return false;
-        }
-        g_ring_vpos = g_ring_ipos = 0;
-        logf("[draw] indexed draws through dynamic ring buffers (%u KB vertices, %u KB indices)", kRingVB >> 10, kRingIB >> 10);
-    }
+    if (!ring_create(d)) return false;
     uint32_t vbytes = nverts * stride, ibytes = nidx * 2;
     if (!stride || vbytes > kRingVB || ibytes > kRingIB) return false;
     uint32_t voff = (g_ring_vpos + stride - 1) / stride * stride;
     DWORD vflag = D3DLOCK_NOOVERWRITE;
     if (voff + vbytes > kRingVB) {
         voff = 0;
-        vflag = D3DLOCK_DISCARD;
+        if (g_ring_rotating) g_ring_vb = ring_next(g_ring_vbs, g_ring_vq, g_ring_vq_out, g_ring_vi); // stays NOOVERWRITE
+        else vflag = D3DLOCK_DISCARD;
     }
     uint32_t ioff = g_ring_ipos;
     DWORD iflag = D3DLOCK_NOOVERWRITE;
     if (ioff + ibytes > kRingIB) {
         ioff = 0;
-        iflag = D3DLOCK_DISCARD;
+        if (g_ring_rotating) g_ring_ib = ring_next(g_ring_ibs, g_ring_iq, g_ring_iq_out, g_ring_ii);
+        else iflag = D3DLOCK_DISCARD;
     }
     void *p = nullptr;
     {
@@ -3278,12 +3328,44 @@ void invalidate_render_state(uint32_t state)
     if (state < XRS_MAX) g_rs_valid[state] = false;
 }
 
+// At device creation: the draw ring sets made and written through once, so their memory is there before the first
+// scene (see ring_create)
+void draw_ring_prepare(IDirect3DDevice9 *d)
+{
+    LARGE_INTEGER t0, t1, f;
+    QueryPerformanceCounter(&t0);
+    if (!ring_create(d)) return;
+    void *p = nullptr;
+    for (int i = 0; i < kRingSets; i++) {
+        if (g_ring_vbs[i] && SUCCEEDED(g_ring_vbs[i]->Lock(0, kRingVB, &p, D3DLOCK_DISCARD))) {
+            memset(p, 0, kRingVB);
+            g_ring_vbs[i]->Unlock();
+        }
+        if (g_ring_ibs[i] && SUCCEEDED(g_ring_ibs[i]->Lock(0, kRingIB, &p, D3DLOCK_DISCARD))) {
+            memset(p, 0, kRingIB);
+            g_ring_ibs[i]->Unlock();
+        }
+    }
+    g_ring_vpos = g_ring_ipos = 0;
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&f);
+    logf("[draw] ring buffers made and written through in %.1f ms",
+         (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart);
+}
+
 void release_draw_buffers()
 {
-    if (g_ring_vb) g_ring_vb->Release();
-    if (g_ring_ib) g_ring_ib->Release();
+    for (int i = 0; i < kRingSets; i++) {
+        for (IUnknown **p : {(IUnknown **)&g_ring_vbs[i], (IUnknown **)&g_ring_ibs[i], (IUnknown **)&g_ring_vq[i], (IUnknown **)&g_ring_iq[i]})
+            if (*p) {
+                (*p)->Release();
+                *p = nullptr;
+            }
+        g_ring_vq_out[i] = g_ring_iq_out[i] = false;
+    }
     g_ring_vb = nullptr;
     g_ring_ib = nullptr;
+    g_ring_rotating = false;
     g_ring_vpos = g_ring_ipos = 0;
 }
 

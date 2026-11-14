@@ -298,6 +298,95 @@ uint64_t others_delta()
     return sum;
 }
 
+// --hitch-detail: the host threads' CPU in each frame (the driver's own threads among them: D3D9On12 translates on a
+// thread of its own, which the render thread waits for at a Lock or a Present), listed for a [hitch] frame.
+struct DetThread {
+    HANDLE h;
+    DWORD tid;
+    std::string name;
+    uint64_t last, delta;
+};
+std::vector<DetThread> g_det_threads;
+double g_cycles_per_ms; // the time stamp counter's rate (QueryThreadCycleTime counts it)
+
+void det_threads_frame(uint32_t frame)
+{
+    if (!g_cycles_per_ms) { // measured once over 20 ms
+        LARGE_INTEGER f, a, b;
+        QueryPerformanceFrequency(&f);
+        QueryPerformanceCounter(&a);
+        uint64_t c0 = __rdtsc();
+        Sleep(20);
+        uint64_t c1 = __rdtsc();
+        QueryPerformanceCounter(&b);
+        g_cycles_per_ms = (double)(c1 - c0) / ((double)(b.QuadPart - a.QuadPart) * 1000.0 / (double)f.QuadPart);
+    }
+    // Threads come and go: a thread of its own looks for new ones every 5 s (a system thread snapshot takes tens of
+    // ms: taken on the render thread every 300 frames, it made a 60 ms frame each time); the render thread takes them
+    // over here
+    static std::mutex found_lock;
+    static std::vector<DetThread> found;
+    static bool scanning;
+    if (!scanning) {
+        scanning = true;
+        DWORD self = GetCurrentThreadId();
+        std::thread([self] {
+            std::vector<DWORD> known;
+            for (;;) {
+                HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+                if (snap != INVALID_HANDLE_VALUE) {
+                    THREADENTRY32 te = {sizeof te};
+                    DWORD me = GetCurrentProcessId(), scanner = GetCurrentThreadId();
+                    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+                        DWORD tid = te.th32ThreadID;
+                        if (te.th32OwnerProcessID != me || tid == self || tid == scanner ||
+                            std::find(known.begin(), known.end(), tid) != known.end())
+                            continue;
+                        known.push_back(tid);
+                        bool game;
+                        std::string name = thread_name(tid, &game);
+                        if (game) continue; // the game's own threads are counted elsewhere (others_delta)
+                        HANDLE h = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, tid);
+                        if (!h) continue;
+                        uint64_t c = 0;
+                        QueryThreadCycleTime(h, &c);
+                        std::lock_guard<std::mutex> g(found_lock);
+                        found.push_back({h, tid, name + " " + std::to_string(tid), c, 0});
+                    }
+                    CloseHandle(snap);
+                }
+                Sleep(5000);
+            }
+        }).detach();
+    }
+    {
+        std::lock_guard<std::mutex> g(found_lock);
+        for (DetThread &t : found) g_det_threads.push_back(t);
+        found.clear();
+    }
+    for (DetThread &t : g_det_threads) {
+        uint64_t c = 0;
+        QueryThreadCycleTime(t.h, &c);
+        t.delta = c > t.last ? c - t.last : 0;
+        t.last = c;
+    }
+}
+
+std::string det_threads_text()
+{
+    std::vector<const DetThread *> v;
+    for (const DetThread &t : g_det_threads)
+        if (t.delta / g_cycles_per_ms >= 1.0) v.push_back(&t);
+    std::sort(v.begin(), v.end(), [](const DetThread *a, const DetThread *b) { return a->delta > b->delta; });
+    std::string s;
+    char b[160];
+    for (size_t i = 0; i < v.size() && i < 6; i++) {
+        snprintf(b, sizeof b, "%s%s %.1f ms", i ? ", " : "", v[i]->name.c_str(), v[i]->delta / g_cycles_per_ms);
+        s += b;
+    }
+    return s.empty() ? "none over 1 ms" : s;
+}
+
 std::string now_text(const char *fmt)
 {
     SYSTEMTIME st;
@@ -821,6 +910,15 @@ void frame_end(uint32_t render_w, uint32_t render_h)
             for (int i = 0; i < kDetCount; i++) det[i] = ms(g_det_ticks[i].exchange(0));
         }
         uint32_t discards = g_detail ? g_det_discards.exchange(0) : 0;
+        double render_cpu = 0; // --hitch-detail: the render thread's own CPU this frame (the rest of the frame it waited)
+        if (g_detail) {
+            det_threads_frame(frames);
+            static uint64_t last_cyc;
+            uint64_t c = 0;
+            QueryThreadCycleTime(GetCurrentThread(), &c);
+            render_cpu = last_cyc && g_cycles_per_ms ? (double)(c - last_cyc) / g_cycles_per_ms : 0;
+            last_cyc = c;
+        }
         static int logged;
         if (dt > 50.0 && frames > 2 && logged < 300) {
             logged++;
@@ -839,6 +937,8 @@ void frame_end(uint32_t render_w, uint32_t render_h)
                      det[kDetSetTexture], det[kDetConstants], det[kDetStates], cat[kConvert], cat[kTexture], det[kDetTexCreate],
                      det[kDetTexFill], det[kDetTexPush], cat[kCompile], det[kDetD3DCompile], det[kDetShaderCreate],
                      cat[kRtCopy], det[kDetPace], det[kDetPresent], rest);
+                logf("[hitch]   frame %u CPU: the render thread %.1f ms of its %.0f; other threads: %s", frames, render_cpu, dt,
+                     det_threads_text().c_str());
             }
         }
     }
