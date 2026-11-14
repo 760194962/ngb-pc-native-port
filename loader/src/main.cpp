@@ -184,6 +184,7 @@ bool parse_args()
         if (a == L"--info") g_cfg.info_only = true;
         else if (a == L"--trace") g_cfg.trace = true;
         else if (a == L"--verbose") g_cfg.verbose = true;
+        else if (a == L"--log-sounds") g_cfg.log_sounds = true;
         else if (a == L"--trace-d3d") g_trace_d3d = true;
         else if (a == L"--screenshot") { if (!next(g_cfg.screenshot_dir)) return false; }
         else if (a == L"--watch") {

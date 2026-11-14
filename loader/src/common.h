@@ -52,6 +52,7 @@ struct Config {
     std::wstring screenshot_dir; // --screenshot: PNG frames go here
     bool trace = false;        // log every kernel call, not just the first of each kind
     bool verbose = false;      // --verbose: the whole log on the console too (default: only logc lines)
+    bool log_sounds = false;   // --log-sounds: log every sound buffer Play (default: the first 60)
     bool strict = false;       // stop at the first call to an unimplemented kernel function
     bool multicore = false;    // default: pin to one CPU like the Xbox
     int game_cpu = -1;         // --game-cpu N: the logical CPU for the game threads (default: first CPU of the last core)
