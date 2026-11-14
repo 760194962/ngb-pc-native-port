@@ -1169,6 +1169,7 @@ void apply_viewport()
 // (+0x1DBC, waited on by D3DDevice_BlockUntilVerticalBlank and game threads) and calls the callback set
 // with SetVerticalBlankCallback (+0x1DB8) with a D3DVBLANKDATA {VBlank, Swap, Flags}.
 std::atomic<uint32_t> g_vblank_count, g_swap_count;
+std::atomic<int64_t> g_vblank_qpc; // QueryPerformanceCounter at the last vblank (pace_swap: the time left before its target)
 HANDLE g_vblank_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr); // wakes pace_swap at each vblank
 
 // The emulated vblank follows the display's when the display refreshes at about 60 Hz: DwmFlush returns after
@@ -1220,7 +1221,10 @@ void __stdcall vblank_thread(void *)
             now.QuadPart = now.QuadPart - due < period ? due : now.QuadPart;
         }
         last = now;
+        // the count first, then its time: a reader that races sees the new count with the old time and finds less time
+        // left than there is (pace_swap's pool refill then does less), never more
         uint32_t vb = ++g_vblank_count;
+        g_vblank_qpc.store(now.QuadPart);
         SetEvent(g_vblank_wake);
         from_display += synced;
         if (flush && vb % 3600 == 0) {
@@ -1896,6 +1900,18 @@ void pace_swap()
         // frames, so at 60 fps they expired while the cue was still on and were shown a second time (docs/05 §7).
         if (now >= target && !(iv & 0x80000000)) target = now + 1;
         if (g_trace_d3d) logf("[d3d] pace_swap: interval 0x%x n %u last_vb %u now %u target %u", iv, n, last_vb, now, target);
+        // Time to wait: the texture pool makes again what an area took (texture.cpp texture_pool_refill), by the target
+        // vblank's time: the last vblank's plus a period for each still to come (59.94 Hz, as the vblank thread counts)
+        uint32_t c = g_vblank_count.load();
+        int64_t q = g_vblank_qpc.load();
+        if (q && c < target) {
+            static const int64_t period = [] {
+                LARGE_INTEGER f;
+                QueryPerformanceFrequency(&f);
+                return f.QuadPart * 1001 / 60000;
+            }();
+            texture_pool_refill(host3d::dev(), q + (int64_t)(target - c) * period);
+        }
         while (g_vblank_count.load() < target) WaitForSingleObject(g_vblank_wake, 4); // Sleep(1) polling woke 0-2 ms late
     }
     uint32_t now_vb = g_vblank_count.load();

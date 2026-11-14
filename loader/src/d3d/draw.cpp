@@ -709,6 +709,21 @@ Prim conv_prim(uint32_t xprim, uint32_t verts)
 std::vector<uint16_t> g_quad_indices;
 std::vector<uint16_t> g_tmp_indices;
 
+// --hitch-detail: a host draw call's time (perf kDetDrawCall); one over 1 ms is logged with what was bound
+// (note_slow_draw, after the sent-state variables), to tell what the driver finishes at a first draw.
+void note_slow_draw(double ms);
+struct DrawTimer {
+    int64_t t0 = perf::g_detail ? perf::det_now() : 0;
+    ~DrawTimer()
+    {
+        if (!t0) return;
+        int64_t dt = perf::det_now() - t0;
+        perf::det_add(perf::kDetDrawCall, dt);
+        double ms = perf::det_ms(dt);
+        if (ms > 1.0) note_slow_draw(ms);
+    }
+};
+
 // Indexed draws through dynamic ring buffers instead of DrawIndexedPrimitiveUP: D3D9On12 (the Iris Xe here) makes
 // an allocation and a copy for every UP call, ~6 ms of a 13 ms chapter-1 frame in r121. The vertices and indices are
 // appended with D3DLOCK_NOOVERWRITE and the buffers start over with D3DLOCK_DISCARD when full.
@@ -767,7 +782,7 @@ bool ring_draw(D3DPRIMITIVETYPE type, uint32_t nverts, uint32_t prims, const uin
     g_ring_ipos = ioff + ibytes;
     d->SetStreamSource(0, g_ring_vb, 0, stride);
     d->SetIndices(g_ring_ib);
-    perf::DetScope ds(perf::kDetDrawCall);
+    DrawTimer draw_timer;
     return SUCCEEDED(d->DrawIndexedPrimitive(type, (INT)(voff / stride), 0, nverts, ioff / 2, prims));
 }
 
@@ -1641,6 +1656,27 @@ IDirect3DVertexDeclaration9 *g_decl_sent; // null after SetFVF
 DWORD g_fvf_sent = ~0u;                   // ~0 after SetVertexDeclaration
 DWORD g_fog_table_sent = ~0u;
 
+void note_slow_draw(double ms)
+{
+    static int n;
+    if (n++ >= 300) return;
+    char tex[160];
+    int at = 0;
+    for (int s = 0; s < 4; s++) {
+        IDirect3DBaseTexture9 *t = g_tex_sent[s];
+        D3DSURFACE_DESC dsc = {};
+        if (t && t->GetType() == D3DRTYPE_TEXTURE) ((IDirect3DTexture9 *)t)->GetLevelDesc(0, &dsc);
+        else if (t && t->GetType() == D3DRTYPE_CUBETEXTURE) ((IDirect3DCubeTexture9 *)t)->GetLevelDesc(0, &dsc);
+        at += snprintf(tex + at, sizeof tex - at, " s%d:%s%u%s", s, t ? "" : "-", t ? (unsigned)dsc.Format : 0u,
+                       t && dsc.Usage & D3DUSAGE_RENDERTARGET ? "rt" : "");
+    }
+    const uint32_t *rs = render_state();
+    logf("[draw] slow draw call %.1f ms, frame %u: ps %p (game %s 0x%x), vs %p (game 0x%x), fvf 0x%lx decl %p;%s; alphatest %u "
+         "fog %u blend %u lighting %u sprites %u", ms, g_frame_count.load(), g_ps_sent, g_st.pixel_shader ? "combiners" : "fixed",
+         g_st.pixel_shader, g_vs_sent, g_st.vertex_shader, g_fvf_sent, g_decl_sent, tex, rs[XRS_ALPHATESTENABLE],
+         rs[XRS_FOGENABLE], rs[XRS_ALPHABLENDENABLE], rs[XRS_LIGHTING], rs[XRS_POINTSPRITEENABLE]);
+}
+
 void set_ps(IDirect3DDevice9 *d, IDirect3DPixelShader9 *ps)
 {
     if (ps == g_ps_sent) return;
@@ -1935,7 +1971,7 @@ void draw_up(uint32_t xprim, uint32_t verts, const void *data, uint32_t stride)
     if (g_sprite_tc) data = with_sprite_tc(data, verts, stride);
     perf::add_draw(verts, verts * stride);
     IDirect3DDevice9 *d = host3d::dev();
-    perf::DetScope ds(perf::kDetDrawCall);
+    DrawTimer draw_timer;
     if (p.quads)
         d->DrawIndexedPrimitiveUP(p.type, 0, verts, p.count, quad_indices(verts / 4), D3DFMT_INDEX16, data, stride);
     else
@@ -2038,7 +2074,7 @@ void draw_indexed_up(uint32_t xprim, uint32_t nidx, const uint16_t *idx, const v
     }
     uint32_t host_nidx = p.quads ? p.count * 3 : nidx;
     if (g_cfg.draw_ring && ring_draw(p.type, mx - mn + 1, p.count, idx, host_nidx, src, stride)) return;
-    perf::DetScope ds(perf::kDetDrawCall);
+    DrawTimer draw_timer;
     host3d::dev()->DrawIndexedPrimitiveUP(p.type, 0, mx - mn + 1, p.count, idx, D3DFMT_INDEX16, src, stride);
 }
 
@@ -2869,7 +2905,7 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
     if (q.empty()) return true;
     set_fvf(d, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
     {
-        perf::DetScope ds(perf::kDetDrawCall);
+        DrawTimer draw_timer;
         d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)(q.size() / 3), q.data(), sizeof(QV));
     }
     set_fvf(d, ctx.fvf);

@@ -63,6 +63,7 @@ extern volatile bool g_detail;
 int64_t det_now();
 void det_add(Det d, int64_t ticks);
 void det_count_discard(); // a ring buffer started over this frame
+double det_ms(int64_t ticks); // det_now() ticks in milliseconds
 struct DetScope {
     Det d;
     int64_t t;

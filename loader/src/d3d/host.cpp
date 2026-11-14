@@ -14,6 +14,10 @@
 #include <algorithm>
 #include <string>
 
+namespace xd3d {
+void texture_pool_start(IDirect3DDevice9 *dev); // texture.cpp: the texture pool filled to its targets
+}
+
 // Common controls 6 (themed message boxes): a manifest dependency the linker
 // embeds in blackrt.dll as resource 2; ui_thread activates it for every window it makes.
 #pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' " \
@@ -632,6 +636,7 @@ bool create_device_here()
     logf("host: Direct3D 9Ex device, back buffer %dx%d on '%s'; INTZ depth textures %s", g_bb_w, g_bb_h, id.Description,
          g_intz ? "supported" : "NOT supported (depth-buffer reads return zero)");
     xd3d::prewarm_shaders(g_dev); // the cached shaders' objects now, not in the frame that first draws with them
+    xd3d::texture_pool_start(g_dev); // textures made ahead by shape, not in the frame an area first shows them
     return true;
 }
 

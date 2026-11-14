@@ -759,6 +759,7 @@ void scripted()
 int64_t det_now() { return qpc(); }
 void det_add(Det d, int64_t ticks) { g_det_ticks[d] += ticks; }
 void det_count_discard() { g_det_discards++; }
+double det_ms(int64_t ticks) { return (double)ticks * tick_ms(); }
 
 Scope::Scope(Cat c) : cat(c), on(g_on || g_detail)
 {

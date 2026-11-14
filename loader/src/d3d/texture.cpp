@@ -14,6 +14,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -299,11 +301,122 @@ IDirect3DBaseTexture9 *new_system_copy(Resource *r)
     return t;
 }
 
+// ---- the texture pool ----
+// A new texture made in the middle of a frame waited for the driver: on the RTX 3060 an area's first burst of new
+// textures (109 in two frames of the attract demo, nearly all DXT) spent 34-40 ms in CreateTexture, a few calls taking
+// 1-10 ms whatever their size (an 8x8 as long as a 512x512), while the same calls in a quiet loop take 12-50 us: the
+// driver syncs with its own thread and the work it has queued. Growing the driver's heaps ahead did nothing (--tex-warm
+// at 32 and 128 MB, 2026-11-14). The game never gives a texture back (none in 420 s: its headers live in the area data it
+// loads), so nothing can be reused either. So the pairs (system + DEFAULT copy) are made ahead, by shape, when the
+// driver is quiet: at device creation, and later in the frame pacing wait (texture_pool_refill). A pool filled at the
+// start took all 109 (texture time 34-40 -> 1.5-3 ms, that frame 74 -> 53 ms).
+// What each shape keeps: the most of it one burst made -- textures less than kQuietFrames apart, the gap the refill
+// waits for, so a burst is what the pool must hold without being filled in between (counted over 3 frames instead,
+// 26% of the textures in a 150 s run found none) -- from the seed shipped beside the program (texture_pool.txt,
+// tools/make_texture_seed.py) and what this player's runs needed beyond it (cache\texture_pool.txt).
+struct Shape {
+    uint32_t w, h, levels;
+    D3DFORMAT f;
+};
+uint64_t shape_key(const Shape &s) { return (uint64_t)s.w | (uint64_t)s.h << 14 | (uint64_t)s.levels << 28 | (uint64_t)(uint32_t)s.f << 32; }
+Shape shape_of(uint64_t k) { return {(uint32_t)(k & 0x3FFF), (uint32_t)(k >> 14 & 0x3FFF), (uint32_t)(k >> 28 & 0xF), (D3DFORMAT)(uint32_t)(k >> 32)}; }
+uint32_t shape_bytes(const Shape &s) // one copy
+{
+    uint32_t b = 0;
+    for (uint32_t i = 0; i < s.levels; i++) {
+        uint32_t w = std::max(1u, s.w >> i), h = std::max(1u, s.h >> i);
+        b += s.f == D3DFMT_A8R8G8B8 ? w * h * 4 : ((w + 3) / 4) * ((h + 3) / 4) * (s.f == D3DFMT_DXT1 ? 8 : 16);
+    }
+    return b;
+}
+// Not kept: a texture over 512 KB (the screen-sized copies and movie frames, rare and big), shapes past 24 MB in all
+constexpr uint32_t kPoolMaxTexture = 512u << 10, kPoolMaxBytes = 24u << 20;
+constexpr uint32_t kQuietFrames = 30; // no texture made for this long: a burst is over, the driver not busy (refill)
+struct PoolSlot {
+    uint32_t target = 0;
+    std::vector<std::pair<IDirect3DTexture9 *, IDirect3DTexture9 *>> items;
+};
+std::unordered_map<uint64_t, PoolSlot> g_pool;
+uint64_t g_pool_bytes, g_pool_target_bytes; // one copy: what the pool holds, what its targets add up to
+bool g_pool_on;                             // started (texture_pool_start) on the current device
+uint32_t g_last_made = 0;                   // the frame a texture was last made (pooled or not)
+std::unordered_map<uint64_t, uint32_t> g_burst; // the burst being counted: each shape's count
+bool g_learned_dirty;
+ULONGLONG g_learned_saved;
+uint32_t g_pool_hits, g_pool_misses, g_pool_refilled, g_pool_slow, g_pool_raised; // since the last report
+
+// A 2D texture's shape when the pool keeps that kind, else false
+bool pool_shape(const PixelContainer *pc, Shape *s)
+{
+    uint32_t w, h, d, levels;
+    pixel_container_dims(pc, &w, &h, &d, &levels);
+    if ((pc->Format & FMT_CUBEMAP) || ((pc->Format >> FMT_DIMENSION_SHIFT) & 0xF) == 3 || w > 0x3FFF || h > 0x3FFF) return false;
+    *s = {w, h, levels ? std::min(levels, 15u) : 1, host_format(fmt_of(pc))};
+    return shape_bytes(*s) <= kPoolMaxTexture;
+}
+
+// Raise a shape's target (kept within the budget); true when it changed
+bool pool_raise(uint64_t key, uint32_t want)
+{
+    PoolSlot &slot = g_pool[key];
+    if (want <= slot.target) return false;
+    uint32_t b = shape_bytes(shape_of(key));
+    uint32_t room = (uint32_t)((kPoolMaxBytes - std::min<uint64_t>(g_pool_target_bytes, kPoolMaxBytes)) / b);
+    uint32_t add = std::min(want - slot.target, room);
+    if (!add) return false;
+    slot.target += add;
+    g_pool_target_bytes += (uint64_t)add * b;
+    return true;
+}
+
+// A new texture: counted in the current burst (the target learns from it), then a pooled pair of its shape if any
+bool pool_take(Resource *r, uint32_t frame, IDirect3DBaseTexture9 **sys, IDirect3DBaseTexture9 **tex)
+{
+    if (frame - g_last_made >= kQuietFrames) g_burst.clear(); // a new burst
+    g_last_made = frame;
+    Shape s;
+    if (!g_pool_on || !pool_shape((const PixelContainer *)r, &s)) return false;
+    uint64_t key = shape_key(s);
+    if (pool_raise(key, ++g_burst[key])) {
+        g_learned_dirty = true;
+        g_pool_raised++;
+    }
+    PoolSlot &slot = g_pool[key];
+    if (slot.items.empty()) {
+        g_pool_misses++;
+        return false;
+    }
+    *sys = slot.items.back().first;
+    *tex = slot.items.back().second;
+    slot.items.pop_back();
+    g_pool_bytes -= shape_bytes(s);
+    g_pool_hits++;
+    return true;
+}
+
+// One pair of a shape into the pool
+bool pool_make(IDirect3DDevice9 *dev, uint64_t key, PoolSlot &slot)
+{
+    Shape s = shape_of(key);
+    IDirect3DTexture9 *sys = nullptr, *tex = nullptr;
+    if (FAILED(dev->CreateTexture(s.w, s.h, s.levels, 0, s.f, D3DPOOL_SYSTEMMEM, &sys, nullptr))) return false;
+    if (FAILED(dev->CreateTexture(s.w, s.h, s.levels, 0, s.f, D3DPOOL_DEFAULT, &tex, nullptr))) {
+        sys->Release();
+        return false;
+    }
+    slot.items.push_back({sys, tex});
+    g_pool_bytes += shape_bytes(s);
+    return true;
+}
+
 // The system copy `sys` into its DEFAULT copy `tex`, made when null (a new texture, or after a Reset). UpdateTexture
 // copies only the regions locked since the last one, so a new DEFAULT copy has the whole system copy marked first.
+int64_t g_push_create_ticks; // --hitch-detail: the last push's DEFAULT CreateTexture time
 IDirect3DBaseTexture9 *push(IDirect3DBaseTexture9 *sys, IDirect3DBaseTexture9 *tex)
 {
     IDirect3DDevice9 *dev = host3d::dev();
+    int64_t c0 = perf::g_detail && !tex ? perf::det_now() : 0;
+    g_push_create_ticks = 0;
     if (!tex) {
         if (sys->GetType() == D3DRTYPE_CUBETEXTURE) {
             auto *s = (IDirect3DCubeTexture9 *)sys;
@@ -327,6 +440,7 @@ IDirect3DBaseTexture9 *push(IDirect3DBaseTexture9 *sys, IDirect3DBaseTexture9 *t
             tex = t;
         }
     }
+    if (c0) g_push_create_ticks = perf::det_now() - c0;
     dev->UpdateTexture(sys, tex);
     return tex;
 }
@@ -404,6 +518,7 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
     if (frame != stat_frame && frame % 600 == 0) {
         logf("[tex] last 600 frames: %u skipped, hashed %u young, %u written, %u periodic, %u other", n_skip, n_new, n_written,
              n_periodic, n_other);
+        if (g_pool_hits || g_pool_misses || g_pool_refilled) texture_pool_report();
         n_skip = n_new = n_written = n_periodic = n_other = 0;
     }
     stat_frame = frame;
@@ -452,20 +567,43 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
         stale = false;
     }
     if (stale) {
+        const bool fresh = !e.sys && !e.tex; // a header seen for the first time (else reshaped, or after a Reset)
         if (e.tex) e.tex->Release();
         if (e.sys) e.sys->Release();
         e.tex = nullptr;
+        int64_t t0 = perf::g_detail ? perf::det_now() : 0, t1 = 0, t2 = 0;
+        IDirect3DBaseTexture9 *pooled = nullptr;
         {
             perf::DetScope ds(perf::kDetTexCreate);
-            e.sys = new_system_copy(r);
+            if (!pool_take(r, frame, &e.sys, &pooled)) e.sys = new_system_copy(r);
         }
         if (e.sys) {
+            if (t0) t1 = perf::det_now();
             {
                 perf::DetScope ds(perf::kDetTexFill);
                 fill(e.sys, r, pal);
             }
+            if (t0) t2 = perf::det_now();
             perf::DetScope ds(perf::kDetTexPush);
-            e.tex = push(e.sys, nullptr);
+            e.tex = push(e.sys, pooled);
+        }
+        if (t0 && e.sys) { // --hitch-detail: each texture made, with its shape and where its time went
+            int64_t t3 = perf::det_now();
+            uint32_t w, h, d, l;
+            pixel_container_dims(pc, &w, &h, &d, &l);
+            D3DFORMAT hf = host_format(fmt_of(pc));
+            uint32_t host_bytes = 0, faces = (pc->Format & FMT_CUBEMAP) ? 6 : 1;
+            for (uint32_t i = 0; i < l; i++) {
+                uint32_t lw = std::max(1u, w >> i), lh = std::max(1u, h >> i);
+                host_bytes += hf == D3DFMT_A8R8G8B8 ? lw * lh * 4 : ((lw + 3) / 4) * ((lh + 3) / 4) * (hf == D3DFMT_DXT1 ? 8 : 16);
+            }
+            host_bytes *= faces;
+            double us = 1000.0 * (double)perf::det_ms(1);
+            logf("[tex] made %p frame %u: %ux%u x%u %s%s -> %s, Xbox %u KB, host %u KB, %s: system copy %.0f us, decode %.0f us, "
+                 "DEFAULT copy %.0f us, UpdateTexture %.0f us", r, frame, w, h, l, format_info(fmt_of(pc)).name,
+                 faces == 6 ? " cube" : "", hf == D3DFMT_A8R8G8B8 ? "A8R8G8B8" : hf == D3DFMT_DXT1 ? "DXT1" : hf == D3DFMT_DXT3 ? "DXT3" : "DXT5",
+                 bytes >> 10, host_bytes >> 10, pooled ? "pooled" : fresh ? "new header" : "reshaped", (t1 - t0) * us, (t2 - t1) * us,
+                 g_push_create_ticks * us, (t3 - t2 - g_push_create_ticks) * us);
         }
         perf::add_texture_upload(bytes);
         e.data = pc->Data;
@@ -507,9 +645,155 @@ void texture_forget(const Resource *r)
     LeaveCriticalSection(&g_cs);
 }
 
+namespace {
+// The pooled pairs released (a Reset or a new device); the targets stay, so the refill makes them again
+void pool_release()
+{
+    for (auto &kv : g_pool) {
+        for (auto &p : kv.second.items) {
+            p.first->Release();
+            p.second->Release();
+        }
+        kv.second.items.clear();
+    }
+    g_pool_bytes = 0;
+}
+
+// Targets from a file of lines "width height levels d3dformat count" (# comments)
+unsigned pool_read_targets(const std::wstring &path)
+{
+    FILE *f = _wfopen(path.c_str(), L"r");
+    if (!f) return 0;
+    char line[160];
+    unsigned shapes = 0;
+    while (fgets(line, sizeof line, f)) {
+        unsigned w, h, l, fmt, n;
+        if (line[0] == '#' || sscanf(line, "%u %u %u %u %u", &w, &h, &l, &fmt, &n) != 5) continue;
+        Shape s = {w, h, l, (D3DFORMAT)fmt};
+        if (!w || !h || !l || l > 15 || w > 0x3FFF || h > 0x3FFF || shape_bytes(s) > kPoolMaxTexture) continue;
+        if (fmt != D3DFMT_A8R8G8B8 && fmt != D3DFMT_DXT1 && fmt != D3DFMT_DXT3 && fmt != D3DFMT_DXT5) continue;
+        pool_raise(shape_key(s), std::min(n, 256u));
+        shapes++;
+    }
+    fclose(f);
+    return shapes;
+}
+
+std::wstring learned_path() { return g_cfg.port_dir + L"\\cache\\texture_pool.txt"; }
+
+// The targets this player's runs raised past the seed, written off the render thread
+void pool_save_learned()
+{
+    std::string text = "# texture pool targets learned in play (d3d/texture.cpp): width height levels d3dformat count\n";
+    char line[96];
+    for (auto &kv : g_pool) {
+        if (!kv.second.target) continue;
+        Shape s = shape_of(kv.first);
+        snprintf(line, sizeof line, "%u %u %u %u %u\n", s.w, s.h, s.levels, (unsigned)s.f, kv.second.target);
+        text += line;
+    }
+    std::wstring path = learned_path();
+    std::thread([text, path] {
+        CreateDirectoryW((g_cfg.port_dir + L"\\cache").c_str(), nullptr);
+        std::wstring tmp = path + L".tmp";
+        if (FILE *f = _wfopen(tmp.c_str(), L"wb")) {
+            bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
+            ok = fclose(f) == 0 && ok;
+            if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
+        }
+    }).detach();
+}
+} // namespace
+
+// At device creation: the targets (the seed beside the program, then what this player's runs learned) and the pool
+// filled to them. The first start of a device reads the files; a new device keeps the targets.
+void texture_pool_start(IDirect3DDevice9 *dev)
+{
+    if (!g_cfg.tex_pool) { // --no-tex-pool: g_pool_on stays false, so nothing is taken, learned or made again
+        static bool noted;
+        if (!noted) logf("[tex] pool: off (--no-tex-pool)");
+        noted = true;
+        return;
+    }
+    EnterCriticalSection(&g_cs);
+    static bool read;
+    unsigned seed = 0, learned = 0;
+    if (!read) {
+        read = true;
+        seed = pool_read_targets(g_cfg.port_dir + L"\\texture_pool.txt");
+        learned = pool_read_targets(learned_path());
+    }
+    LARGE_INTEGER t0, t1, fq;
+    QueryPerformanceCounter(&t0);
+    unsigned made = 0, failed = 0;
+    for (auto &kv : g_pool)
+        while (kv.second.items.size() < kv.second.target)
+            if (pool_make(dev, kv.first, kv.second)) made++;
+            else {
+                failed++;
+                break;
+            }
+    g_pool_on = true;
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&fq);
+    logf("[tex] pool: %u shapes from the seed, %u learned; %u pairs made (%llu KB a copy) in %.0f ms%s", seed, learned, made,
+         (unsigned long long)(g_pool_bytes >> 10), (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)fq.QuadPart,
+         failed ? " (some could not be made)" : "");
+    LeaveCriticalSection(&g_cs);
+}
+
+// In the frame pacing wait (pace_swap), with `deadline` the QueryPerformanceCounter of the vblank it waits for: pairs
+// made again for what the bursts took, while the driver is quiet (no texture made for kQuietFrames) and at least 6 ms
+// are left; at most 4 a frame, none once under 3 ms are left. A pair taking over 2 ms is counted (the report says).
+void texture_pool_refill(IDirect3DDevice9 *dev, int64_t deadline)
+{
+    if (!g_pool_on) return;
+    LARGE_INTEGER now, fq;
+    QueryPerformanceFrequency(&fq);
+    auto left_ms = [&] {
+        QueryPerformanceCounter(&now);
+        return (double)(deadline - now.QuadPart) * 1000.0 / (double)fq.QuadPart;
+    };
+    uint32_t frame = g_frame_count.load(std::memory_order_relaxed);
+    if (frame - g_last_made < kQuietFrames || left_ms() < 6.0) return;
+    EnterCriticalSection(&g_cs);
+    int made = 0;
+    for (auto &kv : g_pool) {
+        while (kv.second.items.size() < kv.second.target && made < 4 && left_ms() >= 3.0) {
+            int64_t t0 = now.QuadPart;
+            if (!pool_make(dev, kv.first, kv.second)) break;
+            QueryPerformanceCounter(&now);
+            if ((double)(now.QuadPart - t0) * 1000.0 / (double)fq.QuadPart > 2.0) g_pool_slow++;
+            made++;
+            g_pool_refilled++;
+        }
+        if (made >= 4) break;
+    }
+    if (g_learned_dirty && GetTickCount64() - g_learned_saved > 10000) {
+        g_learned_dirty = false;
+        g_learned_saved = GetTickCount64();
+        pool_save_learned();
+    }
+    LeaveCriticalSection(&g_cs);
+}
+
+void texture_pool_report()
+{
+    size_t held = 0, wanted = 0;
+    for (auto &kv : g_pool) {
+        held += kv.second.items.size();
+        wanted += kv.second.target;
+    }
+    logf("[tex] pool: %u taken, %u not in it, %u made again (%u over 2 ms), %u targets raised; holds %zu of %zu (%llu KB a copy)",
+         g_pool_hits, g_pool_misses, g_pool_refilled, g_pool_slow, g_pool_raised, held, wanted,
+         (unsigned long long)(g_pool_bytes >> 10));
+    g_pool_hits = g_pool_misses = g_pool_refilled = g_pool_slow = g_pool_raised = 0;
+}
+
 void texture_drop_device_copies()
 {
     EnterCriticalSection(&g_cs);
+    pool_release();
     for (auto &kv : g_cache)
         if (kv.second.tex) {
             kv.second.tex->Release();
@@ -521,6 +805,7 @@ void texture_drop_device_copies()
 void texture_drop_all()
 {
     EnterCriticalSection(&g_cs);
+    pool_release();
     for (auto &kv : g_cache) {
         if (kv.second.tex) kv.second.tex->Release();
         if (kv.second.sys) kv.second.sys->Release();
