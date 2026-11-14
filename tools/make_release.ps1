@@ -5,7 +5,9 @@
 # The launcher installs the game into game\ inside that folder by default, where the game program also looks when it
 # is double-clicked; what the programs write stays there too (savedata\, black.ini, cache\). The script checks that
 # the game program has its icon (a build made with PORT_ICON empty has none). blackrt.pdb and blackrt.map go into a
-# separate -symbols zip, kept to read crash reports.
+# separate -symbols zip, kept to read crash reports. seed\shader_seed.bin (tools\make_shader_seed.py) goes beside the
+# game program: the shaders made at the first start instead of as each area first shows them; check it before a
+# release with tools\make_shader_seed.py --check <a test run's cache\shaders>.
 # Build first (PORT_ICON defaults to launcher/art/icon.ico):
 #   cmake -S loader -B ..\build\release -A Win32
 #   cmake --build ..\build\release --config RelWithDebInfo
@@ -25,6 +27,8 @@ $Bin = (Resolve-Path $Bin).Path
 $game = "$Bin\Ninja Gaiden Black Any.exe"
 $launcher = "$Bin\Ninja Gaiden Black Any Launcher.exe"
 foreach ($f in $game, $launcher, "$Bin\blackrt.dll") { if (-not (Test-Path $f)) { throw "missing ${f}: build first" } }
+$seed = "$root\seed\shader_seed.bin"
+if (-not (Test-Path $seed)) { throw "missing ${seed}: tools\make_shader_seed.py makes it" }
 
 # The programs' icon (icon group 1): a build made with PORT_ICON empty would ship without one
 Add-Type @"
@@ -67,7 +71,7 @@ $stage = "$dist\_stage-$PID"
 $sym = "$stage-symbols"
 $out = "$stage\NGB-Hurricane"
 New-Item -ItemType Directory -Force $out, $sym | Out-Null
-Copy-Item $launcher, $game, "$Bin\blackrt.dll" $out
+Copy-Item $launcher, $game, "$Bin\blackrt.dll", $seed $out
 Copy-Item "$root\README.md", "$root\README.en.md" $out
 Copy-Item "$root\LICENSE" "$out\LICENSE.txt"
 Copy-Item "$Bin\blackrt.pdb", "$Bin\blackrt.map" $sym

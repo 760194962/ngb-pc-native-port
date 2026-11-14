@@ -8,6 +8,11 @@
 // With the bytecode cached, the driver's own work to make the shader object was what remained (about 20 ms in that
 // frame on the RTX 3060, perf 2026-10-22_07-19-32), so at device creation every cached shader is made once
 // (prewarm_shaders) and handed out when the same bytecode is asked for.
+//
+// A first start had no cache: every shader compiled as an area first showed it. The package carries a seed
+// (shader_seed.bin beside the program, tools/make_shader_seed.py): its entries are made at start with the player's.
+// A cold start on the Iris Xe, title and attract demo for 150 s: 40 compiles (400 ms, frames up to 282 ms) without,
+// the 4 vertex programs the seed leaves out (56 ms, up to 113 ms) with; its 421 entries took 16 ms at start.
 #pragma once
 
 #include <d3d9.h>

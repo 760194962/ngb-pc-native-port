@@ -7,6 +7,7 @@
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace xd3d {
@@ -95,33 +96,47 @@ bool cache_entry_current(const std::wstring &path)
     return bt.QuadPart <= gt.QuadPart; // .gen is written after .bin; a newer .bin came from another build
 }
 
-bool parse_file(const std::wstring &path, Entry *e)
+std::vector<uint8_t> read_all(const std::wstring &path, bool *ok)
 {
-    FILE *f = _wfopen(path.c_str(), L"rb");
-    if (!f) return false;
     std::vector<uint8_t> d;
+    FILE *f = _wfopen(path.c_str(), L"rb");
+    *ok = f != nullptr;
+    if (!f) return d;
     uint8_t buf[65536];
     for (size_t n; (n = fread(buf, 1, sizeof buf, f)) > 0;) d.insert(d.end(), buf, buf + n);
     fclose(f);
+    return d;
+}
+
+// One entry's bytes (a .bin file, or a record of the shipped seed)
+bool parse_bytes(const uint8_t *d, size_t size, Entry *e)
+{
     size_t at = 0;
     auto u32 = [&](uint32_t *v) {
-        if (at + 4 > d.size()) return false;
-        memcpy(v, &d[at], 4);
+        if (at + 4 > size) return false;
+        memcpy(v, d + at, 4);
         at += 4;
         return true;
     };
     auto field = [&](std::string *s) {
         uint32_t n;
-        if (!u32(&n) || at + n > d.size()) return false;
-        s->assign((const char *)&d[at], n);
+        if (!u32(&n) || n > size - at) return false;
+        s->assign((const char *)d + at, n);
         at += n;
         return true;
     };
     uint32_t magic, version, len;
     if (!u32(&magic) || magic != kMagic || !u32(&version) || version != kVersion || !u32(&e->flags)) return false;
-    if (!field(&e->profile) || !field(&e->hlsl) || !u32(&len) || at + len != d.size()) return false;
-    e->code.assign(d.begin() + at, d.end());
+    if (!field(&e->profile) || !field(&e->hlsl) || !u32(&len) || at + len != size) return false;
+    e->code.assign(d + at, d + size);
     return true;
+}
+
+bool parse_file(const std::wstring &path, Entry *e)
+{
+    bool ok;
+    std::vector<uint8_t> d = read_all(path, &ok);
+    return ok && parse_bytes(d.data(), d.size(), e);
 }
 
 // The entries read at start (prewarm_shaders), by file path: a lookup in play then reads no file. Opening one took about
@@ -243,7 +258,22 @@ void prewarm_shaders(IDirect3DDevice9 *d)
     QueryPerformanceCounter(&t0);
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW((cache_dir() + L"\\*.bin").c_str(), &fd);
-    unsigned nv = 0, np = 0, bad = 0, failed = 0, old = 0, migrated = 0;
+    unsigned nv = 0, np = 0, bad = 0, failed = 0, old = 0, migrated = 0, seeded = 0;
+    std::unordered_set<std::wstring> scanned; // the player's entries made this time (the seed skips those)
+    // An entry kept in g_mem made into its shader object, handed out later by take_warm
+    auto warm = [&](const Entry &kept) {
+        if (kept.code.empty()) return; // a source this profile does not compile
+        bool vertex = kept.profile.compare(0, 3, "vs_") == 0;
+        IUnknown *obj = nullptr;
+        HRESULT hr = vertex ? d->CreateVertexShader((const DWORD *)kept.code.data(), (IDirect3DVertexShader9 **)&obj)
+                            : d->CreatePixelShader((const DWORD *)kept.code.data(), (IDirect3DPixelShader9 **)&obj);
+        if (FAILED(hr)) {
+            failed++;
+            return;
+        }
+        (vertex ? nv : np)++;
+        g_warm.emplace(code_key(kept.code.data(), kept.code.size()), Warm{d, vertex, kept.code, obj});
+    };
     if (h != INVALID_HANDLE_VALUE) {
         do {
             std::wstring path = cache_dir() + L"\\" + fd.cFileName;
@@ -268,25 +298,52 @@ void prewarm_shaders(IDirect3DDevice9 *d)
                 bad++;
                 continue;
             }
-            Entry &kept = g_mem[path] = e;
-            if (e.code.empty()) continue; // a source this profile does not compile
-            bool vertex = e.profile.compare(0, 3, "vs_") == 0;
-            IUnknown *obj = nullptr;
-            HRESULT hr = vertex ? d->CreateVertexShader((const DWORD *)e.code.data(), (IDirect3DVertexShader9 **)&obj)
-                                : d->CreatePixelShader((const DWORD *)e.code.data(), (IDirect3DPixelShader9 **)&obj);
-            if (FAILED(hr)) {
-                failed++;
-                continue;
-            }
-            (vertex ? nv : np)++;
-            uint64_t key = code_key(e.code.data(), e.code.size());
-            g_warm.emplace(key, Warm{d, vertex, kept.code, obj});
+            warm(g_mem[path] = e);
+            scanned.insert(path);
         } while (FindNextFileW(h, &fd));
         FindClose(h);
     }
+    // The seed shipped beside the program (shader_seed.bin, tools/make_shader_seed.py): entries recorded in test runs
+    // over the chapters, so a first start has them too -- a new player otherwise compiled every shader the first time
+    // an area showed it, on the render thread (2-40 ms each, D3DCompile; ngbrecomp ships one for the same reason,
+    // packaging/d3d-seed.bin). Read-only: it stays out of cache\shaders, and an entry the player's cache holds (the
+    // same source, so the same bytecode) is not made twice. Records: "NGBSEED1", count, then each entry's file bytes
+    // with their length. The game's own vertex programs are not in it (their HLSL is the game's code translated).
+    {
+        bool ok;
+        std::vector<uint8_t> s = read_all(g_cfg.port_dir + L"\\shader_seed.bin", &ok);
+        unsigned in_seed = 0, seed_bad = 0;
+        if (ok && s.size() >= 12 && !memcmp(s.data(), "NGBSEED1", 8)) {
+            uint32_t count;
+            memcpy(&count, &s[8], 4);
+            size_t at = 12;
+            for (uint32_t i = 0; i < count && at + 4 <= s.size(); i++) {
+                uint32_t len;
+                memcpy(&len, &s[at], 4);
+                at += 4;
+                if (len > s.size() - at) break;
+                Entry e;
+                bool good = parse_bytes(&s[at], len, &e);
+                at += len;
+                in_seed++;
+                if (!good) {
+                    seed_bad++;
+                    continue;
+                }
+                std::wstring path = entry_path(e.hlsl, e.profile.c_str(), e.flags);
+                if (scanned.count(path)) continue; // the player's cache has it (made above)
+                warm(g_mem[path] = std::move(e));
+                seeded++;
+            }
+        } else if (ok) {
+            seed_bad = 1;
+        }
+        if (ok) logf("[shader cache] seed: %u entries, %u not in the player's cache added%s", in_seed, seeded,
+                     seed_bad ? " (part of shader_seed.bin unreadable)" : "");
+    }
     QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
-    logf("[shader cache] read %zu entries, made %u vertex and %u pixel shaders from %s in %.0f ms; %u old-generator kept, "
+    logf("[shader cache] read %zu entries, made %u vertex and %u pixel shaders from %s and the seed in %.0f ms; %u old-generator kept, "
          "%u legacy marked, %u unreadable deleted%s",
          g_mem.size(), nv, np, narrow(cache_dir()).c_str(),
          (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart, old, migrated, bad,
