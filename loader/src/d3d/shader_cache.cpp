@@ -242,6 +242,7 @@ HRESULT cached_compile(const std::string &hlsl, const char *name, const char *pr
     int cached = read_entry(path, hlsl, profile, flags, code);
     HRESULT hr = cached > 0 ? S_OK : E_FAIL;
     if (!cached) {
+        perf::DetScope ds(perf::kDetD3DCompile);
         hr = D3DCompile(hlsl.data(), hlsl.size(), name, nullptr, nullptr, "main", profile, flags, 0, code, errors);
         write_entry(path, hlsl, profile, flags, SUCCEEDED(hr) ? *code : nullptr);
     }
@@ -366,6 +367,7 @@ HRESULT create_vertex_shader(IDirect3DDevice9 *d, ID3DBlob *code, IDirect3DVerte
             return S_OK;
         }
     }
+    perf::DetScope ds(perf::kDetShaderCreate);
     return d->CreateVertexShader((const DWORD *)code->GetBufferPointer(), out);
 }
 
@@ -378,6 +380,7 @@ HRESULT create_pixel_shader(IDirect3DDevice9 *d, ID3DBlob *code, IDirect3DPixelS
             return S_OK;
         }
     }
+    perf::DetScope ds(perf::kDetShaderCreate);
     return d->CreatePixelShader((const DWORD *)code->GetBufferPointer(), out);
 }
 

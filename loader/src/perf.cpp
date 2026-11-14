@@ -29,8 +29,12 @@
 namespace perf {
 
 volatile bool g_on;
+volatile bool g_detail;
 
 namespace {
+
+std::atomic<int64_t> g_det_ticks[kDetCount]; // --hitch-detail: this frame's (frame_end)
+std::atomic<uint32_t> g_det_discards;
 
 // [hitch] counters: kept whether or not recording (frame_end logs a slow frame's)
 std::atomic<uint32_t> g_h_compiles, g_h_uploads, g_h_upload_kb, g_h_rt_copies, g_h_reads, g_h_read_kb;
@@ -752,7 +756,11 @@ void scripted()
 
 } // namespace
 
-Scope::Scope(Cat c) : cat(c), on(g_on)
+int64_t det_now() { return qpc(); }
+void det_add(Det d, int64_t ticks) { g_det_ticks[d] += ticks; }
+void det_count_discard() { g_det_discards++; }
+
+Scope::Scope(Cat c) : cat(c), on(g_on || g_detail)
 {
     if (!on) return;
     int64_t now = qpc();
@@ -804,11 +812,33 @@ void frame_end(uint32_t render_w, uint32_t render_h)
         uint32_t c = g_h_compiles.exchange(0), u = g_h_uploads.exchange(0), ukb = g_h_upload_kb.exchange(0),
                  rc = g_h_rt_copies.exchange(0), r = g_h_reads.exchange(0), rkb = g_h_read_kb.exchange(0),
                  bus = g_h_build_us.exchange(0), cached = g_h_cached.exchange(0);
+        // --hitch-detail: this frame's category and part times (the recorder takes the categories itself while it runs)
+        float cat[kCatCount] = {}, det[kDetCount] = {};
+        if (g_detail) {
+            if (!(g_on && g_rec))
+                for (int i = 0; i < kCatCount; i++) cat[i] = ms(g_cat_ticks[i].exchange(0));
+            for (int i = 0; i < kDetCount; i++) det[i] = ms(g_det_ticks[i].exchange(0));
+        }
+        uint32_t discards = g_detail ? g_det_discards.exchange(0) : 0;
         static int logged;
         if (dt > 50.0 && frames > 2 && logged < 300) {
             logged++;
             logf("[hitch] frame %u took %.0f ms: new shaders %u (%.0f ms building, %u from the cache), texture uploads %u (%u KB), "
                  "render target copies %u, file reads %u (%u KB)", frames, dt, c, bus / 1000.0, cached, u, ukb, rc, r, rkb);
+            if (g_detail) {
+                float port = 0;
+                for (int i = 0; i < kCatCount; i++) port += cat[i];
+                // the rest: the game's own code, D3D calls outside the timed parts, waits
+                float rest = (float)dt - port - det[kDetPace] - det[kDetPresent];
+                logf("[hitch]   frame %u detail ms: draw %.1f (driver draw calls %.1f, ring locks %.1f + %.1f at %u restarts, "
+                     "shader binds %.1f, texture binds %.1f, constants %.1f, render states %.1f), vertex convert %.1f, "
+                     "textures %.1f (create %.1f, decode %.1f, upload %.1f), shaders %.1f (D3DCompile %.1f, create %.1f), "
+                     "rt copies %.1f; pace %.1f, present %.1f; rest %.1f",
+                     frames, cat[kDraw], det[kDetDrawCall], det[kDetRingLock], det[kDetRingDiscard], discards, det[kDetBind],
+                     det[kDetSetTexture], det[kDetConstants], det[kDetStates], cat[kConvert], cat[kTexture], det[kDetTexCreate],
+                     det[kDetTexFill], det[kDetTexPush], cat[kCompile], det[kDetD3DCompile], det[kDetShaderCreate],
+                     cat[kRtCopy], det[kDetPace], det[kDetPresent], rest);
+            }
         }
     }
     scripted();

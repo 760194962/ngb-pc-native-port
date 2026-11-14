@@ -437,8 +437,14 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
     bool stale = !same_shape || e.dirty || e.hash != hash || (fmt_of(pc) == XFMT_P8 && e.palette != palptr);
     e.stable = stale ? 0 : std::min<uint32_t>(e.stable + 1, kStableChecks);
     if (stale && same_shape) { // contents changed (video frames, render-to-memory): refill in place
-        fill(e.sys, r, pal);
-        push(e.sys, e.tex);
+        {
+            perf::DetScope ds(perf::kDetTexFill);
+            fill(e.sys, r, pal);
+        }
+        {
+            perf::DetScope ds(perf::kDetTexPush);
+            push(e.sys, e.tex);
+        }
         perf::add_texture_upload(bytes);
         e.palette = palptr;
         e.hash = hash;
@@ -449,9 +455,16 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
         if (e.tex) e.tex->Release();
         if (e.sys) e.sys->Release();
         e.tex = nullptr;
-        e.sys = new_system_copy(r);
+        {
+            perf::DetScope ds(perf::kDetTexCreate);
+            e.sys = new_system_copy(r);
+        }
         if (e.sys) {
-            fill(e.sys, r, pal);
+            {
+                perf::DetScope ds(perf::kDetTexFill);
+                fill(e.sys, r, pal);
+            }
+            perf::DetScope ds(perf::kDetTexPush);
             e.tex = push(e.sys, nullptr);
         }
         perf::add_texture_upload(bytes);

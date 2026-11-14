@@ -261,6 +261,7 @@ void pshader_drop_all()
 
 void upload_ps_constants(IDirect3DDevice9 *d, bool vertex_fog)
 {
+    perf::DetScope ds(perf::kDetConstants);
     const uint32_t *rs = render_state();
     note_alternating_constants(rs);
     float c[28][4];

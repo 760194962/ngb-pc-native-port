@@ -572,6 +572,7 @@ void apply_texture_stages(IDirect3DDevice9 *d, bool fixed_function_pixels)
             if (!t) t = host_texture(r, g_st.palettes[s]);
         }
         if (t != g_tex_sent[s]) {
+            perf::DetScope ds(perf::kDetSetTexture);
             d->SetTexture(s, t);
             g_tex_sent[s] = t;
         }
@@ -749,16 +750,24 @@ bool ring_draw(D3DPRIMITIVETYPE type, uint32_t nverts, uint32_t prims, const uin
         iflag = D3DLOCK_DISCARD;
     }
     void *p = nullptr;
-    if (FAILED(g_ring_vb->Lock(voff, vbytes, &p, vflag))) return false;
-    memcpy(p, src, vbytes);
-    g_ring_vb->Unlock();
-    if (FAILED(g_ring_ib->Lock(ioff, ibytes, &p, iflag))) return false;
-    memcpy(p, idx, ibytes);
-    g_ring_ib->Unlock();
+    {
+        perf::DetScope ds(vflag == D3DLOCK_DISCARD ? perf::kDetRingDiscard : perf::kDetRingLock);
+        if (FAILED(g_ring_vb->Lock(voff, vbytes, &p, vflag))) return false;
+        memcpy(p, src, vbytes);
+        g_ring_vb->Unlock();
+    }
+    {
+        perf::DetScope ds(iflag == D3DLOCK_DISCARD ? perf::kDetRingDiscard : perf::kDetRingLock);
+        if (FAILED(g_ring_ib->Lock(ioff, ibytes, &p, iflag))) return false;
+        memcpy(p, idx, ibytes);
+        g_ring_ib->Unlock();
+    }
+    if (perf::g_detail && (vflag == D3DLOCK_DISCARD || iflag == D3DLOCK_DISCARD)) perf::det_count_discard();
     g_ring_vpos = voff + vbytes;
     g_ring_ipos = ioff + ibytes;
     d->SetStreamSource(0, g_ring_vb, 0, stride);
     d->SetIndices(g_ring_ib);
+    perf::DetScope ds(perf::kDetDrawCall);
     return SUCCEEDED(d->DrawIndexedPrimitive(type, (INT)(voff / stride), 0, nverts, ioff / 2, prims));
 }
 
@@ -1092,6 +1101,7 @@ namespace {
 // registers (seen with GetVertexShaderConstantF), not explained by the shaders' def constants; not solved yet.
 void upload_vs_constants(IDirect3DDevice9 *d)
 {
+    perf::DetScope ds(perf::kDetConstants);
     d->SetVertexShaderConstantF(0, &g_st.vs_constants[0][0], 192);
     float k[36] = {};
     host_viewport_transform(k, k + 4);
@@ -1633,12 +1643,16 @@ DWORD g_fog_table_sent = ~0u;
 
 void set_ps(IDirect3DDevice9 *d, IDirect3DPixelShader9 *ps)
 {
-    if (ps != g_ps_sent) d->SetPixelShader(g_ps_sent = ps);
+    if (ps == g_ps_sent) return;
+    perf::DetScope ds(perf::kDetBind);
+    d->SetPixelShader(g_ps_sent = ps);
 }
 
 void set_vs(IDirect3DDevice9 *d, IDirect3DVertexShader9 *vs)
 {
-    if (vs != g_vs_sent) d->SetVertexShader(g_vs_sent = vs);
+    if (vs == g_vs_sent) return;
+    perf::DetScope ds(perf::kDetBind);
+    d->SetVertexShader(g_vs_sent = vs);
 }
 
 void set_fvf(IDirect3DDevice9 *d, DWORD fvf)
@@ -1761,7 +1775,10 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
         flash_record_draw(caller, (uint32_t)(uintptr_t)g_st.textures[0], g_st.vertex_shader);
     }
     flash_count_draw(g_st.render_target == nullptr || is_backbuffer(g_st.render_target), g_st.vertex_shader & 1, g_st.pixel_shader != 0);
-    apply_render_states(d);
+    {
+        perf::DetScope ds(perf::kDetStates);
+        apply_render_states(d);
+    }
     bool ps = g_st.pixel_shader != 0;
     apply_texture_stages(d, !ps); // may copy a render target (outside the scene) first
     note_tap_filter(g_rt_stage);
@@ -1918,6 +1935,7 @@ void draw_up(uint32_t xprim, uint32_t verts, const void *data, uint32_t stride)
     if (g_sprite_tc) data = with_sprite_tc(data, verts, stride);
     perf::add_draw(verts, verts * stride);
     IDirect3DDevice9 *d = host3d::dev();
+    perf::DetScope ds(perf::kDetDrawCall);
     if (p.quads)
         d->DrawIndexedPrimitiveUP(p.type, 0, verts, p.count, quad_indices(verts / 4), D3DFMT_INDEX16, data, stride);
     else
@@ -2020,6 +2038,7 @@ void draw_indexed_up(uint32_t xprim, uint32_t nidx, const uint16_t *idx, const v
     }
     uint32_t host_nidx = p.quads ? p.count * 3 : nidx;
     if (g_cfg.draw_ring && ring_draw(p.type, mx - mn + 1, p.count, idx, host_nidx, src, stride)) return;
+    perf::DetScope ds(perf::kDetDrawCall);
     host3d::dev()->DrawIndexedPrimitiveUP(p.type, 0, mx - mn + 1, p.count, idx, D3DFMT_INDEX16, src, stride);
 }
 
@@ -2849,7 +2868,10 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
     ClipRhw clip;
     if (q.empty()) return true;
     set_fvf(d, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
-    d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)(q.size() / 3), q.data(), sizeof(QV));
+    {
+        perf::DetScope ds(perf::kDetDrawCall);
+        d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)(q.size() / 3), q.data(), sizeof(QV));
+    }
     set_fvf(d, ctx.fvf);
     return true;
 }

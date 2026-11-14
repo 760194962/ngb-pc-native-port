@@ -2348,10 +2348,16 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     if (g_cfg.widescreen && g_cfg.aspect_w * 9 != g_cfg.aspect_h * 16) xd3d::wide_hud_frame_end();
     pb_flush();
     perf::swap_begin();
-    pace_swap();
+    {
+        perf::DetScope ds(perf::kDetPace);
+        pace_swap();
+    }
     rt_cpu_upload();
     upload_cpu_backbuffer();
-    present_backbuffer();
+    {
+        perf::DetScope ds(perf::kDetPresent);
+        present_backbuffer();
+    }
     if (perfhud::active()) { // the performance overlay / an online message over the finished picture
         RECT frame, pic;
         host3d::frame_layout(&frame, &pic);
@@ -2388,7 +2394,11 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
         vis_end(0);
         logf("[d3d] tests: a visibility test made; its occlusion query lives on");
     }
-    HRESULT presented = host3d::present();
+    HRESULT presented;
+    {
+        perf::DetScope ds(perf::kDetPresent);
+        presented = host3d::present();
+    }
     perfhud::input_presented();
     static HRESULT last_presented = D3D_OK; // a changed result (S_PRESENT_OCCLUDED minimised, S_PRESENT_MODE_CHANGED...)
     if (presented != last_presented) {
