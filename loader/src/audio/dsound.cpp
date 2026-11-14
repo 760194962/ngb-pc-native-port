@@ -124,6 +124,7 @@ struct Voice : Object {
     float ramp_from[8] = {}; // each route's gain in the last block (mix_voice ramps from it)
     bool ramp_valid = false;
     hrtf::State hrtf;      // a 3D voice's head-related filter (mix_voice)
+    int log3d = 0;         // --log-sounds: mixer blocks until this voice's 3D figures are logged (set by Play)
     // Xbox ADPCM: one decoded block
     const uint8_t *dec_ptr = nullptr;
     int16_t dec[2][ADPCM_SAMPLES] = {};
@@ -430,6 +431,9 @@ const MixBinVolumePair *voice_bins(const Voice &v, uint32_t &n)
 
 // A 3D voice's distance attenuation as the library computes it (CDirectSound3DCalculator 0x37D504 / 0x37D1BA):
 // -2000 log10(1 + rolloff (d / min - 1)) millibels, d clamped to [min, max], rolloff = the listener's x the voice's.
+// Both factors are used as they are (0x37B26D: fld [listener+0x3C], fmul [voice+0x48]): a voice the game gives rolloff 0
+// does not fall off with distance. Ninja Gaiden Black's chapter-7 cutscene sets 0 on the plank's crash (SetAllParameters,
+// min 9 max 50, the sound ~140 away); taking 0 as 1 (2.2.29 and before) cut it by 14.9 dB under the ambience (the user).
 float ds3d_distance(const Voice &v)
 {
     const Ds3dBuffer &p = v.ds3d;
@@ -441,7 +445,7 @@ int32_t ds3d_att_mb(const Voice &v)
     const Ds3dBuffer &p = v.ds3d;
     float mn = p.flMinDistance > 0 ? p.flMinDistance : 1.0f;
     float mx = p.flMaxDistance > mn ? p.flMaxDistance : 1e9f;
-    float roll = g_listener.rolloff * (p.flRolloffFactor > 0 ? p.flRolloffFactor : 1.0f);
+    float roll = g_listener.rolloff * p.flRolloffFactor;
     float d = std::min(ds3d_distance(v), mx);
     if (d <= mn) return 0;
     return std::max(-10000, (int32_t)(-2000.0f * log10f(1.0f + roll * (d / mn - 1.0f))));
@@ -587,6 +591,14 @@ template <typename Fetch> bool mix_voice(Voice &v, float *out, uint32_t outs, Fe
     Voice3d t3;
     bool is3d = v.is3d && v.ds3d.dwMode != DS3DMODE_DISABLE;
     if (is3d) voice_3d(v, t3);
+    if (v.log3d && --v.log3d == 0 && is3d) { // --log-sounds: what the third block of a played 3D voice gets
+        const Ds3dBuffer &p = v.ds3d;
+        logf("[dsound] 3d %p: pos %.1f %.1f %.1f (%s), listener %.1f %.1f %.1f, distance %.1f min %.1f max %.1f rolloff %.2f x %.2f "
+             "-> distance %d mB; front %d back %d centre %d other %d mB, voice vol %d",
+             &v, p.vPosition.x, p.vPosition.y, p.vPosition.z, p.dwMode == DS3DMODE_HEADRELATIVE ? "head-relative" : "world",
+             g_listener.pos.x, g_listener.pos.y, g_listener.pos.z, ds3d_distance(v), p.flMinDistance, p.flMaxDistance,
+             g_listener.rolloff, p.flRolloffFactor, ds3d_att_mb(v), t3.front_pair, t3.back_pair, t3.centre, t3.other, v.volume);
+    }
     Routes r;
     voice_routes(v, r, is3d ? &t3 : nullptr);
     uint32_t ch = channels(v.fmt);
@@ -1520,8 +1532,9 @@ HRESULT __stdcall IDirectSoundBuffer_Play(void *p, uint32_t r1, uint32_t r2, uin
         }
         b->looping = (flags & DSBPLAY_LOOPING) != 0;
         b->playing = true;
+        b->log3d = g_cfg.log_sounds ? 3 : 0;
         static int logged;
-        if (logged++ < 60)
+        if (logged++ < 60 || g_cfg.log_sounds) // --log-sounds: every play (tests: a sound missing at one moment)
             logf("[dsound] play %p: %s, %s, data %p+%u, play %u+%u, loop %u+%u, cur %u%s", b, fmt_str(&b->fmt).c_str(),
                  voice_str(*b).c_str(), b->data, b->bytes, b->play_start, b->play_len, b->loop_start, b->loop_len, b->cur,
                  b->looping ? ", looping" : "");
