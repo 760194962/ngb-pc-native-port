@@ -218,6 +218,7 @@ struct Config {
     int ffp_vs_blend = 1;      // press-file "cfg:ffpvsblend:N": how the generated shader blends positions (d3d/ffp_vs.cpp Key; tests)
     unsigned ffp_vs_check = 0; // --ffp-vs-check N: N fixed-function draws drawn both ways and compared (d3d/draw.cpp ffp_vs_check)
     bool draw_warm = true;     // --no-draw-warm: no draw states recorded and drawn at start (d3d/drawwarm.cpp)
+    std::wstring vsh_record;   // --vsh-record FILE (tests): every game vertex program translated, for tools/make_vsh_seed.py
     unsigned ffp_debug = 0;    // press-file "cfg:ffpdebug:N": the stage shader shows stage 1's texture colour (1) or alpha (2)
     std::wstring press_script; // --press: "frame:button,frame:button" scripted controller input
     std::wstring perf_at;      // --perf-at S:D: record performance for D seconds from S seconds after the first frame

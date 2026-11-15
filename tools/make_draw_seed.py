@@ -2,7 +2,8 @@
 states test runs recorded (their cache\\draw_states.bin), drawn once at a player's first start so the driver builds
 their programs then and not in the frame an area first shows them.
 
-  make:  python -I tools/make_draw_seed.py -o seed/draw_states.bin [--shader-seed seed/shader_seed.bin] FILE [FILE ...]
+  make:  python -I tools/make_draw_seed.py -o seed/draw_states.bin [--shader-seed seed/shader_seed.bin
+         [--vsh-seed seed/vertex_programs.bin]] FILE [FILE ...]
   check: python -I tools/make_draw_seed.py --check FILE [--seed seed/draw_states.bin]
 
 A FILE is a cache\\draw_states.bin. Header: "NGBDRAW2", the record size, the count, the version of the program that
@@ -58,11 +59,27 @@ def shader_keys(seed_path):
     return keys
 
 
+def vsh_keys(path):
+    """The bytecode keys of the vertex program seed's programs (make_vsh_seed.py): a first start makes them before
+    the replay, so records with them can be drawn"""
+    d = open(path, 'rb').read()
+    if d[:8] != b'NGBVSED1':
+        sys.exit('%s: not a vertex program seed' % path)
+    count, = struct.unpack_from('<I', d, 8)
+    at, keys = 12, set()
+    for _ in range(count):
+        key, n = struct.unpack_from('<QI', d, at + 24)
+        keys.add(key)
+        at += 36 + 4 * n
+    return keys
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('files', nargs='+')
     ap.add_argument('-o', '--out')
     ap.add_argument('--shader-seed')
+    ap.add_argument('--vsh-seed', help='seed/vertex_programs.bin: its programs count as in the shader seed')
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--seed', default=os.path.join(os.path.dirname(__file__), '..', 'seed', 'draw_states.bin'))
     a = ap.parse_args()
@@ -86,6 +103,8 @@ def main():
     left = 0
     if a.shader_seed:
         keys = shader_keys(a.shader_seed)
+        if a.vsh_seed:
+            keys |= vsh_keys(a.vsh_seed)
         kept = set()
         for r in recs:
             vs, ps = struct.unpack_from('<QQ', r, 0)

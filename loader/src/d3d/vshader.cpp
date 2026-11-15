@@ -184,6 +184,128 @@ uint32_t bump_divide_stages()
     return r;
 }
 
+// ---- The game's vertex programs in the shipped seed ----
+// The shader seed (shader_seed.bin) cannot hold them: their HLSL is the game's code translated. So the package
+// carries only where each program is in the player's own default.xbe (vertex_programs.bin, tools/make_vsh_seed.py,
+// as ngbrecomp's d3d-seed.bin does): "NGBVSED1", count, then per program u32 words, input mask, variant (undivided
+// stages), profile (0 vs_2_0, 1 vs_2_a), u64 hash of the words (FNV-1a), u64 the bytecode key, u32 offsets, and its
+// offset in every build of the game the tool was given. At start the words are read from
+// the player's default.xbe at the first offset whose hash matches, translated and compiled into the player's cache
+// (a first start only; later starts find them there) and made into their shader objects; a copy of the game where
+// no offset matches is left out. A first start otherwise compiled each program the first time an area showed it,
+// on the render thread (17-23 ms in the attract demo's first scene, Iris Xe and RTX 3060, 2026-11-14).
+//
+// --vsh-record FILE (test runs) appends every program translated: the tool's input. Records: "NGBVREC1" once, then
+// u32 words, mask, variant (undivided stages), profile (0 vs_2_0, 1 vs_2_a), u64 bytecode key, the words.
+namespace {
+uint64_t words_hash(const uint32_t *w, uint32_t n)
+{
+    uint64_t h = 0xCBF29CE484222325ull;
+    const uint8_t *b = (const uint8_t *)w;
+    for (size_t i = 0; i < (size_t)n * 4; i++) h = (h ^ b[i]) * 0x100000001B3ull;
+    return h;
+}
+
+void vsh_record(const VertexShader *vs, uint32_t undivided, const char *profile, ID3DBlob *code)
+{
+    if (g_cfg.vsh_record.empty() || !code) return;
+    static std::mutex m;
+    static std::unordered_set<uint64_t> seen;
+    uint32_t words = vs->program_insts * 4, mask = vs_input_mask(vs), prof = strcmp(profile, "vs_2_a") == 0;
+    uint64_t id = words_hash(vs->program, words) ^ ((uint64_t)mask << 32 | undivided << 8 | prof);
+    std::lock_guard<std::mutex> g(m);
+    if (!seen.insert(id).second) return;
+    FILE *f = _wfopen(g_cfg.vsh_record.c_str(), L"ab");
+    if (!f) return;
+    _fseeki64(f, 0, SEEK_END); // (an append stream's position reads 0 until its first write)
+    if (_ftelli64(f) == 0) fwrite("NGBVREC1", 8, 1, f);
+    uint64_t key = shader_code_key(code->GetBufferPointer(), code->GetBufferSize());
+    uint32_t head[4] = {words, mask, undivided, prof};
+    fwrite(head, sizeof head, 1, f);
+    fwrite(&key, 8, 1, f);
+    fwrite(vs->program, 4, words, f);
+    fclose(f);
+}
+} // namespace
+
+void vsh_seed_prewarm(IDirect3DDevice9 *d)
+{
+    std::wstring path = g_cfg.port_dir + L"\\vertex_programs.bin";
+    FILE *f = _wfopen(path.c_str(), L"rb");
+    if (!f) return;
+    std::vector<uint8_t> s;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size > 0) {
+        s.resize((size_t)size);
+        if (fread(s.data(), 1, s.size(), f) != s.size()) s.clear();
+    }
+    fclose(f);
+    if (s.size() < 12 || memcmp(s.data(), "NGBVSED1", 8)) {
+        logf("[vsh] %s: not a vertex program seed", narrow(path).c_str());
+        return;
+    }
+    LARGE_INTEGER t0, t1, fr;
+    QueryPerformanceCounter(&t0);
+    std::vector<uint8_t> xbe;
+    if (FILE *x = _wfopen(g_cfg.xbe_path.c_str(), L"rb")) {
+        fseek(x, 0, SEEK_END);
+        long n = ftell(x);
+        fseek(x, 0, SEEK_SET);
+        if (n > 0) {
+            xbe.resize((size_t)n);
+            if (fread(xbe.data(), 1, xbe.size(), x) != xbe.size()) xbe.clear();
+        }
+        fclose(x);
+    }
+    uint32_t count;
+    memcpy(&count, &s[8], 4);
+    size_t at = 12;
+    unsigned made = 0, missing = 0, failed = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t head[4], noffs;
+        uint64_t hash; // then the bytecode key the tool's runs made (make_draw_seed.py's; not read here)
+        if (at + 36 > s.size()) break;
+        memcpy(head, &s[at], 16);
+        memcpy(&hash, &s[at + 16], 8);
+        memcpy(&noffs, &s[at + 32], 4);
+        at += 36;
+        if (noffs > 64 || at + (size_t)noffs * 4 > s.size()) break;
+        const uint32_t words = head[0], mask = head[1], undivided = head[2];
+        const char *profile = head[3] ? "vs_2_a" : "vs_2_0";
+        const uint32_t *prog = nullptr;
+        for (uint32_t k = 0; k < noffs && !prog; k++) {
+            uint32_t off;
+            memcpy(&off, &s[at + k * 4], 4);
+            if (words && (size_t)off + (size_t)words * 4 <= xbe.size() && words_hash((const uint32_t *)&xbe[off], words) == hash)
+                prog = (const uint32_t *)&xbe[off];
+        }
+        at += (size_t)noffs * 4;
+        if (!prog) { // another copy of the game, or no default.xbe readable
+            missing++;
+            continue;
+        }
+        std::vector<uint32_t> w(prog, prog + words); // aligned
+        std::string hlsl = vsh_to_hlsl(w.data(), words / 4, mask, undivided);
+        ID3DBlob *code = nullptr, *errors = nullptr;
+        HRESULT hr = cached_compile(hlsl, "nv2a_vsh", profile, D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors);
+        IDirect3DVertexShader9 *obj = nullptr;
+        if (SUCCEEDED(hr) && SUCCEEDED(create_vertex_shader(d, code, &obj))) {
+            obj->Release(); // the warm set keeps it for the game's first draw (take_warm)
+            made++;
+        } else {
+            failed++;
+        }
+        if (code) code->Release();
+        if (errors) errors->Release();
+    }
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&fr);
+    logf("[vsh] seed: %u of %u game vertex programs made in %.0f ms (%u not in this copy of the game%s)", made, count,
+         (t1.QuadPart - t0.QuadPart) * 1000.0 / fr.QuadPart, missing, failed ? ", some failed to compile" : "");
+}
+
 IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stages)
 {
     if (!vs || !vs->program) return nullptr;
@@ -198,6 +320,7 @@ IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stag
             vs->host_vs_undivided = hv;
             vs->host_vs_undivided_stages = undivided_stages;
             logf("[vsh] shader %p: texture outputs 0x%x handed on undivided (divided per pixel)", vs, undivided_stages);
+            vsh_record(vs, undivided_stages, "vs_2_a", code);
         }
         if (code) code->Release();
         if (errors) errors->Release();
@@ -209,9 +332,11 @@ IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stag
     perf::add_compile();
     ID3DBlob *code = nullptr, *errors = nullptr;
     HRESULT hr = E_FAIL;
+    const char *used = "vs_2_0";
     for (const char *profile : {"vs_2_0", "vs_2_a"}) {
         if (errors) { errors->Release(); errors = nullptr; }
         hr = cached_compile(hlsl, "nv2a_vsh", profile, D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors);
+        used = profile;
         if (SUCCEEDED(hr)) break;
     }
     if (FAILED(hr)) {
@@ -225,6 +350,7 @@ IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stag
     } else {
         static std::atomic<int> n{0};
         if (++n <= 30) logf("[vsh] shader %p translated (%u instructions)", vs, vs->program_insts);
+        vsh_record(vs, 0, used, code);
     }
     if (code) code->Release();
     if (errors) errors->Release();

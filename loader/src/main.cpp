@@ -283,6 +283,9 @@ bool parse_args()
         else if (a == L"--host-ffp") g_cfg.host_ffp = true;
         else if (a == L"--ffp-vs") g_cfg.ffp_vs = true; // tests: the generated fixed-function vertex shaders (off by default)
         else if (a == L"--no-draw-warm") g_cfg.draw_warm = false;
+        else if (a == L"--vsh-record") {
+            if (!next(g_cfg.vsh_record)) return false;
+        }
         else if (a == L"--ffp-vs-check") {
             std::wstring v;
             if (!next(v)) return false;
