@@ -27,6 +27,21 @@ namespace xd3d {
 HRESULT cached_compile(const std::string &hlsl, const char *name, const char *profile, UINT flags, ID3DBlob **code,
                        ID3DBlob **errors);
 
+// The first of `profiles` (null-ended, tried in order) that compiles this source, as ngbrecomp 0.9.68 does (#94): from
+// the cache; else compiled now while this frame has spent less than the compile budget on compiling (--compile-budget
+// MS; 0: always later; -1, the default: always now, as before), else on the compile threads: kLater, and the caller
+// leaves its draw out (a few frames later the cache has it). A first sight of many shaders at once (an area the seed
+// does not cover) then costs the frame the budget, not 10-40 ms each, but the picture misses those draws meanwhile:
+// off by default, an option. *profile: the one that compiled (kReady).
+enum class Compiled { kReady, kLater, kFailed };
+Compiled compile_now_or_later(const std::string &hlsl, const char *name, const char *const *profiles, UINT flags,
+                              ID3DBlob **code, ID3DBlob **errors, const char **profile);
+// Set by a shader the current draw needs that compiles later (ps_host_shader, ffp_pixel_shader, vs_host_shader):
+// begin_draw leaves the draw out; cleared at each begin_draw
+extern bool g_shader_later;
+void compile_later_report(); // each frame: the background compiles and the draws left out, now and then in the log
+void compile_later_count_draw(); // a draw left out for one (begin_draw)
+
 // At device creation: make the shader objects of every cached entry.
 void prewarm_shaders(IDirect3DDevice9 *d);
 // The key the shader objects are kept by (an FNV-1a hash of the bytecode), and the object kept for one (a new

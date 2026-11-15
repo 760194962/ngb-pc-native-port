@@ -316,8 +316,14 @@ IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stag
         std::string hlsl = vsh_to_hlsl(vs->program, vs->program_insts, vs_input_mask(vs), undivided_stages);
         ID3DBlob *code = nullptr, *errors = nullptr;
         IDirect3DVertexShader9 *hv = nullptr;
-        if (SUCCEEDED(cached_compile(hlsl, "nv2a_vsh", "vs_2_a", D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors)) &&
-            SUCCEEDED(create_vertex_shader(host3d::dev(), code, &hv))) {
+        static const char *const kUndivided[] = {"vs_2_a", nullptr};
+        const char *used = nullptr;
+        Compiled c = compile_now_or_later(hlsl, "nv2a_vsh", kUndivided, D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors, &used);
+        if (c == Compiled::kLater) { // on the compile thread: this draw is left out
+            g_shader_later = true;
+            return nullptr;
+        }
+        if (c == Compiled::kReady && SUCCEEDED(create_vertex_shader(host3d::dev(), code, &hv))) {
             if (vs->host_vs_undivided) vs->host_vs_undivided->Release();
             vs->host_vs_undivided = hv;
             vs->host_vs_undivided_stages = undivided_stages;
@@ -333,14 +339,14 @@ IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stag
     perf::Scope perf_scope(perf::kCompile);
     perf::add_compile();
     ID3DBlob *code = nullptr, *errors = nullptr;
-    HRESULT hr = E_FAIL;
+    static const char *const kProfiles[] = {"vs_2_0", "vs_2_a", nullptr};
     const char *used = "vs_2_0";
-    for (const char *profile : {"vs_2_0", "vs_2_a"}) {
-        if (errors) { errors->Release(); errors = nullptr; }
-        hr = cached_compile(hlsl, "nv2a_vsh", profile, D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors);
-        used = profile;
-        if (SUCCEEDED(hr)) break;
+    Compiled c = compile_now_or_later(hlsl, "nv2a_vsh", kProfiles, D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors, &used);
+    if (c == Compiled::kLater) { // on the compile thread: this draw is left out (not marked failed: asked again)
+        g_shader_later = true;
+        return nullptr;
     }
+    HRESULT hr = c == Compiled::kReady ? S_OK : E_FAIL;
     if (FAILED(hr)) {
         vs->translate_failed = true;
         logf("[vsh] compile failed for shader %p: %s", vs, errors ? (const char *)errors->GetBufferPointer() : "?");

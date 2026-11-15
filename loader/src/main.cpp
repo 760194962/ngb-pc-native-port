@@ -286,6 +286,11 @@ bool parse_args()
         else if (a == L"--log-vsh") g_cfg.log_vsh = true;
         else if (a == L"--no-cpu-tex") g_cfg.cpu_tex = false;
         else if (a == L"--no-saved-volumes") g_cfg.saved_volumes = false;
+        else if (a == L"--compile-budget") {
+            std::wstring v;
+            if (!next(v)) return false;
+            g_cfg.compile_budget_ms = _wtof(v.c_str());
+        }
         else if (a == L"--cpu-tex-verify") g_cfg.cpu_tex_verify = true;
         else if (a == L"--vsh-record") {
             if (!next(g_cfg.vsh_record)) return false;

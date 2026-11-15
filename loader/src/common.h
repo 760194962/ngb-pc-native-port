@@ -223,6 +223,7 @@ struct Config {
     bool cpu_tex_verify = false; // --cpu-tex-verify (tests): kept ripple textures compared with the game's own, byte for byte
     bool cpu_tex = true;       // --no-cpu-tex: the game's CPU-made ripple textures computed every time (ngb_cpu_textures.cpp)
     bool saved_volumes = true; // --no-saved-volumes: a cold start keeps the default sound volumes, as the console (ngb_sound_boot.cpp)
+    double compile_budget_ms = -1; // --compile-budget MS: compiling on the render thread a frame before the rest go to threads and their draws are left out (-1, the default: all now)
     unsigned ffp_debug = 0;    // press-file "cfg:ffpdebug:N": the stage shader shows stage 1's texture colour (1) or alpha (2)
     std::wstring press_script; // --press: "frame:button,frame:button" scripted controller input
     std::wstring perf_at;      // --perf-at S:D: record performance for D seconds from S seconds after the first frame

@@ -176,12 +176,14 @@ IDirect3DPixelShader9 *ps_host_shader()
     perf::Scope perf_scope(perf::kCompile);
     perf::add_compile();
     ID3DBlob *code = nullptr, *errors = nullptr;
-    HRESULT hr = E_FAIL;
-    for (const char *profile : {"ps_2_0", "ps_2_a", "ps_2_b"}) {
-        if (errors) { errors->Release(); errors = nullptr; }
-        hr = cached_compile(hlsl, "nv2a_psh", profile, D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors);
-        if (SUCCEEDED(hr)) break;
+    static const char *const kProfiles[] = {"ps_2_0", "ps_2_a", "ps_2_b", nullptr};
+    const char *used = nullptr;
+    Compiled c = compile_now_or_later(hlsl, "nv2a_psh", kProfiles, D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors, &used);
+    if (c == Compiled::kLater) { // on the compile thread: this draw is left out, the next ones ask again
+        g_shader_later = true;
+        return nullptr;
     }
+    HRESULT hr = c == Compiled::kReady ? S_OK : E_FAIL;
     IDirect3DPixelShader9 *ps = nullptr;
     static int logged;
     if (FAILED(hr)) {

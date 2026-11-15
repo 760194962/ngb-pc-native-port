@@ -3,9 +3,12 @@
 #include "common.h"
 #include "perf.h"
 
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -252,6 +255,171 @@ HRESULT cached_compile(const std::string &hlsl, const char *name, const char *pr
     QueryPerformanceFrequency(&f);
     perf::add_shader_build((double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart, cached != 0);
     return hr;
+}
+
+// ---- compiles within a budget, the rest on a thread (compile_now_or_later) ----
+bool g_shader_later;
+
+namespace {
+
+struct Job {
+    std::string hlsl, name;
+    std::vector<std::string> profiles; // those not known to fail, in order
+    UINT flags;
+};
+std::mutex g_jobs_lock;
+std::condition_variable g_jobs_cv;
+std::deque<Job> g_jobs;
+std::unordered_set<std::string> g_queued; // the jobs' sources (with their flags) queued or compiling
+bool g_worker_started;
+uint32_t g_budget_frame = ~0u;
+double g_budget_spent;                        // ms compiled on the render thread this frame
+uint32_t g_later_jobs, g_later_draws, g_later_done; // since the last report
+double g_later_ms;
+
+std::string job_id(const std::string &hlsl, UINT flags) { return hlsl + '\0' + std::to_string(flags); }
+
+uint32_t g_later_first = ~0u, g_later_last; // frames with a draw left out (since the last report)
+
+// The jobs in order on up to 4 threads (half the logical CPUs; D3DCompile is reentrant), at the normal priority: a draw
+// is left out until its shader is done. ngbrecomp 0.9.68 has one; with one, the first area's 26 new shaders (cold
+// cache, no seed, RTX 3060) took 0.24 s and their draws were left out about 14 frames (the title's fade cut short);
+// with four, 214 draws in 4 frames, then 12 in 2 (2026-11-15).
+void compile_worker()
+{
+    for (;;) {
+        Job j;
+        {
+            std::unique_lock<std::mutex> g(g_jobs_lock);
+            g_jobs_cv.wait(g, [] { return !g_jobs.empty(); });
+            j = std::move(g_jobs.front());
+            g_jobs.pop_front();
+        }
+        LARGE_INTEGER t0, t1, f;
+        QueryPerformanceCounter(&t0);
+        for (const std::string &p : j.profiles) {
+            ID3DBlob *code = nullptr, *errors = nullptr;
+            HRESULT hr = D3DCompile(j.hlsl.data(), j.hlsl.size(), j.name.c_str(), nullptr, nullptr, "main", p.c_str(), j.flags, 0,
+                                    &code, &errors);
+            std::wstring path = entry_path(j.hlsl, p.c_str(), j.flags);
+            write_entry(path, j.hlsl, p.c_str(), j.flags, SUCCEEDED(hr) ? code : nullptr); // (files: off the render thread)
+            Entry e;
+            e.flags = j.flags, e.profile = p, e.hlsl = j.hlsl;
+            if (SUCCEEDED(hr)) {
+                const uint8_t *c = (const uint8_t *)code->GetBufferPointer();
+                e.code.assign(c, c + code->GetBufferSize());
+            }
+            {
+                std::lock_guard<std::mutex> g(g_lock);
+                g_mem[path] = std::move(e); // the render thread's next lookup finds it here
+            }
+            if (code) code->Release();
+            if (errors) errors->Release();
+            if (SUCCEEDED(hr)) break;
+        }
+        QueryPerformanceCounter(&t1);
+        QueryPerformanceFrequency(&f);
+        std::lock_guard<std::mutex> g(g_jobs_lock);
+        g_queued.erase(job_id(j.hlsl, j.flags));
+        g_later_done++;
+        g_later_ms += (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+    }
+}
+
+} // namespace
+
+Compiled compile_now_or_later(const std::string &hlsl, const char *name, const char *const *profiles, UINT flags,
+                              ID3DBlob **code, ID3DBlob **errors, const char **profile)
+{
+    *code = nullptr;
+    if (errors) *errors = nullptr;
+    // What the cache knows: the first profile that compiles, or where the unknown ones start
+    // (a source the cache holds is made at once, budget or not: 0.9.68's #21, deferring those left walls and effects
+    // out for a while after every start)
+    std::vector<std::string> unknown;
+    {
+        std::lock_guard<std::mutex> g(g_lock);
+        for (const char *const *p = profiles; *p; p++) {
+            if (!unknown.empty()) {
+                unknown.push_back(*p);
+                continue;
+            }
+            int r = read_entry(entry_path(hlsl, *p, flags), hlsl, *p, flags, code);
+            if (r > 0) {
+                *profile = *p;
+                perf::add_shader_build(0, true);
+                return Compiled::kReady;
+            }
+            if (r == 0) unknown.push_back(*p);
+        }
+    }
+    if (unknown.empty()) return Compiled::kFailed; // every profile known not to compile it
+    std::string id = job_id(hlsl, flags);
+    {
+        std::lock_guard<std::mutex> g(g_jobs_lock);
+        if (g_queued.count(id)) return Compiled::kLater; // compiling already
+    }
+    uint32_t frame = g_frame_count.load(std::memory_order_relaxed);
+    if (frame != g_budget_frame) g_budget_frame = frame, g_budget_spent = 0;
+    double budget = g_cfg.compile_budget_ms;
+    if (budget < 0 || g_budget_spent < budget) { // now, as before
+        LARGE_INTEGER t0, t1, f;
+        QueryPerformanceCounter(&t0);
+        Compiled result = Compiled::kFailed;
+        for (const std::string &p : unknown) {
+            if (errors && *errors) (*errors)->Release(), *errors = nullptr;
+            const char *pp = nullptr;
+            for (const char *const *q = profiles; *q; q++)
+                if (p == *q) pp = *q;
+            if (SUCCEEDED(cached_compile(hlsl, name, pp, flags, code, errors))) {
+                *profile = pp;
+                result = Compiled::kReady;
+                break;
+            }
+        }
+        QueryPerformanceCounter(&t1);
+        QueryPerformanceFrequency(&f);
+        g_budget_spent += (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+        return result;
+    }
+    std::lock_guard<std::mutex> g(g_jobs_lock);
+    if (!g_worker_started) {
+        g_worker_started = true;
+        unsigned n = std::thread::hardware_concurrency() / 2;
+        n = n < 1 ? 1 : n > 4 ? 4 : n;
+        for (unsigned i = 0; i < n; i++) std::thread(compile_worker).detach();
+        logf("[shader cache] %u compile threads (shaders past the %.0f ms budget a frame)", n, budget);
+    }
+    g_queued.insert(id);
+    g_jobs.push_back(Job{hlsl, name, std::move(unknown), flags});
+    g_jobs_cv.notify_one();
+    g_later_jobs++;
+    return Compiled::kLater;
+}
+
+void compile_later_report()
+{
+    static uint32_t last;
+    uint32_t frame = g_frame_count.load(std::memory_order_relaxed);
+    if (frame - last < 60) return;
+    last = frame;
+    std::lock_guard<std::mutex> g(g_jobs_lock);
+    if (!g_later_jobs && !g_later_draws) return;
+    char span[64] = "";
+    if (g_later_draws) snprintf(span, sizeof span, " in frames %u-%u (%u)", g_later_first, g_later_last, g_later_last - g_later_first + 1);
+    logf("[shader cache] frame %u: %u shaders went to the compile threads (%u done, %.0f ms of compiling), %u draws left out%s", frame,
+         g_later_jobs, g_later_done, g_later_ms, g_later_draws, span);
+    g_later_jobs = g_later_draws = g_later_done = 0;
+    g_later_ms = 0;
+    g_later_first = ~0u, g_later_last = 0;
+}
+
+void compile_later_count_draw()
+{
+    g_later_draws++;
+    uint32_t f = g_frame_count.load(std::memory_order_relaxed);
+    if (g_later_first == ~0u) g_later_first = f;
+    g_later_last = f;
 }
 
 void prewarm_shaders(IDirect3DDevice9 *d)

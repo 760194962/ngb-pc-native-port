@@ -8,6 +8,7 @@
 #include "d3d/ffp_ps.h"
 #include "d3d/ffp_vs.h"
 #include "d3d/drawwarm.h"
+#include "d3d/shader_cache.h"
 #include "d3d/host.h"
 #include "build_profile.h"
 #include "d3d/nv2a_vsh.h"
@@ -1971,6 +1972,7 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
     apply_texture_stages(d, !ps); // may copy a render target (outside the scene) first
     note_tap_filter(g_rt_stage);
     host3d::begin_scene();
+    g_shader_later = false; // set by a shader this draw needs that compiles on the thread (compile_now_or_later)
     // Fixed-function draws get a generated stage shader too (d3d/ffp_ps.cpp); the host's own fixed-function pixel
     // pipeline (D3D9On12) dropped alpha modulation on pass-through stages (docs/04 搂3.9). --host-ffp keeps it.
     uint32_t vsh = g_st.vertex_shader;
@@ -2036,6 +2038,7 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
     }
     if (ctx.path == Path::None) {
         g_st.draws_skipped++;
+        if (g_shader_later) compile_later_count_draw(); // its vertex program compiles on the thread
         return false;
     }
     if (ctx.path == Path::Fvf) {
@@ -2065,6 +2068,11 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
                                  : g_cfg.host_ffp ? nullptr
                                  : ffp_pixel_shader(!fvf_vs || (vsh & D3DFVF_DIFFUSE) != 0, !fvf_vs || (vsh & D3DFVF_SPECULAR) != 0,
                                                     fvf_vs && (vsh & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
+    if (!hps && g_shader_later) { // its pixel shader compiles on the thread: left out, not drawn by a fallback
+        g_st.draws_skipped++;
+        compile_later_count_draw();
+        return false;
+    }
     set_ps(d, hps);
     if (ffvs) {
         upload_ffp_vs_constants(d, fst);
