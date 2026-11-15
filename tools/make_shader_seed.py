@@ -2,7 +2,10 @@
 prewarm_shaders): the cache entries of test runs, so a player's first start does not compile them as each area
 first shows them.
 
-  make:  python -I tools/make_shader_seed.py -o seed/shader_seed.bin [--exclude TEXT ...] CACHE_DIR [CACHE_DIR ...]
+  make:  python -I tools/make_shader_seed.py -o seed/shader_seed.bin [--exclude TEXT ...] [--base SEED] CACHE_DIR [CACHE_DIR ...]
+
+--base keeps an existing seed's records and adds the cache folders' entries to them (a new build's new shaders
+without the test runs the seed was first made from).
   check: python -I tools/make_shader_seed.py --check CACHE_DIR [--seed seed/shader_seed.bin]
 
 A CACHE_DIR is a cache\\shaders folder (entries <fnv64>.bin with their .gen epoch sidecars). Taken: entries that parse,
@@ -98,6 +101,22 @@ def collect(dirs, want_epoch, excludes, why):
     return out
 
 
+def seed_records(path):
+    """name -> entry bytes of a seed's records (for --base)"""
+    d = open(path, 'rb').read()
+    if d[:8] != b'NGBSEED1':
+        sys.exit('%s: not a shader seed' % path)
+    count, = struct.unpack_from('<I', d, 8)
+    at, out = 12, {}
+    for _ in range(count):
+        n, = struct.unpack_from('<I', d, at); at += 4
+        data = d[at:at + n]; at += n
+        e = parse(data)
+        if e:
+            out[entry_name(e[0], e[1], e[2])] = data
+    return out
+
+
 def read_seed(path):
     d = open(path, 'rb').read()
     if d[:8] != b'NGBSEED1':
@@ -120,10 +139,17 @@ def main():
     ap.add_argument('--exclude', action='append', default=[])
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--seed', default=os.path.join(os.path.dirname(__file__), '..', 'seed', 'shader_seed.bin'))
+    ap.add_argument('--base', help='a seed whose records are kept, the CACHE_DIRs\' entries added to them')
     a = ap.parse_args()
     why = {'unreadable': 0, 'name is not its hash': 0, 'another generator epoch': 0, 'the game\'s vertex program': 0,
            'excluded text': 0}
     entries = collect(a.dirs, a.epoch, a.exclude, why)
+    if a.base and not a.check:
+        base = seed_records(a.base)
+        added = sum(1 for n in entries if n not in base)
+        base.update(entries)
+        entries = base
+        print('%d entries from %s, %d added from the cache folders' % (len(entries) - added, a.base, added))
     if a.check:
         seed = read_seed(a.seed)
         have = sum(1 for n in entries if n in seed)

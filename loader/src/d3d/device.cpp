@@ -332,12 +332,16 @@ HostZ &host_z(const PixelContainer *z, uint32_t rt_w, uint32_t rt_h, uint64_t *k
     return hz;
 }
 
+// The port's own pixel shaders (depth fill and reads, the anti-aliasing resolves), made at their first use: through the
+// shader cache and its prewarmed objects like the game's (shader_cache.cpp), so the shader seed covers them too. They
+// were compiled with D3DCompile at every start, in the frame that first needed one (an area's first scene: the
+// D3DCompile samples of its 28-43 ms frame, perf 2026-11-15).
 IDirect3DPixelShader9 *compile_ps(const char *src, const char *name, const char *profile = "ps_2_0")
 {
     IDirect3DPixelShader9 *ps = nullptr;
     ID3DBlob *code = nullptr, *errors = nullptr;
-    if (SUCCEEDED(D3DCompile(src, strlen(src), name, nullptr, nullptr, "main", profile, 0, 0, &code, &errors)))
-        host3d::dev()->CreatePixelShader((const DWORD *)code->GetBufferPointer(), &ps);
+    if (SUCCEEDED(cached_compile(src, name, profile, 0, &code, &errors)))
+        create_pixel_shader(host3d::dev(), code, &ps);
     else
         logf("[d3d] %s shader: %s", name, errors ? (const char *)errors->GetBufferPointer() : "?");
     if (code) code->Release();

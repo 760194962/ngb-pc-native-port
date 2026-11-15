@@ -114,7 +114,9 @@ VertexShader *vs_create(const uint32_t *decl, const uint32_t *function, uint32_t
             decl += b;
         }
         logf("[vsh] shader %p: type 0x%x, %u instructions, decl [%s]", vs, vs->program_type, vs->program_insts, decl.c_str());
-        if (vs->program) {
+        // The disassembly only with --log-vsh: a line per instruction, flushed each, and the game makes its shaders in
+        // bursts (a cutscene's first frame wrote 290 lines, 2026-11-15)
+        if (vs->program && g_cfg.log_vsh) {
             std::string dis = vsh_disasm(vs->program, vs->program_insts);
             size_t pos = 0;
             while (pos < dis.size()) {

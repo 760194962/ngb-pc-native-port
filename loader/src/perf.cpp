@@ -585,6 +585,14 @@ void write_report(Recording *r)
     double cls[3][kClsCount] = {};
     std::map<std::string, double> self[3], incl[3];
     double frame_samples[3] = {}, idle = 0;
+    // Spikes: frames whose work took over 20 ms (a hitch, not a steady load); their samples alone, for what runs in a
+    // frame such as an area's first one (the slowest 5% mostly holds the steady heavy frames)
+    std::map<std::string, double> spike_self, spike_incl;
+    double spike_samples = 0;
+    size_t spike_frames = 0;
+    std::vector<uint8_t> spike(F.size());
+    for (size_t i = 0; i < F.size(); i++)
+        if (F[i].work > 20.0f) spike[i] = 1, spike_frames++;
     auto generic = [](const std::string &k) {
         for (const char *g : {"memcpy", "memset", "memmove", "malloc", "free", "ILT+", "operator new", "std::"})
             if (k.find(g) != std::string::npos) return true;
@@ -625,6 +633,12 @@ void write_report(Recording *r)
             self[g][key]++;
             if (smp.running)
                 for (const std::string &k : seen) incl[g][k]++;
+        }
+        if (smp.frame < spike.size() && spike[smp.frame]) {
+            spike_samples++;
+            spike_self[key]++;
+            if (smp.running)
+                for (const std::string &k : seen) spike_incl[k]++;
         }
     }
 
@@ -701,6 +715,19 @@ void write_report(Recording *r)
     };
     top("Hot spots, self time (percent of the frame-time samples; '<-' = the port/game function that called it):", self, 45);
     top("Hot spots, including callees (from return addresses found on the stack, a heuristic; running samples only):", incl, 30);
+    auto top1 = [&](const char *title, const std::map<std::string, double> &m, int count) {
+        std::vector<std::pair<double, std::string>> v;
+        for (auto &[k, n] : m) v.push_back({n, k});
+        std::sort(v.rbegin(), v.rend());
+        put("\n%s\n", title);
+        for (int i = 0; i < (int)v.size() && i < count; i++)
+            put("  %5.1f%% %4.0f  %s\n", 100.0 * v[i].first / std::max(1.0, spike_samples), v[i].first, v[i].second.c_str());
+    };
+    put("\nSpike frames (work over 20 ms): %zu frames, %.0f samples\n", spike_frames, spike_samples);
+    if (spike_samples) {
+        top1("  self time (percent of their samples, samples):", spike_self, 30);
+        top1("  including callees (running samples):", spike_incl, 30);
+    }
 
     // threads
     std::sort(r->threads.begin(), r->threads.end(), [](const ThreadCpu &a, const ThreadCpu &b) { return a.c1 - a.c0 > b.c1 - b.c0; });
