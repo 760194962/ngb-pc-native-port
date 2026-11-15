@@ -42,6 +42,7 @@ add_library(blackrt SHARED
   src/ng04_exitmenu.cpp
   src/ngb_livedash.cpp
   src/ngb_cpu_textures.cpp
+  src/ngb_sound_boot.cpp
   src/fe/calls.cpp
   src/fe/vars.cpp
   src/fe/pc_settings.cpp

@@ -285,6 +285,7 @@ bool parse_args()
         else if (a == L"--no-draw-warm") g_cfg.draw_warm = false;
         else if (a == L"--log-vsh") g_cfg.log_vsh = true;
         else if (a == L"--no-cpu-tex") g_cfg.cpu_tex = false;
+        else if (a == L"--no-saved-volumes") g_cfg.saved_volumes = false;
         else if (a == L"--cpu-tex-verify") g_cfg.cpu_tex_verify = true;
         else if (a == L"--vsh-record") {
             if (!next(g_cfg.vsh_record)) return false;
@@ -813,6 +814,8 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && !black && !profile->aux) install_music51_fix(); // the music player's six channels at -96 dB
     if (profile && !black) // the ripple textures the game makes on the CPU, kept (ngb_cpu_textures.cpp)
         if (const XbeSection *t = g_xbe.section_named(".text")) install_cpu_textures(t->vaddr, t->vsize);
+    if (profile && !black && !profile->aux) // the saved sound volumes at a cold start (ngb_sound_boot.cpp)
+        if (const XbeSection *t = g_xbe.section_named(".text")) install_saved_volumes(t->vaddr, t->vsize);
     if (profile && profile->wide2d) // the HUD's sides on a screen not 16:9: in play as the game's HUD routine says
         if (const XbeSection *t = g_xbe.section_named(".text")) xd3d::install_hud_probe((uint8_t *)(uintptr_t)t->vaddr, t->vsize);
     // Ⓐ in Ranking's Live boxes (and Ninja Gaiden (2004)'s Master Ninja Tournament): the port's Xbox Live dashboard when it

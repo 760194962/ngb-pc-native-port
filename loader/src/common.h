@@ -222,6 +222,7 @@ struct Config {
     bool log_vsh = false;      // --log-vsh: each game vertex program's disassembly in the log (d3d/vshader.cpp)
     bool cpu_tex_verify = false; // --cpu-tex-verify (tests): kept ripple textures compared with the game's own, byte for byte
     bool cpu_tex = true;       // --no-cpu-tex: the game's CPU-made ripple textures computed every time (ngb_cpu_textures.cpp)
+    bool saved_volumes = true; // --no-saved-volumes: a cold start keeps the default sound volumes, as the console (ngb_sound_boot.cpp)
     unsigned ffp_debug = 0;    // press-file "cfg:ffpdebug:N": the stage shader shows stage 1's texture colour (1) or alpha (2)
     std::wstring press_script; // --press: "frame:button,frame:button" scripted controller input
     std::wstring perf_at;      // --perf-at S:D: record performance for D seconds from S seconds after the first frame
@@ -245,6 +246,7 @@ void install_ng04_exitmenu();     // the title menu's EXIT GAME row for Ninja Ga
 void install_ngb_aspect();        // black.ini aspect 16:10 / 21:9 for Ninja Gaiden Black x2.1 (ngb_aspect.cpp)
 void install_ngb_livedash();      // Ⓐ cancels Ranking's Xbox Live boxes instead of opening the dashboard (ngb_livedash.cpp)
 void install_cpu_textures(uint32_t text_va, uint32_t text_size); // the ripple textures Ninja Gaiden makes on the CPU, made once, then copied (ngb_cpu_textures.cpp)
+void install_saved_volumes(uint32_t text_va, uint32_t text_size); // the saved sound volumes at a cold start (ngb_sound_boot.cpp)
 void install_ng04_livedash();     // the same in Ninja Gaiden (2004)'s Master Ninja Tournament (ngb_livedash.cpp)
 void logv(const char *fmt, va_list ap);
 void logc(const char *fmt, ...); // the log file and the console: startup, setup errors, exit, crashes
