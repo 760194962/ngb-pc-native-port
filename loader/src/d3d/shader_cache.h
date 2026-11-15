@@ -18,6 +18,7 @@
 #include <d3d9.h>
 #include <d3dcompiler.h>
 
+#include <cstdint>
 #include <string>
 
 namespace xd3d {
@@ -28,6 +29,10 @@ HRESULT cached_compile(const std::string &hlsl, const char *name, const char *pr
 
 // At device creation: make the shader objects of every cached entry.
 void prewarm_shaders(IDirect3DDevice9 *d);
+// The key the shader objects are kept by (an FNV-1a hash of the bytecode), and the object kept for one (a new
+// reference), or null: the recorded draw states name their shaders this way (drawwarm.cpp)
+uint64_t shader_code_key(const void *code, size_t size);
+IUnknown *warm_lookup(IDirect3DDevice9 *d, bool vertex, uint64_t key);
 void warm_drop_all(); // a new device: the prewarmed objects not handed out (prewarm_shaders makes them again)
 
 // CreateVertexShader / CreatePixelShader for compiled bytecode, taking a prewarmed object of the same bytecode first.

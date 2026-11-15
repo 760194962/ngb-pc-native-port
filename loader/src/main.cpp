@@ -281,6 +281,13 @@ bool parse_args()
         else if (a == L"--no-reverb") { g_cfg.reverb = false; settings_mark_cli("reverb"); }
         else if (a == L"--no-fog") g_cfg.no_fog = true;
         else if (a == L"--host-ffp") g_cfg.host_ffp = true;
+        else if (a == L"--ffp-vs") g_cfg.ffp_vs = true; // tests: the generated fixed-function vertex shaders (off by default)
+        else if (a == L"--no-draw-warm") g_cfg.draw_warm = false;
+        else if (a == L"--ffp-vs-check") {
+            std::wstring v;
+            if (!next(v)) return false;
+            g_cfg.ffp_vs_check = (unsigned)_wtoi(v.c_str());
+        }
         else if (a == L"--no-rdtsc") g_cfg.no_rdtsc = true;
         else if (a == L"--coverage") {
             if (!next(g_cfg.coverage)) return false;

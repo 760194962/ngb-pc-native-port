@@ -23,6 +23,11 @@ extern uint32_t g_ffp_edge_stages;
 // (begin_draw clears them; quad_snap sets them and picks the shader again with ffp_reselect).
 extern uint32_t g_ffp_quad_stages, g_ffp_quad_weighted;
 extern bool g_ffp_sprite_tc; // this draw's point sprites carry their coordinate in TEXCOORD0 (d3d/draw.cpp with_sprite_tc)
+// The fog the shader applies itself (after a generated vertex shader, d3d/ffp_vs.cpp, which passes clip z, w in
+// TEXCOORD5): 0 none (the host's fog, if on), else the table mode D3DFOG_EXP 1, EXP2 2, LINEAR 3. Set per draw.
+extern int g_ffp_fog;
+// c9-c10 for that fog: 1 / (end - start), end, density, 1 / the projection's _34 (clip w -> eye depth); the colour
+void upload_ffp_fog_constants(IDirect3DDevice9 *d, float w_scale);
 IDirect3DPixelShader9 *ffp_reselect(); // the shader for the last ffp_pixel_shader arguments, with the quad bits as now
 void upload_ffp_quad_constants(IDirect3DDevice9 *d, const float clamp[4][4], const float size[4][4]);
 // c0 = TEXTUREFACTOR for the shader above.

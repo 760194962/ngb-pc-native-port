@@ -16,6 +16,7 @@ extern int g_width, g_height; // back buffer size
 
 void hle_flush(); // interpret pending inline push-buffer commands
 int sync_transforms_from_device(); // take matrices game code wrote into the device object (bit mask of the ones that changed)
+void flush_host_transforms(IDirect3DDevice9 *d); // the deferred view, projection, world matrices to the host (host fixed-function draws)
 bool sync_material_from_device();  // same for the material at device+0xF00 (true when it changed)
 void log_frame_mean_color(uint32_t frame); // --debug-frame N-M: mean colour of each presented frame (flash detector)
 constexpr int kDepthViewBytes = -2; // depth memory read through a colour header: Z bytes split into A/R/G, stencil in B

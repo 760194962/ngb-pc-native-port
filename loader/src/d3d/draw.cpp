@@ -6,6 +6,8 @@
 #include "d3d/device.h"
 #include "d3d/dispatch.h"
 #include "d3d/ffp_ps.h"
+#include "d3d/ffp_vs.h"
+#include "d3d/drawwarm.h"
 #include "d3d/host.h"
 #include "build_profile.h"
 #include "d3d/nv2a_vsh.h"
@@ -24,7 +26,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -254,6 +258,50 @@ bool psh_reads_fog()
     return has(rs[8]) || has(rs[9] & 0xFFFFFF00u);         // final combiner ABCD, EFG (low byte = flags)
 }
 
+// Host fog for the draw: the game's fog with the fixed-function pixels (draw.cpp below; the programmable pixel path
+// applies its own). The Stage 3 skylight cutscene sets fog 5 -> -1.2 with the 0xff6e3c1e colour. D3D9's
+// fixed-function linear fog on Intel saturates every vertex to the fog colour and the whole scene turns flat brown.
+// The NV2A keeps the formula, (end - d) / (end - start): fog only nearer than 5, rising towards the camera, which
+// D3D9's linear fog cannot express (its factor always falls with distance); it stays off here. start = end is the
+// library's slope of 8192 (FUN_003D0EC0), sent as a start 1/8192 before the end.
+DWORD host_fog_on()
+{
+    const uint32_t *rs = render_state();
+    DWORD fog = rs[XRS_FOGENABLE] != 0 && !g_cfg.no_fog && !g_st.pixel_shader;
+    if (fog && rs[XRS_FOGTABLEMODE] == D3DFOG_LINEAR) {
+        float fs = 0, fe = 0;
+        memcpy(&fs, &rs[XRS_FOGSTART], 4);
+        memcpy(&fe, &rs[XRS_FOGEND], 4);
+        if (fe < fs) fog = 0;
+    }
+    return fog;
+}
+
+DWORD g_fog_sent;
+float g_bias_sent, g_slope_sent; // D3DRS_DEPTHBIAS / SLOPESCALEDEPTHBIAS as sent (apply_render_states)
+void send_fog_enable(IDirect3DDevice9 *d, DWORD fog)
+{
+    if (g_rs_valid[XRS_FOGENABLE] && fog == g_fog_sent) return;
+    d->SetRenderState(D3DRS_FOGENABLE, fog);
+    g_fog_sent = fog;
+    g_rs_valid[XRS_FOGENABLE] = true;
+}
+
+// D3DRS_LOCALVIEWER as the host is given it (see apply_render_states)
+DWORD host_localviewer()
+{
+    DWORD v = render_state()[XRS_LOCALVIEWER] != 0;
+    if (g_cfg.force_localviewer == 0 || g_cfg.force_localviewer == 1) {
+        v = (DWORD)g_cfg.force_localviewer;
+    } else if (g_cfg.force_localviewer != 2) {
+        for (int s = 0; s < 4; s++) {
+            const uint32_t *ts = texture_state(s);
+            if (ts[12] != 1 && (ts[28] & 0xFFFF0000) == 0x30000) v = TRUE; // an enabled stage: reflection vector
+        }
+    }
+    return v;
+}
+
 template <typename F> void on_change(uint32_t state, F apply)
 {
     uint32_t v = render_state()[state];
@@ -273,7 +321,7 @@ void apply_render_states(IDirect3DDevice9 *d)
     // them inline (FUN_001D45C0, FUN_001D5420). A unit is 1/2^24 of the 24-bit depth range. The slope term is
     // per pixel of the target (the largest depth change between neighbouring pixels): at k times the Xbox
     // resolution the slope is k times smaller, so the factor is scaled by the target scale to keep the same offset.
-    // Ninja Gaiden Black draws lightmap / decal layers coplanar over the rocks with ZBIAS (docs/04 §3.8, §3.17).
+    // Ninja Gaiden Black draws lightmap / decal layers coplanar over the rocks with ZBIAS (docs/04 搂3.8, 搂3.17).
     {
         const uint32_t *rs = render_state();
         float bias = 0.0f, slope = 0.0f;
@@ -311,7 +359,7 @@ void apply_render_states(IDirect3DDevice9 *d)
             bias -= 2.0f * pb / 16777216.0f;
             slope -= 0.5f * ps * std::max(target_scale_x(), target_scale_y());
         }
-        static float sent_bias, sent_slope;
+        float &sent_bias = g_bias_sent, &sent_slope = g_slope_sent;
         if (!g_rs_valid[XRS_ZBIAS] || bias != sent_bias || slope != sent_slope) { // ZBIAS's slot marks "sent"
             DWORD b, s;
             memcpy(&b, &bias, 4);
@@ -332,7 +380,7 @@ void apply_render_states(IDirect3DDevice9 *d)
     // D3DBLEND_CONSTANTALPHA / INVCONSTANTALPHA (0x8003 / 0x8004) take the blend colour's alpha, replicated into
     // the host's BLENDFACTOR. Ninja Gaiden Black copies the back buffer with them (BLENDCOLOR 0xffffffff: a full
     // copy) and draws a fade overlay over the pickup dialog with 0x00ffffff (alpha 0: nothing); read as the colour
-    // modes, that overlay replaced the dialog with the snapshot (docs/04 §3.8).
+    // modes, that overlay replaced the dialog with the snapshot (docs/04 搂3.8).
     auto blend_factor = [&]() {
         const uint32_t *rs = render_state();
         uint32_t sb = rs[XRS_SRCBLEND], db = rs[XRS_DESTBLEND], bc = rs[XRS_BLENDCOLOR];
@@ -367,26 +415,8 @@ void apply_render_states(IDirect3DDevice9 *d)
     // Host fog is for the fixed-function path only. The programmable path gets the NV2A fog factor interpolated
     // through VSOut.t4 and blends it into its own FOGR register (nv2a_vsh.cpp / nv2a_psh.cpp), so adding D3D9's
     // post-shader fog there would apply it twice. Reversed linear ranges still mean no visible fog (see below).
-    {
-        static DWORD fog_sent;
-        DWORD fog = render_state()[XRS_FOGENABLE] != 0 && !g_cfg.no_fog && !g_st.pixel_shader;
-        if (fog && render_state()[XRS_FOGTABLEMODE] == D3DFOG_LINEAR) {
-            // The Stage 3 skylight cutscene sets fog 5 -> -1.2 with the 0xff6e3c1e colour. D3D9's fixed-function
-            // linear fog on Intel saturates every vertex to the fog colour and the whole scene turns flat brown. The
-            // NV2A keeps the formula, (end - d) / (end - start): fog only nearer than 5, rising towards the camera,
-            // which D3D9's linear fog cannot express (its factor always falls with distance); it stays off here.
-            // start = end is the library's slope of 8192 (FUN_003D0EC0), sent as a start 1/8192 before the end.
-            float fs = 0, fe = 0;
-            memcpy(&fs, &render_state()[XRS_FOGSTART], 4);
-            memcpy(&fe, &render_state()[XRS_FOGEND], 4);
-            if (fe < fs) fog = 0;
-        }
-        if (!g_rs_valid[XRS_FOGENABLE] || fog != fog_sent) {
-            set(D3DRS_FOGENABLE, fog);
-            fog_sent = fog;
-            g_rs_valid[XRS_FOGENABLE] = true;
-        }
-    }
+    // D3DRS_FOGENABLE itself is sent by begin_draw once the vertex path is chosen: off where the generated stage shader
+    // applies the fog (sent here and switched off there, fogged scenes sent it twice a draw).
     auto fog_start = [&]() { // the start sent: 1/8192 before the end when they are equal (see above)
         float fs, fe;
         memcpy(&fs, &render_state()[XRS_FOGSTART], 4);
@@ -422,15 +452,7 @@ void apply_render_states(IDirect3DDevice9 *d)
     // white line (the user, 2026-10-22; with TRUE the light and dark along them came back). cfg:localviewer:2 sends the
     // game's value as before, 0 / 1 force it.
     {
-        DWORD v = render_state()[XRS_LOCALVIEWER] != 0;
-        if (g_cfg.force_localviewer == 0 || g_cfg.force_localviewer == 1) {
-            v = (DWORD)g_cfg.force_localviewer;
-        } else if (g_cfg.force_localviewer != 2) {
-            for (int s = 0; s < 4; s++) {
-                const uint32_t *ts = texture_state(s);
-                if (ts[12] != 1 && (ts[28] & 0xFFFF0000) == 0x30000) v = TRUE; // an enabled stage: reflection vector
-            }
-        }
+        DWORD v = host_localviewer();
         static DWORD sent;
         if (!g_rs_valid[XRS_LOCALVIEWER] || sent != v) {
             set(D3DRS_LOCALVIEWER, v);
@@ -490,7 +512,7 @@ template <typename F> void ts_on_change(int s, int t, F apply)
 
 // A 1x1 opaque white texture for fixed-function stages that use D3DTA_TEXTURE without a texture bound: that reads
 // as (1,1,1,1) on the Xbox (Ninja Gaiden Black's nunchaku sweep modulates its alpha by an unset stage 1 and is
-// drawn alpha-tested; D3D9 samples an unbound stage as (0,0,0,0) and the sweep vanished, docs/04 §3.9).
+// drawn alpha-tested; D3D9 samples an unbound stage as (0,0,0,0) and the sweep vanished, docs/04 搂3.9).
 host3d::CpuTexture g_white;
 
 IDirect3DTexture9 *white_texture()
@@ -724,6 +746,23 @@ struct DrawTimer {
     }
 };
 
+// --ffp-vs-check: this draw goes through the generated fixed-function vertex shader and is to be compared with the
+// host's pipeline (begin_draw decides; ffp_vs_check_draw, below begin_draw, does it)
+bool g_ffvs_check_this;
+void ffp_vs_check_draw(void (*issue)(void *), void *arg);
+uint64_t draw_state_sig(D3DPRIMITIVETYPE prim); // below begin_draw
+
+// The host draw call: its draw state recorded when new (d3d/drawwarm.cpp), timed, and with --ffp-vs-check drawn both
+// ways first
+template <typename F> void issue_draw(D3DPRIMITIVETYPE prim, F &&f)
+{
+    IDirect3DDevice9 *d = host3d::dev();
+    if (g_cfg.draw_warm) drawwarm_note(d, prim, draw_state_sig(prim));
+    if (g_ffvs_check_this) ffp_vs_check_draw([](void *p) { (*(F *)p)(); }, &f);
+    DrawTimer draw_timer;
+    f();
+}
+
 // Indexed draws through dynamic ring buffers instead of DrawIndexedPrimitiveUP: D3D9On12 (the Iris Xe here) makes
 // an allocation and a copy for every UP call, ~6 ms of a 13 ms chapter-1 frame in r121. The vertices and indices are
 // appended with D3DLOCK_NOOVERWRITE. A full set is not renamed with D3DLOCK_DISCARD any more: kRingSets sets are used
@@ -832,8 +871,9 @@ bool ring_draw(D3DPRIMITIVETYPE type, uint32_t nverts, uint32_t prims, const uin
     g_ring_ipos = ioff + ibytes;
     d->SetStreamSource(0, g_ring_vb, 0, stride);
     d->SetIndices(g_ring_ib);
-    DrawTimer draw_timer;
-    return SUCCEEDED(d->DrawIndexedPrimitive(type, (INT)(voff / stride), 0, nverts, ioff / 2, prims));
+    HRESULT hr = E_FAIL;
+    issue_draw(type, [&] { hr = d->DrawIndexedPrimitive(type, (INT)(voff / stride), 0, nverts, ioff / 2, prims); });
+    return SUCCEEDED(hr);
 }
 
 const uint16_t *quad_indices(uint32_t quads)
@@ -1167,6 +1207,7 @@ namespace {
 void upload_vs_constants(IDirect3DDevice9 *d)
 {
     perf::DetScope ds(perf::kDetConstants);
+    ffp_vs_forget_constants(); // the generated fixed-function shader's registers are overwritten
     d->SetVertexShaderConstantF(0, &g_st.vs_constants[0][0], 192);
     float k[36] = {};
     host_viewport_transform(k, k + 4);
@@ -1219,7 +1260,7 @@ void apply_fvf_texture_scale(IDirect3DDevice9 *d, bool rhw)
             // NV2A, so the texel-to-0..1 scale has to follow the game's matrix: uv' = (uv * M) * S. Ninja Gaiden
             // Black keeps an identity TEXTURE0 transform set while it copies the back buffer (720x480 linear) into
             // its menu / dialog snapshot with texel coordinates 0..720 x 0..480; without the scale the whole quad
-            // sampled the clamped edge, one flat colour (docs/04 §3.7).
+            // sampled the clamped edge, one flat colour (docs/04 搂3.7).
             if (!scaled) {
                 // The game's matrix as it is: a previous draw may have left M * S or the texel scale on the host
                 // (docs/07 #1). Counted when the host held something else (--api-count log).
@@ -1830,11 +1871,71 @@ void forget_sent_state()
     memset(g_ts_valid, 0, sizeof g_ts_valid);
     for (IDirect3DBaseTexture9 *&t : g_tex_sent) t = nullptr; // Reset unbinds every texture
     g_fog_table_sent = ~0u;
+    ffp_vs_forget_constants();
 }
 
 namespace {
 
 int g_ms_aa_sent = -1; // D3DRS_MULTISAMPLEANTIALIAS as last sent (-1: unknown, a new device)
+
+FfpVsState g_ffp_vs_state; // the last generated-shader draw's state (its constants are uploaded from it)
+
+// The generated vertex shader for this fixed-function draw (d3d/ffp_vs.cpp), from the state the host's pipeline would
+// be given (what apply_render_states, apply_texture_stages, apply_fvf_texture_scale and begin_draw sent), or null:
+// the host's pipeline draws it. Sets g_ffp_fog when the stage shader is to apply the fog.
+IDirect3DVertexShader9 *ffp_vs_for_draw(IDirect3DDevice9 *d, const DrawCtx &ctx, uint32_t xprim, const uint32_t tci_sent[4],
+                                        FfpVsState &st)
+{
+    if (!g_cfg.ffp_vs) return ffp_vs_not("off"), nullptr;
+    // Lines of these may be drawn as screen-space quads instead (draw_wide_lines), with the host's pipeline
+    if ((xprim == XPT_LINELIST || xprim == XPT_LINESTRIP || xprim == XPT_LINELOOP) && ctx.fvf == (D3DFVF_XYZ | D3DFVF_DIFFUSE))
+        return ffp_vs_not("lines"), nullptr;
+    const uint32_t *rs = render_state();
+    int fog = 0;
+    if (host_fog_on()) {
+        uint32_t mode = rs[XRS_FOGTABLEMODE];
+        const D3DMATRIX &P = g_st.transforms[1];
+        if (g_cfg.host_ffp) return ffp_vs_not("fog with the host's pixel pipeline"), nullptr;
+        if (mode < D3DFOG_EXP || mode > D3DFOG_LINEAR) return ffp_vs_not("vertex fog"), nullptr;
+        // Table fog on the eye distance (w): what Direct3D takes with a perspective projection (W-friendly)
+        if (P._14 != 0 || P._24 != 0 || P._34 == 0 || P._44 != 0) return ffp_vs_not("fog without a perspective projection"), nullptr;
+        fog = (int)mode;
+    }
+    st.fvf = g_sprite_tc ? (ctx.fvf | D3DFVF_TEX1) : ctx.fvf; // with_sprite_tc appends a 2D set
+    st.lighting = rs[XRS_LIGHTING] != 0;
+    st.specular = rs[XRS_SPECULARENABLE] != 0 && !g_cfg.no_specular;
+    st.localviewer = host_localviewer() != 0;
+    st.colorvertex = rs[XRS_COLORVERTEX] != 0;
+    st.msrc[0] = rs[XRS_DIFFUSEMATERIALSOURCE];
+    st.msrc[1] = rs[XRS_SPECULARMATERIALSOURCE];
+    st.msrc[2] = rs[XRS_AMBIENTMATERIALSOURCE];
+    st.msrc[3] = rs[XRS_EMISSIVEMATERIALSOURCE];
+    st.ambient = rs[XRS_AMBIENT];
+    st.normalize = rs[XRS_NORMALIZENORMALS] != 0;
+    uint32_t vb = rs[XRS_VERTEXBLEND]; // as apply_render_states sends it
+    st.blend = vb == 0 ? 0 : vb <= 2 ? 1 : vb <= 4 ? 2 : 3;
+    for (int s = 0; s < 4; s++) {
+        st.tci[s] = tci_sent[s];
+        st.ttf[s] = g_ttff_valid[s] ? g_ttff_sent[s] : texture_state(s)[21];
+        st.texm[s] = g_texm_valid[s] ? &g_texm_sent[s] : &g_st.transforms[2 + s];
+    }
+    st.points = xprim == XPT_POINTLIST;
+    if (st.points) { // as apply_render_states sent them
+        st.point_scale = g_point_sent[1] != 0;
+        st.point_size = as_float(g_point_sent[2]);
+        st.point_min = as_float(g_point_sent[3]);
+        st.point_max = as_float(g_point_sent[4]);
+        st.point_a = as_float(g_point_sent[5]);
+        st.point_b = as_float(g_point_sent[6]);
+        st.point_c = as_float(g_point_sent[7]);
+        D3DVIEWPORT9 vp = {};
+        d->GetViewport(&vp);
+        st.viewport_height = (float)vp.Height;
+    }
+    IDirect3DVertexShader9 *vs = ffp_vertex_shader(st);
+    if (vs) g_ffp_fog = fog;
+    return vs;
+}
 
 bool begin_draw(DrawCtx &ctx, uint32_t xprim)
 {
@@ -1843,6 +1944,7 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
     rt_cpu_upload(); // render targets the CPU wrote into since the last draw (the NG2004 downloader; nothing otherwise)
     g_draw_serial++;
     g_sprite_tc = false;
+    g_ffvs_check_this = false;
     g_ffp_quad_stages = g_ffp_quad_weighted = 0; // a 2D quad's stage shader variant is picked by scale_rhw (QuadSnap)
     if (g_cfg.skip_texmodes && g_st.pixel_shader && render_state()[XRS_PSTEXTUREMODES] == g_cfg.skip_texmodes) return false;
     // Stack scans stop at the thread's stack base: a draw near the top of a game thread's stack read past it and
@@ -1870,7 +1972,7 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
     note_tap_filter(g_rt_stage);
     host3d::begin_scene();
     // Fixed-function draws get a generated stage shader too (d3d/ffp_ps.cpp); the host's own fixed-function pixel
-    // pipeline (D3D9On12) dropped alpha modulation on pass-through stages (docs/04 §3.9). --host-ffp keeps it.
+    // pipeline (D3D9On12) dropped alpha modulation on pass-through stages (docs/04 搂3.9). --host-ffp keeps it.
     uint32_t vsh = g_st.vertex_shader;
     bool fvf_vs = vs_is_fvf(vsh);
     // Point sprites (points drawn with POINTSPRITEENABLE; other primitives with it on are drawn as before): the stage
@@ -1879,7 +1981,7 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
     bool sprite_points = render_state()[XRS_POINTSPRITEENABLE] && xprim == XPT_POINTLIST;
     g_ffp_sprite_tc = sprite_points;
     g_sprite_tc = sprite_points && fvf_vs && vsh && !((vsh >> 8) & 0xF);
-    if (sprite_points && !fvf_vs) { // not seen in Ninja Gaiden Black so far: noted, to know if AMD needs more (docs/04 §3.30)
+    if (sprite_points && !fvf_vs) { // not seen in Ninja Gaiden Black so far: noted, to know if AMD needs more (docs/04 搂3.30)
         static bool noted;
         if (!noted) {
             noted = true;
@@ -1888,26 +1990,12 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
                  game_callers((const uint32_t *)_AddressOfReturnAddress()).c_str());
         }
     }
-    IDirect3DPixelShader9 *hps = ps ? ps_host_shader()
-                                 : g_cfg.host_ffp ? nullptr
-                                 : ffp_pixel_shader(!fvf_vs || (vsh & D3DFVF_DIFFUSE) != 0, !fvf_vs || (vsh & D3DFVF_SPECULAR) != 0,
-                                                    fvf_vs && (vsh & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
-    set_ps(d, hps);
-    if (ps && render_state()[XRS_FOGENABLE] && psh_reads_fog()) {
-        // A pixel shader that reads its FOG register with fog on: FOG.a is the fog factor a translated vertex program
-        // passes in TEXCOORD4 (1.1.8-t, the underwater tint); with fixed-function vertices it is 1. Noted once or so.
-        static int noted;
-        if (noted++ < 4) logf("[draw] frame %u: pixel shader 0x%x reads FOG with fog enabled (%s)", g_frame_count.load(),
-                              g_st.pixel_shader, fvf_vs ? "fixed-function vertices: fog factor 1" : "fog factor from the vertex program");
-        if (noted == 1 && g_cfg.trace_fog_ps && !g_cfg.debug_frame) g_cfg.debug_frame = g_frame_count + 1; // --trace-fog-ps
-    }
-    if (ps && hps) upload_ps_constants(d, !fvf_vs);
-    else if (ps) apply_pixel_shader_fallback(d);
-    else if (hps) upload_ffp_constants(d);
+    // The vertex path first: the stage shader's fog depends on it
     uint32_t h = g_st.vertex_shader;
+    uint32_t tci_sent[4]; // D3DTSS_TEXCOORDINDEX as the host has it for this draw
+    for (int s = 0; s < 4; s++) tci_sent[s] = texture_state(s)[28];
     if (vs_is_fvf(h)) {
         if (h) {
-            set_vs(d, nullptr);
             set_fvf(d, h);
             apply_fvf_texture_scale(d, (h & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
             if (g_sprite_tc) {
@@ -1915,7 +2003,7 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
                 // and every stage passes it through, for the host to replace with the sprite's coordinates.
                 g_sprite_fvf = h;
                 for (int s = 0; s < 4; s++) {
-                    d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_PASSTHRU | 0);
+                    d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, tci_sent[s] = D3DTSS_TCI_PASSTHRU | 0);
                     g_ts_valid[s][28] = false; // the game's index is sent again on the next draw
                 }
             } else if (render_state()[XRS_POINTSPRITEENABLE] && !((h >> 8) & 0xF)) {
@@ -1923,7 +2011,7 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
                 // generated coordinate for the stages with a texture
                 for (int s = 0; s < 4; s++) {
                     if (!g_st.textures[s]) continue;
-                    d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEPOSITION | s);
+                    d->SetTextureStageState(s, D3DTSS_TEXCOORDINDEX, tci_sent[s] = D3DTSS_TCI_CAMERASPACEPOSITION | s);
                     g_ts_valid[s][28] = false;
                 }
             }
@@ -1933,7 +2021,6 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
     } else if (VertexShader *vs = vs_from_handle(h)) {
         if (!vs->program) { // fixed-function vertices through a declaration (decl_fvf)
             if (uint32_t f = decl_fvf(vs)) {
-                set_vs(d, nullptr);
                 set_fvf(d, f);
                 apply_fvf_texture_scale(d, false);
                 ctx.path = Path::Fvf;
@@ -1961,6 +2048,40 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
             synced_once = 1;
         }
     }
+    // Fixed-function vertices with 3D positions: the generated vertex shader (d3d/ffp_vs.cpp) where it does what the
+    // state asks, else the host's pipeline (null)
+    IDirect3DVertexShader9 *ffvs = nullptr;
+    FfpVsState &fst = g_ffp_vs_state;
+    g_ffp_fog = 0;
+    if (ctx.path == Path::Fvf) {
+        if ((ctx.fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW) {
+            ffvs = ffp_vs_for_draw(d, ctx, xprim, tci_sent, fst);
+            ffp_vs_count(ffvs != nullptr);
+        }
+        set_vs(d, ffvs);
+        if (!ffvs) flush_host_transforms(d); // the host's pipeline transforms these (the matrices are sent only for it)
+    }
+    IDirect3DPixelShader9 *hps = ps ? ps_host_shader()
+                                 : g_cfg.host_ffp ? nullptr
+                                 : ffp_pixel_shader(!fvf_vs || (vsh & D3DFVF_DIFFUSE) != 0, !fvf_vs || (vsh & D3DFVF_SPECULAR) != 0,
+                                                    fvf_vs && (vsh & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW);
+    set_ps(d, hps);
+    if (ffvs) {
+        upload_ffp_vs_constants(d, fst);
+        if (g_ffp_fog) upload_ffp_fog_constants(d, 1.0f / g_st.transforms[1]._34);
+    }
+    send_fog_enable(d, g_ffp_fog ? FALSE : host_fog_on()); // with g_ffp_fog the stage shader applies it
+    if (ps && render_state()[XRS_FOGENABLE] && psh_reads_fog()) {
+        // A pixel shader that reads its FOG register with fog on: FOG.a is the fog factor a translated vertex program
+        // passes in TEXCOORD4 (1.1.8-t, the underwater tint); with fixed-function vertices it is 1. Noted once or so.
+        static int noted;
+        if (noted++ < 4) logf("[draw] frame %u: pixel shader 0x%x reads FOG with fog enabled (%s)", g_frame_count.load(),
+                              g_st.pixel_shader, fvf_vs ? "fixed-function vertices: fog factor 1" : "fog factor from the vertex program");
+        if (noted == 1 && g_cfg.trace_fog_ps && !g_cfg.debug_frame) g_cfg.debug_frame = g_frame_count + 1; // --trace-fog-ps
+    }
+    if (ps && hps) upload_ps_constants(d, !fvf_vs);
+    else if (ps) apply_pixel_shader_fallback(d);
+    else if (hps) upload_ffp_constants(d);
     // Vertex shaders compute the fog factor themselves (oFog -> table function): D3D9 vertex fog.
     DWORD fog_table = ctx.path == Path::Prog ? D3DFOG_NONE : render_state()[XRS_FOGTABLEMODE];
     if (fog_table != g_fog_table_sent) {
@@ -1981,8 +2102,263 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
     }
     ms_note_draw();
     g_st.draws++;
+    // --ffp-vs-check N: up to N draws, each combination of generated vertex shader, pixel shader and fog at most
+    // twice, drawn both ways (ffp_vs_check_draw)
+    if (ffvs && g_cfg.ffp_vs_check) {
+        static std::map<std::string, int> seen;
+        static unsigned picked;
+        char k[64];
+        snprintf(k, sizeof k, "%p %p %d", (void *)ffvs, (void *)hps, g_ffp_fog);
+        if (picked < g_cfg.ffp_vs_check && seen[k]++ < (fst.blend ? 40 : 2)) { // blended: their positions differ most
+            g_ffvs_check_this = true;
+            picked++;
+        }
+    }
     return true;
 }
+
+// What a draw's state comes from, hashed (drawwarm_note reads the host's state exactly when this is new): the shaders and
+// vertex input sent, the primitive, the game's pipeline render states, the fog, depth bias and multisampling sent, each
+// stage's texture format, the target and depth buffer, and with fixed-function vertices the coordinate sources.
+// It runs for every draw: hashed a 32-bit word at a time in two independent FNV-1a lanes (this is a 32-bit program:
+// a 64-bit multiply-xorshift per word was ~750 TSC ticks a draw, measured), the two lanes making the 64-bit result.
+uint64_t draw_state_sig(D3DPRIMITIVETYPE prim)
+{
+    static const uint16_t kGame[] = {XRS_ZENABLE, XRS_ZWRITEENABLE, XRS_ZFUNC, XRS_ALPHATESTENABLE, XRS_ALPHAFUNC, XRS_ALPHABLENDENABLE,
+                                     XRS_SRCBLEND, XRS_DESTBLEND, XRS_BLENDOP, XRS_COLORWRITEENABLE, XRS_CULLMODE, XRS_FILLMODE,
+                                     XRS_SHADEMODE, XRS_STENCILENABLE, XRS_STENCILFUNC, XRS_STENCILFAIL, XRS_STENCILZFAIL,
+                                     XRS_STENCILPASS, XRS_STENCILMASK, XRS_STENCILWRITEMASK, XRS_FOGTABLEMODE, XRS_LIGHTING,
+                                     XRS_SPECULARENABLE, XRS_VERTEXBLEND, XRS_POINTSPRITEENABLE, XRS_POINTSCALEENABLE,
+                                     XRS_COLORVERTEX, XRS_LOCALVIEWER, XRS_NORMALIZENORMALS};
+    const uint32_t *rs = render_state();
+    // each lane takes both words (the other one rotated): a change to any word changes both lanes (a 64-bit signature,
+    // not two 32-bit halves of the inputs). ~340 TSC ticks a draw on the i5-12500H (2026-11-15).
+    uint32_t a = 0x811C9DC5u, c = 0x9E3779B9u;
+    auto mix = [&](uint32_t x, uint32_t y) {
+        a = (a ^ x ^ _rotl(y, 16)) * 0x01000193u;
+        c = (c ^ y ^ _rotl(x, 16)) * 0x01000193u;
+    };
+    mix((uint32_t)(uintptr_t)g_vs_sent, (uint32_t)(uintptr_t)g_ps_sent);
+    mix((uint32_t)(uintptr_t)g_decl_sent, g_fvf_sent);
+    mix((uint32_t)prim, (uint32_t)g_fog_sent << 8 | (uint32_t)(g_ms_aa_sent + 1));
+    constexpr int kN = sizeof kGame / sizeof kGame[0];
+    for (int i = 0; i + 1 < kN; i += 2) mix(rs[kGame[i]], rs[kGame[i + 1]]);
+    if (kN & 1) mix(rs[kGame[kN - 1]], 0);
+    uint32_t b, s;
+    memcpy(&b, &g_bias_sent, 4);
+    memcpy(&s, &g_slope_sent, 4);
+    mix(b, s);
+    for (int st = 0; st < 4; st++) {
+        Resource *r = g_st.textures[st];
+        uint32_t f = r && resource_type(r) == RTYPE_TEXTURE
+                         ? ((((PixelContainer *)r)->Format >> FMT_FORMAT_SHIFT) & 0xFF) | (((PixelContainer *)r)->Format & FMT_CUBEMAP ? 0x100 : 0)
+                         : r ? 0x200 : 0;
+        mix(f, (g_tex_sent[st] ? 1u : 0u) | (g_rt_stage[st] ? 2u : 0u));
+        // the coordinate index and transform flags as the host has them (the draw may have set others than the game's)
+        if (!g_vs_sent) mix(g_ts_sent[st][28] ^ (g_ts_valid[st][28] ? 0 : 0x80000000u), g_ts_sent[st][21] ^ (g_ts_valid[st][21] ? 0 : 0x80000000u));
+    }
+    if (!g_vs_sent && rs[XRS_LIGHTING]) mix(drawwarm_light_sig(), 0x4C); // the host's pipeline lighting: its lights' shapes
+    if (!g_vs_sent) { // the host pipeline's matrices: which elements are 0 and which 1 (drawwarm's record), 4 at a time
+        const D3DMATRIX *m[7] = {&g_st.transforms[0], &g_st.transforms[1], &g_st.transforms[6], nullptr, nullptr, nullptr, nullptr};
+        for (int s = 0; s < 4; s++) m[3 + s] = g_texm_valid[s] ? &g_texm_sent[s] : &g_st.transforms[2 + s];
+        const __m128 zero = _mm_setzero_ps(), one = _mm_set1_ps(1.0f);
+        for (const D3DMATRIX *x : m) {
+            const float *f = &x->_11;
+            uint32_t z = 0, o = 0;
+            for (int r = 0; r < 4; r++) {
+                __m128 v = _mm_loadu_ps(f + 4 * r);
+                z |= (uint32_t)_mm_movemask_ps(_mm_cmpeq_ps(v, zero)) << (4 * r);
+                o |= (uint32_t)_mm_movemask_ps(_mm_cmpeq_ps(v, one)) << (4 * r);
+            }
+            mix(z, o);
+        }
+    }
+    mix((uint32_t)(uintptr_t)g_st.render_target, (uint32_t)(uintptr_t)g_st.depth_stencil);
+    return (uint64_t)a << 32 | c;
+}
+
+// ---- --ffp-vs-check ----
+// The draw is made three times from the same picture: by the generated vertex shader and by the host's fixed-function
+// pipeline (as before the generated shader; with its own fog when the stage shader had it), each into a copy, depth and
+// stencil not written; the copies are compared pixel by pixel and the picture put back for the real draw. Colour
+// targets of 8-bit BGRA only (not multisampled).
+struct CheckRt {
+    IDirect3DTexture9 *t = nullptr;
+    IDirect3DSurface9 *s = nullptr, *sys = nullptr;
+};
+CheckRt g_chk[3]; // before, generated, host
+UINT g_chk_w, g_chk_h;
+D3DFORMAT g_chk_f;
+uint32_t g_chk_done, g_chk_empty, g_chk_same, g_chk_close, g_chk_far, g_chk_skipped;
+unsigned long long g_chk_pixels, g_chk_differ;
+unsigned long long g_chk_blend[2][4]; // unblended / blended: draws that drew, pixels, differing, by more than 2
+
+void check_release()
+{
+    for (CheckRt &c : g_chk) {
+        if (c.sys) c.sys->Release();
+        if (c.s) c.s->Release();
+        if (c.t) c.t->Release();
+        c = CheckRt{};
+    }
+}
+
+std::string ffp_vs_state_text(const FfpVsState &st, IDirect3DVertexShader9 *vs, IDirect3DPixelShader9 *ps)
+{
+    const D3DLIGHT9 *l[8];
+    int n = st.lighting ? ffp_enabled_lights(l, 8) : 0;
+    std::string types;
+    for (int i = 0; i < n && i < 8; i++) types += "0123"[l[i]->Type & 3];
+    char b[400];
+    snprintf(b, sizeof b,
+             "vs %p ps %p (game ps 0x%x) fvf 0x%x lighting %d lights %s spec %d localviewer %d colorvertex %d msrc %u%u%u%u normalize %d "
+             "blend %u fog %d tci %x %x %x %x ttf %x %x %x %x points %d",
+             (void *)vs, (void *)ps, g_st.pixel_shader, st.fvf, st.lighting, types.empty() ? "-" : types.c_str(), st.specular,
+             st.localviewer, st.colorvertex, st.msrc[0], st.msrc[1], st.msrc[2], st.msrc[3], st.normalize, st.blend, g_ffp_fog,
+             st.tci[0], st.tci[1], st.tci[2], st.tci[3], st.ttf[0], st.ttf[1], st.ttf[2], st.ttf[3], st.points);
+    return b;
+}
+
+void ffp_vs_check_draw(void (*issue)(void *), void *arg)
+{
+    IDirect3DDevice9 *d = host3d::dev();
+    IDirect3DSurface9 *rt = nullptr;
+    if (FAILED(d->GetRenderTarget(0, &rt)) || !rt) return;
+    D3DSURFACE_DESC ds = {};
+    rt->GetDesc(&ds);
+    if (ds.MultiSampleType != D3DMULTISAMPLE_NONE || (ds.Format != D3DFMT_A8R8G8B8 && ds.Format != D3DFMT_X8R8G8B8)) {
+        g_chk_skipped++;
+        rt->Release();
+        return;
+    }
+    if (!g_chk[0].s || g_chk_w != ds.Width || g_chk_h != ds.Height || g_chk_f != ds.Format) {
+        check_release();
+        g_chk_w = ds.Width, g_chk_h = ds.Height, g_chk_f = ds.Format;
+        for (CheckRt &c : g_chk) {
+            if (FAILED(d->CreateTexture(ds.Width, ds.Height, 1, D3DUSAGE_RENDERTARGET, ds.Format, D3DPOOL_DEFAULT, &c.t, nullptr)) ||
+                FAILED(c.t->GetSurfaceLevel(0, &c.s)) ||
+                FAILED(d->CreateOffscreenPlainSurface(ds.Width, ds.Height, ds.Format, D3DPOOL_SYSTEMMEM, &c.sys, nullptr))) {
+                logf("[ffpvs-check] could not make the %ux%u copies", ds.Width, ds.Height);
+                check_release();
+                rt->Release();
+                g_cfg.ffp_vs_check = 0;
+                return;
+            }
+        }
+    }
+    IDirect3DVertexShader9 *vs = g_vs_sent;
+    IDirect3DPixelShader9 *ps = g_ps_sent;
+    const int fog = g_ffp_fog;
+    DWORD zw = 0, swm = 0, fe = 0;
+    d->GetRenderState(D3DRS_ZWRITEENABLE, &zw);
+    d->GetRenderState(D3DRS_STENCILWRITEMASK, &swm);
+    d->GetRenderState(D3DRS_FOGENABLE, &fe);
+    host3d::end_scene();
+    d->StretchRect(rt, nullptr, g_chk[0].s, nullptr, D3DTEXF_NONE);
+    d->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+    d->SetRenderState(D3DRS_STENCILWRITEMASK, 0);
+    host3d::begin_scene();
+    issue(arg); // the generated shader
+    host3d::end_scene();
+    d->StretchRect(rt, nullptr, g_chk[1].s, nullptr, D3DTEXF_NONE);
+    d->StretchRect(g_chk[0].s, nullptr, rt, nullptr, D3DTEXF_NONE);
+    d->SetVertexShader(nullptr); // the host's pipeline, with the host's fog where the stage shader had it
+    flush_host_transforms(d);
+    IDirect3DPixelShader9 *host_ps = ps;
+    if (fog) {
+        g_ffp_fog = 0;
+        host_ps = ffp_reselect();
+        d->SetPixelShader(host_ps);
+        d->SetRenderState(D3DRS_FOGENABLE, TRUE);
+    }
+    host3d::begin_scene();
+    issue(arg);
+    host3d::end_scene();
+    d->StretchRect(rt, nullptr, g_chk[2].s, nullptr, D3DTEXF_NONE);
+    d->StretchRect(g_chk[0].s, nullptr, rt, nullptr, D3DTEXF_NONE);
+    d->SetVertexShader(vs);
+    if (fog) {
+        g_ffp_fog = fog;
+        IDirect3DPixelShader9 *again = ffp_reselect();
+        d->SetPixelShader(again);
+        if (again != ps) logf("[ffpvs-check] the stage shader picked again differs (%p, %p)", (void *)again, (void *)ps);
+    }
+    d->SetRenderState(D3DRS_FOGENABLE, fe);
+    d->SetRenderState(D3DRS_ZWRITEENABLE, zw);
+    d->SetRenderState(D3DRS_STENCILWRITEMASK, swm);
+    rt->Release();
+    // Compare
+    D3DLOCKED_RECT lr[3];
+    bool ok = true;
+    for (int i = 0; i < 3; i++) ok = ok && SUCCEEDED(d->GetRenderTargetData(g_chk[i].s, g_chk[i].sys));
+    for (int i = 0; i < 3 && ok; i++) ok = SUCCEEDED(g_chk[i].sys->LockRect(&lr[i], nullptr, D3DLOCK_READONLY));
+    host3d::begin_scene();
+    if (!ok) {
+        g_chk_skipped++;
+        return;
+    }
+    uint32_t touched_gen = 0, touched_host = 0, differ = 0, over2 = 0, over16 = 0, maxd = 0, mx = 0, my = 0, gv = 0, hv = 0;
+    const uint32_t mask = ds.Format == D3DFMT_X8R8G8B8 ? 0x00FFFFFFu : 0xFFFFFFFFu;
+    for (UINT y = 0; y < ds.Height; y++) {
+        const uint32_t *a = (const uint32_t *)((const uint8_t *)lr[0].pBits + y * lr[0].Pitch);
+        const uint32_t *g = (const uint32_t *)((const uint8_t *)lr[1].pBits + y * lr[1].Pitch);
+        const uint32_t *h = (const uint32_t *)((const uint8_t *)lr[2].pBits + y * lr[2].Pitch);
+        for (UINT x = 0; x < ds.Width; x++) {
+            uint32_t av = a[x] & mask, gx = g[x] & mask, hx = h[x] & mask;
+            touched_gen += gx != av;
+            touched_host += hx != av;
+            if (gx == hx) continue;
+            differ++;
+            uint32_t m = 0;
+            for (int c = 0; c < 32; c += 8) {
+                int dd = abs((int)((gx >> c) & 255) - (int)((hx >> c) & 255));
+                if ((uint32_t)dd > m) m = (uint32_t)dd;
+            }
+            over2 += m > 2;
+            over16 += m > 16;
+            if (m > maxd) maxd = m, mx = x, my = y, gv = gx, hv = hx;
+        }
+    }
+    for (int i = 0; i < 3; i++) g_chk[i].sys->UnlockRect();
+    g_chk_done++;
+    // Only draws that changed the picture tell anything (a hidden or colour-masked draw changes nothing either way)
+    if (!touched_gen && !touched_host) g_chk_empty++;
+    else if (!differ) g_chk_same++;
+    else if (!over2) g_chk_close++;
+    else g_chk_far++;
+    g_chk_pixels += touched_host;
+    g_chk_differ += differ;
+    {
+        unsigned long long *b = g_chk_blend[g_ffp_vs_state.blend ? 1 : 0];
+        b[0] += touched_gen || touched_host;
+        b[1] += touched_host;
+        b[2] += differ;
+        b[3] += over2;
+    }
+    static int logged;
+    if ((differ && logged < 600) || g_chk_done <= 10) {
+        logged += differ != 0;
+        DWORD cw = 0, zf = 0, ze = 0, ab = 0, at = 0;
+        d->GetRenderState(D3DRS_COLORWRITEENABLE, &cw);
+        d->GetRenderState(D3DRS_ZFUNC, &zf);
+        d->GetRenderState(D3DRS_ZENABLE, &ze);
+        d->GetRenderState(D3DRS_ALPHABLENDENABLE, &ab);
+        d->GetRenderState(D3DRS_ALPHATESTENABLE, &at);
+        logf("[ffpvs-check] frame %u draw %u: %u / %u pixels drawn (generated / host), %u differ (%u by more than 2, %u by more than 16, "
+             "largest %u at %u,%u: %08x / %08x); target %ux%u colorwrite %lx z %lu/%lu blend %lu alphatest %lu; %s",
+             g_frame_count.load(), g_draw_serial, touched_gen, touched_host, differ, over2, over16, maxd, mx, my, gv, hv, ds.Width,
+             ds.Height, cw, ze, zf, ab, at, ffp_vs_state_text(g_ffp_vs_state, vs, ps).c_str());
+    }
+    if (g_chk_done % 100 == 0)
+        logf("[ffpvs-check] %u draws compared: %u changed nothing; of the rest %u the same, %u within 2 levels, %u differing more; "
+             "%llu pixels drawn, %llu differ (%u not comparable)",
+             g_chk_done, g_chk_empty, g_chk_same, g_chk_close, g_chk_far, g_chk_pixels, g_chk_differ, g_chk_skipped);
+    if (g_chk_done % 100 == 0)
+        logf("[ffpvs-check] unblended: %llu draws, %llu pixels, %llu differ, %llu by more than 2; blended: %llu draws, %llu pixels, %llu differ, "
+             "%llu by more than 2", g_chk_blend[0][0], g_chk_blend[0][1], g_chk_blend[0][2], g_chk_blend[0][3], g_chk_blend[1][0],
+             g_chk_blend[1][1], g_chk_blend[1][2], g_chk_blend[1][3]);
+}
+
 
 // Set by scale_rhw for a picture squeezed to 16:9 that would show past it: the host rectangle the next draw is
 // clipped to; empty otherwise
@@ -2021,11 +2397,12 @@ void draw_up(uint32_t xprim, uint32_t verts, const void *data, uint32_t stride)
     if (g_sprite_tc) data = with_sprite_tc(data, verts, stride);
     perf::add_draw(verts, verts * stride);
     IDirect3DDevice9 *d = host3d::dev();
-    DrawTimer draw_timer;
-    if (p.quads)
-        d->DrawIndexedPrimitiveUP(p.type, 0, verts, p.count, quad_indices(verts / 4), D3DFMT_INDEX16, data, stride);
-    else
-        d->DrawPrimitiveUP(p.type, p.count, data, stride);
+    if (p.quads) {
+        const uint16_t *qi = quad_indices(verts / 4);
+        issue_draw(p.type, [&] { d->DrawIndexedPrimitiveUP(p.type, 0, verts, p.count, qi, D3DFMT_INDEX16, data, stride); });
+    } else {
+        issue_draw(p.type, [&] { d->DrawPrimitiveUP(p.type, p.count, data, stride); });
+    }
 }
 
 // Every page of [p, p+n) is committed and readable. Direct3D 9 copies the vertices of a DrawIndexedPrimitiveUP
@@ -2124,8 +2501,7 @@ void draw_indexed_up(uint32_t xprim, uint32_t nidx, const uint16_t *idx, const v
     }
     uint32_t host_nidx = p.quads ? p.count * 3 : nidx;
     if (g_cfg.draw_ring && ring_draw(p.type, mx - mn + 1, p.count, idx, host_nidx, src, stride)) return;
-    DrawTimer draw_timer;
-    host3d::dev()->DrawIndexedPrimitiveUP(p.type, 0, mx - mn + 1, p.count, idx, D3DFMT_INDEX16, src, stride);
+    issue_draw(p.type, [&] { host3d::dev()->DrawIndexedPrimitiveUP(p.type, 0, mx - mn + 1, p.count, idx, D3DFMT_INDEX16, src, stride); });
 }
 
 const uint8_t *stream_data(uint32_t stream)
@@ -2146,7 +2522,7 @@ const uint8_t *stream_data(uint32_t stream)
 // Ninja Gaiden 2004's HUD emblem onto its texture's transparent top row near the chapter-3 airship (the user,
 // 2026-11-02; run/r827). cfg:rhwtexmat:1 applies the game's matrix as before (comparison). Ninja Gaiden Black copies the back buffer
 // (720x480 linear) into its 512x512 snapshot and the depth buffer into its 256x256 glow source with XYZRHW quads
-// addressed 0..720 x 0..480; through the stage transform both came out as one flat colour (docs/04 §3.8).
+// addressed 0..720 x 0..480; through the stage transform both came out as one flat colour (docs/04 搂3.8).
 struct RhwTexScale {
     uint32_t off; // byte offset of the 2-float set in the vertex
     float m[6];   // u' = u*m0 + v*m1 + m2, v' = u*m3 + v*m4 + m5
@@ -2878,7 +3254,7 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
 
 // Lines. The Xbox rasterizes its lines D3DRS_LINEWIDTH pixels wide at 720x480; a host line is one pixel at the
 // render scale, so Ninja Gaiden Black's sparks (2-vertex XYZ|DIFFUSE line strips, additive, FUN_00318410) came
-// out hair-thin (docs/04 §3.9). Untextured line primitives are projected on the CPU with the game's matrices and
+// out hair-thin (docs/04 搂3.9). Untextured line primitives are projected on the CPU with the game's matrices and
 // drawn as screen-space quads LINEWIDTH x the render scale wide; anything else falls through to the host line.
 bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const void *data, uint32_t stride)
 {
@@ -2954,10 +3330,7 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
     ClipRhw clip;
     if (q.empty()) return true;
     set_fvf(d, D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
-    {
-        DrawTimer draw_timer;
-        d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)(q.size() / 3), q.data(), sizeof(QV));
-    }
+    issue_draw(D3DPT_TRIANGLELIST, [&] { d->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)(q.size() / 3), q.data(), sizeof(QV)); });
     set_fvf(d, ctx.fvf);
     return true;
 }

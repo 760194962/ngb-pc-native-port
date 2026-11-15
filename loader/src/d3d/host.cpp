@@ -1,5 +1,6 @@
 #include "d3d/apicount.h"
 #include "d3d/draw.h"
+#include "d3d/drawwarm.h"
 #include "d3d/host.h"
 #include "d3d/perfhud.h"
 #include "d3d/shader_cache.h"
@@ -639,6 +640,7 @@ bool create_device_here()
     xd3d::prewarm_shaders(g_dev); // the cached shaders' objects now, not in the frame that first draws with them
     xd3d::texture_pool_start(g_dev); // textures made ahead by shape, not in the frame an area first shows them
     if (g_cfg.ring_rotate) xd3d::draw_ring_prepare(g_dev); // the draw ring sets made and written now (draw.cpp)
+    xd3d::drawwarm_replay(g_dev); // the recorded draw states drawn once, for the driver to build them now (drawwarm.cpp)
     return true;
 }
 

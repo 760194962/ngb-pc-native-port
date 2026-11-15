@@ -213,6 +213,11 @@ struct Config {
     int zmode = 3;             // press-file "cfg:zmode:N": fixed-function sampling of a depth-format header (0 depth, 1 bytes, 2 shadow func vs 0, 3 back buffer colour)
     bool no_rdtsc = false;     // --no-rdtsc: leave rdtsc to the host TSC (diagnosis)
     bool host_ffp = false;     // --host-ffp: fixed-function draws use the host's pixel pipeline, not the generated stage shader
+    bool ffp_vs = false;       // --ffp-vs: fixed-function draws with 3D positions use the generated vertex shader (d3d/ffp_vs.cpp), not the host's pipeline
+    int ffp_vs_eye = -1;       // press-file "cfg:ffpvseye:1": the generated shader's viewer at infinity towards +z, not -z (tests)
+    int ffp_vs_blend = 1;      // press-file "cfg:ffpvsblend:N": how the generated shader blends positions (d3d/ffp_vs.cpp Key; tests)
+    unsigned ffp_vs_check = 0; // --ffp-vs-check N: N fixed-function draws drawn both ways and compared (d3d/draw.cpp ffp_vs_check)
+    bool draw_warm = true;     // --no-draw-warm: no draw states recorded and drawn at start (d3d/drawwarm.cpp)
     unsigned ffp_debug = 0;    // press-file "cfg:ffpdebug:N": the stage shader shows stage 1's texture colour (1) or alpha (2)
     std::wstring press_script; // --press: "frame:button,frame:button" scripted controller input
     std::wstring perf_at;      // --perf-at S:D: record performance for D seconds from S seconds after the first frame

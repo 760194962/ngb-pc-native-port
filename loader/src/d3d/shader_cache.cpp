@@ -212,7 +212,10 @@ std::unordered_multimap<uint64_t, Warm> g_warm;
 
 uint64_t code_key(const void *p, size_t n) { return fnv1a(0xCBF29CE484222325ull, p, n); }
 
-// A prewarmed object for this bytecode (its reference passes to the caller), or null.
+// A prewarmed object for this bytecode (a new reference for the caller), or null. The object stays for the next
+// caller with the same bytecode: different sources can compile to the same code (the generated fixed-function shaders'
+// states that differ only in what the code does not use), and each of those used to make the object again in play,
+// a CreateVertexShader that waited 2-3 ms on the driver's thread (RTX 3060, 2026-11-15).
 IUnknown *take_warm(IDirect3DDevice9 *d, bool vertex, ID3DBlob *code)
 {
     auto range = g_warm.equal_range(code_key(code->GetBufferPointer(), code->GetBufferSize()));
@@ -220,9 +223,8 @@ IUnknown *take_warm(IDirect3DDevice9 *d, bool vertex, ID3DBlob *code)
         const Warm &w = it->second;
         if (w.dev == d && w.vertex == vertex && w.code.size() == code->GetBufferSize() &&
             !memcmp(w.code.data(), code->GetBufferPointer(), w.code.size())) {
-            IUnknown *obj = w.obj;
-            g_warm.erase(it);
-            return obj;
+            w.obj->AddRef();
+            return w.obj;
         }
     }
     return nullptr;
@@ -351,6 +353,20 @@ void prewarm_shaders(IDirect3DDevice9 *d)
          failed ? " (the device refused some)" : "");
 }
 
+uint64_t shader_code_key(const void *code, size_t size) { return code_key(code, size); }
+
+IUnknown *warm_lookup(IDirect3DDevice9 *d, bool vertex, uint64_t key)
+{
+    std::lock_guard<std::mutex> g(g_lock);
+    auto range = g_warm.equal_range(key);
+    for (auto it = range.first; it != range.second; ++it)
+        if (it->second.dev == d && it->second.vertex == vertex) {
+            it->second.obj->AddRef();
+            return it->second.obj;
+        }
+    return nullptr;
+}
+
 void warm_drop_all()
 {
     std::lock_guard<std::mutex> g(g_lock);
@@ -368,7 +384,14 @@ HRESULT create_vertex_shader(IDirect3DDevice9 *d, ID3DBlob *code, IDirect3DVerte
         }
     }
     perf::DetScope ds(perf::kDetShaderCreate);
-    return d->CreateVertexShader((const DWORD *)code->GetBufferPointer(), out);
+    HRESULT hr = d->CreateVertexShader((const DWORD *)code->GetBufferPointer(), out);
+    if (SUCCEEDED(hr)) { // kept for the next source with the same code (take_warm)
+        std::lock_guard<std::mutex> g(g_lock);
+        (*out)->AddRef();
+        const uint8_t *c = (const uint8_t *)code->GetBufferPointer();
+        g_warm.emplace(code_key(c, code->GetBufferSize()), Warm{d, true, std::vector<uint8_t>(c, c + code->GetBufferSize()), *out});
+    }
+    return hr;
 }
 
 HRESULT create_pixel_shader(IDirect3DDevice9 *d, ID3DBlob *code, IDirect3DPixelShader9 **out)
@@ -381,7 +404,14 @@ HRESULT create_pixel_shader(IDirect3DDevice9 *d, ID3DBlob *code, IDirect3DPixelS
         }
     }
     perf::DetScope ds(perf::kDetShaderCreate);
-    return d->CreatePixelShader((const DWORD *)code->GetBufferPointer(), out);
+    HRESULT hr = d->CreatePixelShader((const DWORD *)code->GetBufferPointer(), out);
+    if (SUCCEEDED(hr)) { // kept for the next source with the same code (take_warm)
+        std::lock_guard<std::mutex> g(g_lock);
+        (*out)->AddRef();
+        const uint8_t *c = (const uint8_t *)code->GetBufferPointer();
+        g_warm.emplace(code_key(c, code->GetBufferSize()), Warm{d, false, std::vector<uint8_t>(c, c + code->GetBufferSize()), *out});
+    }
+    return hr;
 }
 
 } // namespace xd3d

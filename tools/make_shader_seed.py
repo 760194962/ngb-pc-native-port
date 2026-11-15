@@ -8,7 +8,8 @@ first shows them.
 A CACHE_DIR is a cache\\shaders folder (entries <fnv64>.bin with their .gen epoch sidecars). Taken: entries that parse,
 whose name is the hash of their own profile, flags and HLSL (as entry_path makes it), of the current generator epoch
 (a .gen other than --epoch is left out; none means older than the sidecar, kept). Left out: the game's own vertex
-programs (vs_* profiles: their HLSL is the game's code translated, which the public source and package do not carry;
+programs (vs_* profiles other than the generated fixed-function ones, d3d/ffp_vs.cpp, whose HLSL starts
+"// ffp_vs": their HLSL is the game's code translated, which the public source and package do not carry;
 ngbrecomp's seed keeps only their place in default.xbe for the same reason) and entries containing an --exclude text
 (a generator variant no build makes any more, e.g. tex2Dlod). Entries are written sorted by name: the same inputs
 make the same file.
@@ -87,7 +88,7 @@ def collect(dirs, want_epoch, excludes, why):
             if ep and ep != want_epoch:
                 why['another generator epoch'] += 1
                 continue
-            if profile.startswith(b'vs_'):
+            if profile.startswith(b'vs_') and not hlsl.startswith(b'// ffp_vs'):
                 why['the game\'s vertex program'] += 1
                 continue
             if any(x.encode() in hlsl for x in excludes):

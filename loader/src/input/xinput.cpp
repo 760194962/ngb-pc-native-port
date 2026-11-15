@@ -320,6 +320,9 @@ void read_press_file(uint32_t now_ms)
                         xd3d::request_render_rebuild();
                     }
                     else if (k == "hostffp") g_cfg.host_ffp = !v ? false : true;
+                    else if (k == "ffpvs") g_cfg.ffp_vs = v;
+                    else if (k == "ffpvseye") g_cfg.ffp_vs_eye = atoi(line.c_str() + c + 1);
+                    else if (k == "ffpvsblend") g_cfg.ffp_vs_blend = atoi(line.c_str() + c + 1);
                     else if (k == "ffpdebug") g_cfg.ffp_debug = (unsigned)atoi(line.c_str() + c + 1);
                     else if (k == "zmode") g_cfg.zmode = atoi(line.c_str() + c + 1);
                     else if (k == "texcheck") g_cfg.tex_every_frame = v;

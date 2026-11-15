@@ -11,6 +11,8 @@
 #include "d3d/host.h"
 #include "d3d/shader_cache.h"
 #include "d3d/ffp_ps.h"
+#include "d3d/ffp_vs.h"
+#include "d3d/drawwarm.h"
 #include "d3d/nv2a_psh.h"
 #include "d3d/perfhud.h"
 #include "d3d/pshader.h"
@@ -2237,10 +2239,30 @@ namespace {
 const D3DTRANSFORMSTATETYPE kTransforms[10] = {D3DTS_VIEW,     D3DTS_PROJECTION,     D3DTS_TEXTURE0,       D3DTS_TEXTURE1,
                                                D3DTS_TEXTURE2, D3DTS_TEXTURE3,       D3DTS_WORLDMATRIX(0), D3DTS_WORLDMATRIX(1),
                                                D3DTS_WORLDMATRIX(2), D3DTS_WORLDMATRIX(3)};
+uint32_t g_host_xf_stale; // view, projection, world matrices the host does not hold yet (sync_transforms_from_device)
 D3DMATERIAL9 g_material;
 bool g_material_set;
 std::map<uint32_t, D3DLIGHT9> g_lights;
 std::map<uint32_t, BOOL> g_lights_on;
+} // namespace
+
+// For the generated fixed-function vertex shader (ffp_vs.cpp): what the host's pipeline is given
+uint32_t g_ffp_light_gen = 1;
+const D3DMATERIAL9 &ffp_material() { return g_material; }
+int ffp_enabled_lights(const D3DLIGHT9 **out, int max)
+{
+    int n = 0;
+    for (auto &kv : g_lights_on) {
+        if (!kv.second) continue;
+        auto it = g_lights.find(kv.first);
+        if (it == g_lights.end()) continue;
+        if (n < max) out[n] = &it->second;
+        n++;
+    }
+    return n;
+}
+
+namespace {
 
 // A Direct3D 9 device is lost when Windows takes the display from it: sleep and wake, the lock screen,
 // Ctrl+Alt+Del, a UAC prompt. Present then fails and everything drawn is thrown away, so the picture stopped at the
@@ -2285,6 +2307,7 @@ void resend_game_state(IDirect3DDevice9 *d)
 {
     forget_sent_state();
     for (int i = 0; i < 10; i++) d->SetTransform(kTransforms[i], &g_st.transforms[i]);
+    g_host_xf_stale = 0;
     if (g_material_set) d->SetMaterial(&g_material);
     for (auto &kv : g_lights) d->SetLight(kv.first, &kv.second);
     for (auto &kv : g_lights_on) d->LightEnable(kv.first, kv.second);
@@ -2319,6 +2342,8 @@ void drop_device_objects()
     texture_drop_all();
     pshader_drop_all();
     ffp_drop_all();
+    ffp_vs_drop_all();
+    drawwarm_drop_all();
     vs_drop_host_all();
     warm_drop_all();
     perfhud::release_all();
@@ -2491,6 +2516,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     DTRACE("0x%x", Flags);
     game_load::on_swap(); // the engine's load figure for the frame it hands over (game_load.cpp)
     if (g_cfg.widescreen && g_cfg.aspect_w * 9 != g_cfg.aspect_h * 16) xd3d::wide_hud_frame_end();
+    drawwarm_frame();
     pb_flush();
     perf::swap_begin();
     {
@@ -2656,6 +2682,36 @@ Surface *__stdcall D3DDevice_GetDepthStencilSurface2()
 // (FUN_00042690+0x68: rep movsd of its view matrix into device+0xC60, then or [0x3D83D0], 0xFF0200; 762 sites set
 // that dirty word) and the library reads them at draw time. So the HLE does the same: before a fixed-function draw,
 // whatever differs between the device's copy and what the host was last given is pushed to the host.
+//
+// The view, projection and world matrices reach the host only when a draw is to use its fixed-function vertex
+// pipeline (flush_host_transforms): the generated vertex shaders (d3d/ffp_vs.cpp) take them from g_st.transforms, and
+// a SetTransform per world change was paid for nothing by their draws (measured with them: the state work of a
+// generated-shader draw ~2,450 TSC ticks against the ~1,000 its draw call saves, 2026-11-15). Texture matrices go
+// at once (host_texture_transform_changed keeps what the host holds).
+namespace {
+constexpr uint32_t kDeferredTransforms = 1u << 0 | 1u << 1 | 1u << 6 | 1u << 7 | 1u << 8 | 1u << 9; // view, projection, world 0-3
+
+void host_transform_changed(int i, const D3DMATRIX *m)
+{
+    if (kDeferredTransforms >> i & 1) {
+        g_host_xf_stale |= 1u << i;
+        return;
+    }
+    host3d::dev()->SetTransform(kTransforms[i], m);
+    host_texture_transform_changed(i - 2, m); // TEXTURE0..3 are entries 2..5
+}
+} // namespace
+
+void flush_host_transforms(IDirect3DDevice9 *d)
+{
+    while (g_host_xf_stale) {
+        unsigned long i;
+        _BitScanForward(&i, g_host_xf_stale);
+        g_host_xf_stale &= g_host_xf_stale - 1;
+        d->SetTransform(kTransforms[i], &g_st.transforms[i]);
+    }
+}
+
 int sync_transforms_from_device()
 {
     if (!g_dev) return 0;
@@ -2664,8 +2720,7 @@ int sync_transforms_from_device()
         const D3DMATRIX *m = (const D3DMATRIX *)(g_dev + DEV_TRANSFORMS + i * 0x40);
         if (memcmp(m, &g_st.transforms[i], sizeof(D3DMATRIX)) == 0) continue;
         g_st.transforms[i] = *m;
-        host3d::dev()->SetTransform(kTransforms[i], m);
-        host_texture_transform_changed(i - 2, m); // TEXTURE0..3 are entries 2..5
+        host_transform_changed(i, m);
         changed |= 1 << i;
     }
     return changed;
@@ -2682,6 +2737,7 @@ bool sync_material_from_device()
     if (g_material_set && memcmp(m, &g_material, sizeof(D3DMATERIAL9)) == 0) return false;
     g_material = *m;
     g_material_set = true;
+    g_ffp_light_gen++;
     host3d::dev()->SetMaterial(m);
     return true;
 }
@@ -3058,8 +3114,7 @@ void __stdcall D3DDevice_SetTransform(uint32_t State, const D3DMATRIX *pMatrix)
              pMatrix->_41, pMatrix->_42, pMatrix->_43, pMatrix->_44);
     g_st.transforms[State] = *pMatrix;
     memcpy(g_dev + DEV_TRANSFORMS + State * 0x40, pMatrix, 0x40);
-    host3d::dev()->SetTransform(kTransforms[State], pMatrix);
-    host_texture_transform_changed((int)State - 2, pMatrix);
+    host_transform_changed((int)State, pMatrix);
 }
 
 // Ninja Gaiden 2004's update.xbe reads transforms back (its device keeps them at another offset than the HLE's)
@@ -3179,6 +3234,7 @@ void __stdcall D3DDevice_SetMaterial(const D3DMATERIAL9 *pMaterial)
              pMaterial->Emissive.g, pMaterial->Emissive.b, pMaterial->Power);
     g_material = *pMaterial;
     g_material_set = true;
+    g_ffp_light_gen++;
     host3d::dev()->SetMaterial(pMaterial);
 }
 
@@ -3221,6 +3277,7 @@ void __stdcall D3DDevice_SetLight(uint32_t Index, const D3DLIGHT9 *pLight)
              pLight->Direction.x, pLight->Direction.y, pLight->Direction.z, pLight->Position.x, pLight->Position.y, pLight->Position.z,
              pLight->Range);
     g_lights[Index] = *pLight;
+    g_ffp_light_gen++;
     if (uint8_t *e = light_entry(Index)) {
         memcpy(e, pLight, sizeof(D3DLIGHT9)); // D3DLIGHT8 and D3DLIGHT9 have the same 104-byte layout
         *(uint32_t *)(e + LE_FLAGS) |= 3;
@@ -3237,6 +3294,7 @@ void __stdcall D3DDevice_LightEnable(uint32_t Index, BOOL bEnable)
     DTRACE("%u, %d", Index, bEnable);
     if (debug_frame_active()) logf("[rt] LightEnable %u, %d", Index, bEnable);
     g_lights_on[Index] = bEnable;
+    g_ffp_light_gen++;
     if (!g_lights.count(Index)) {
         D3DLIGHT9 l = {};
         l.Type = D3DLIGHT_DIRECTIONAL;
