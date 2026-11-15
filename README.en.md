@@ -163,7 +163,49 @@ These also happen on the Xbox; the port fixes them. Each fix can be switched bac
 - Lava rooms: a black bar down the right (the screen copy one column short), a white blob in the heat haze, and a
   blurred band at the right edge.
 
+### Smoothness: no hitch the first time an area shows (2.2.31)
+
+Before, after every start, the first time an area or a cutscene showed cost a hitch (one frame of 30-280 ms). Each
+cause was found and handled on its own; each can be switched off to compare. Tested on an RTX 3060 and on Iris Xe
+integrated graphics (D3D9On12) with the attract demo and the performance recorder, every setting at least twice,
+interleaved; changes to the picture also checked at high render scales (x8 on the RTX 3060, x4 on the Iris Xe).
+
+| Cause | What the port does | Switch | Result |
+|---|---|---|---|
+| A shader compiled the first time it is used (2-40 ms each) | the package carries a shader seed, `shader_seed.bin` (429 entries), made at start | - | a new player's first start: worst frame 282 -> 113 ms (Iris Xe) |
+| The game's own vertex programs (translated game code, not shippable) | only where they are in `default.xbe`, `vertex_programs.bin` (7 programs, checked in all 7 builds); at start they are read from the player's own copy and compiled | - | the attract demo's first scene: 17-23 ms of compiling gone |
+| The graphics driver builds an internal program at a draw state's first draw (NVIDIA's fixed-function pipeline above all) | the draw states the game uses are recorded and all drawn once at start on a 16x16 target, `draw_states.bin` (8,339 states) | `--no-draw-warm` | area entry 47-52 -> 26 ms (RTX 3060); at x8 the 49-54 ms hitch gone |
+| The driver stalling when a burst of new textures is made (34-40 ms) | a texture pool by size and format (24 MB) made ahead and refilled in the idle wait for vblank | `--no-tex-pool` | texture time in those frames 32-36 -> 1.3-3.5 ms (RTX 3060) |
+| D3D9On12 waiting for new memory at the first 3D scene | the draw ring buffers are three sets used in turn and written at device creation; a forced rebuild remakes only the targets that changed | `--ring-discard` (old way) | worst frame 55-138 -> 40-45 ms (Iris Xe) |
+| The port's own pixel shaders compiled at every start | through the shader cache and in the seed | - | area entry 43 -> 29 ms (Iris Xe) |
+| A cutscene's first frame computing 10 ripple textures on the CPU (2.5 ms each) | kept by their arguments in `cache\cpu_textures.bin`, then copied; byte for byte the game's own | `--no-cpu-tex`, `--cpu-tex-verify` | that frame 38-56 -> 9 ms (RTX 3060), 35-36 -> under 24 ms (Iris Xe) |
+| New shaders the seed does not have | an optional compile budget: shaders past it compile on background threads and their draws wait | `--compile-budget MS` (off) | cold cache worst frame 237 -> 98 ms, but about 4 frames miss pieces, so off by default |
+
+**Where the seeds come from**: the title, the attract demo, and a recorded play of chapters 1-2 by the author (33
+minutes, 2026-11-15). In that play only two frames took over 50 ms: one shader the seed did not have then (now in it),
+and the game tidying its hard-disk cache on leaving the main menu (see Known issues). Checked against that play's
+records, all three seeds cover 100%. Chapter 3 on has not been recorded yet; anything the seed lacks costs one hitch the
+first time, then the player's own cache keeps it.
+
+**Cost**: every start spends a little longer drawing the states (NVIDIA keeps no such D3D9 programs on disk, so it is
+done at every start). Start to frame 60: RTX 3060 about 3.03 -> 3.33 s, Iris Xe about 1.9 -> 2.1 s. Frame times in play
+(median, p99) are as before.
+
+**Tools** (for development): `tools/make_shader_seed.py`, `tools/make_vsh_seed.py`, `tools/make_draw_seed.py`,
+`tools/make_texture_seed.py` make the seeds; `--check` tells how much of a test run a seed covers. Changing a shader
+generator's HLSL text (even a space) makes players' caches and the seed miss: run `make_shader_seed.py --check` on a
+fresh cache before a release.
+
+### Other changes (2.2.31)
+
+- The saved volumes at a cold start: before, every start put the music, effects and voice volumes back to the default
+  60, and a player who had changed them was asked "Apply changes to the sound settings?" at the title every time. Now
+  the saved volumes apply from the start (after ngbrecomp 0.9.54 #182). `--no-saved-volumes` keeps the console's way.
+
 ## Known issues
+- Entering play from the main menu can hold the picture about 0.6 s: the game is deleting earlier chapters' cutscene
+  packs from its hard-disk cache (`rtm_*.afs`); its CRI file system advances a step a frame (60 Hz) and each file takes
+  two. The console does the same; not the port (found with `--trace`, 2026-11-15).
 
 - Mirror: seen close up in first person, a dark band with horizontal streaks runs down the right of the screen. This
   is an original-game defect (the reflection camera does not cover that part of the mirror); investigated and left
@@ -489,6 +531,20 @@ Started with `--press-file <file>`, the game runs each line appended to that tex
 
 The start option `--debug-frame N` names a frame to trace.
 
+Start options for tracking down performance and hitches:
+
+| Option | Effect |
+|---|---|
+| `--hitch-detail` | a frame over 50 ms gets lines saying where its time went: draw calls, buffer locks, texture create / decode / upload, shader compiles, each thread's CPU, GPU time |
+| `--perf-at S:D` | record performance for D seconds from second S into `perf\` (with samples of the game's code in frames over 20 ms); the report is written only when the time is up |
+| `--vsh-record file` | record the game's vertex programs used, for `tools/make_vsh_seed.py` |
+| `--trace` | log every kernel call (a large log) |
+| `--log-vsh` | write each vertex program's disassembly |
+| `--compile-budget MS` | the compile budget (off by default; see Smoothness above) |
+| `--no-draw-warm` / `--no-tex-pool` / `--no-cpu-tex` / `--ring-discard` | turn the matching smoothness change off, to compare |
+| `--cpu-tex-verify` | the game still computes every ripple texture, compared byte for byte with the kept one |
+| `--ffp-vs` / `--ffp-vs-check N` | generated vertex shaders instead of D3D9's fixed-function pipeline (off) / both drawn and compared per pixel |
+
 ## Layout
 
 | Path | Contents |
@@ -533,7 +589,20 @@ See `LICENSE`.
 ## Thanks
 
 - [black-pc](https://github.com/Spark198rus/black-pc) (Spark198rus): the loader this project is built on.
-- [ngbrecomp](https://github.com/gamboozino/ngbrecomp): the D3D symbol table of the Ninja Gaiden main program.
+- [ngbrecomp](https://github.com/gamboozino/ngbrecomp) (GPL-2.0): the D3D symbol table of the Ninja Gaiden main
+  program; these approaches also follow it (each reimplemented in this project's own structure, no code copied; taken
+  from its latest version at the time):
+  - a shader seed in the package (`packaging/d3d-seed.bin`, `docs/renderer.md`), 2.2.31.
+  - the game's vertex programs shipped only as where they are in `default.xbe` and read from the player's copy at
+    start (the same idea as `d3d-seed.bin`), 2.2.31.
+  - the saved volumes applied at a cold start (0.9.54 #182, `src/sound_boot.c`), 2.2.31.
+  - the compile budget: shaders past it compile in the background, cached ones are always made at once (0.9.68 #94,
+    #21), 2.2.31, as an option that is off by default.
+  - ngbrecomp also ships a draw-state warm-up table (`packaging/shader-seed/states.bin`); this project's draw-state
+    replay was worked out by measuring the D3D9 drivers (lights' shapes, the matrices' 0/1 structure, ...), with its
+    own format and method.
+  - earlier releases: the HUD's in-play test (`src/hud.c`, 2.2.27), the chapter-2 pond's NaN LOD bias as -16 (#16,
+    2.2.18), the load meter (#50, #96).
 - [xemu](https://xemu.app) and [Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded): references for how
   the Xbox kernel and the NV2A behave (no code copied).
 - [genma-pc](https://github.com/w1284603830/genma-pc): a similar native Xbox port, a reference for CLIPPLANE and other
