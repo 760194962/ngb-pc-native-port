@@ -516,6 +516,28 @@ uint32_t drawwarm_light_sig()
     return h;
 }
 
+// --hitch-detail, a draw call over 1 ms (draw.cpp note_slow_draw): was its state replayed at start? 2: yes (the driver
+// built its program anyway: it keys on something the record does not hold), 1: recorded this run (new to the seed and
+// the learned file), 0: no record of it (prim: the draw's, or 0 to try every primitive type).
+int drawwarm_status(IDirect3DDevice9 *d, D3DPRIMITIVETYPE prim)
+{
+    if (!g_cfg.draw_warm) return 0;
+    static std::unordered_set<uint64_t> at_start;
+    std::lock_guard<std::mutex> g(g_lock);
+    load();
+    if (at_start.empty()) // the records the replay drew: those read at start (seed and learned file)
+        for (size_t i = 0; i < g_recs.size() - g_new; i++) at_start.insert(fnv(&g_recs[i], sizeof g_recs[i]));
+    int best = 0;
+    for (int p = prim ? prim : 1; p <= (prim ? prim : 6); p++) {
+        Rec r;
+        if (!capture(d, (D3DPRIMITIVETYPE)p, r)) continue;
+        uint64_t h = fnv(&r, sizeof r);
+        if (at_start.count(h)) return 2;
+        if (g_have.count(h)) best = 1;
+    }
+    return best;
+}
+
 void drawwarm_note(IDirect3DDevice9 *d, D3DPRIMITIVETYPE prim, uint64_t sig)
 {
     if (!g_cfg.draw_warm) return;

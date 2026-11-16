@@ -16,6 +16,7 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -412,6 +413,8 @@ bool pool_make(IDirect3DDevice9 *dev, uint64_t key, PoolSlot &slot)
 // The system copy `sys` into its DEFAULT copy `tex`, made when null (a new texture, or after a Reset). UpdateTexture
 // copies only the regions locked since the last one, so a new DEFAULT copy has the whole system copy marked first.
 int64_t g_push_create_ticks; // --hitch-detail: the last push's DEFAULT CreateTexture time
+std::mutex g_push_frame_lock;
+std::unordered_map<IDirect3DBaseTexture9 *, uint32_t> g_push_frame; // --hitch-detail: each DEFAULT texture's last upload frame
 IDirect3DBaseTexture9 *push(IDirect3DBaseTexture9 *sys, IDirect3DBaseTexture9 *tex)
 {
     IDirect3DDevice9 *dev = host3d::dev();
@@ -442,10 +445,22 @@ IDirect3DBaseTexture9 *push(IDirect3DBaseTexture9 *sys, IDirect3DBaseTexture9 *t
     }
     if (c0) g_push_create_ticks = perf::det_now() - c0;
     dev->UpdateTexture(sys, tex);
+    if (perf::g_detail) {
+        std::lock_guard<std::mutex> g(g_push_frame_lock);
+        g_push_frame[tex] = g_frame_count.load(std::memory_order_relaxed);
+    }
     return tex;
 }
 
 } // namespace
+
+// --hitch-detail: the frame a host texture was last uploaded at (push), or ~0u when not known
+uint32_t texture_push_frame(IDirect3DBaseTexture9 *t)
+{
+    std::lock_guard<std::mutex> g(g_push_frame_lock);
+    auto it = g_push_frame.find(t);
+    return it == g_push_frame.end() ? ~0u : it->second;
+}
 
 void pixel_container_dims(const PixelContainer *pc, uint32_t *w, uint32_t *h, uint32_t *d, uint32_t *levels)
 {

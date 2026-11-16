@@ -35,6 +35,8 @@
 
 namespace xd3d {
 
+void gpu_frame_marks(uint32_t frame, int what); // device.cpp (--hitch-detail): 0 the frame's first draw
+
 LastDraw g_last_draws[4];
 unsigned g_last_draw_next;
 
@@ -737,6 +739,14 @@ std::vector<uint16_t> g_tmp_indices;
 void note_slow_draw(double ms);
 struct DrawTimer {
     int64_t t0 = perf::g_detail ? perf::det_now() : 0;
+    DrawTimer()
+    {
+        if (!t0) return;
+        // the frame's GPU marks start at its first draw, not after the last Present (device.cpp gpu_frame_marks)
+        static uint32_t marked = ~0u;
+        uint32_t f = g_frame_count.load(std::memory_order_relaxed);
+        if (f != marked) marked = f, gpu_frame_marks(f, 0);
+    }
     ~DrawTimer()
     {
         if (!t0) return;
@@ -1492,6 +1502,8 @@ void pixwatch_check(const char *next, bool depth_read)
     last_draw = next;
 }
 
+uint32_t texture_push_frame(IDirect3DBaseTexture9 *t); // texture.cpp (--hitch-detail)
+
 namespace {
 
 void debug_draw(const char *what, const DrawCtx &ctx, uint32_t prim, uint32_t count, const float *verts, uint32_t stride_floats)
@@ -1752,19 +1764,23 @@ void note_slow_draw(double ms)
 {
     static int n;
     if (n++ >= 300) return;
-    char tex[160];
+    char tex[256];
     int at = 0;
     for (int s = 0; s < 4; s++) {
         IDirect3DBaseTexture9 *t = g_tex_sent[s];
         D3DSURFACE_DESC dsc = {};
         if (t && t->GetType() == D3DRTYPE_TEXTURE) ((IDirect3DTexture9 *)t)->GetLevelDesc(0, &dsc);
         else if (t && t->GetType() == D3DRTYPE_CUBETEXTURE) ((IDirect3DCubeTexture9 *)t)->GetLevelDesc(0, &dsc);
-        at += snprintf(tex + at, sizeof tex - at, " s%d:%s%u%s", s, t ? "" : "-", t ? (unsigned)dsc.Format : 0u,
-                       t && dsc.Usage & D3DUSAGE_RENDERTARGET ? "rt" : "");
+        uint32_t pf = t ? texture_push_frame(t) : ~0u, now = g_frame_count.load();
+        char age[24] = "";
+        if (pf != ~0u) snprintf(age, sizeof age, "/up%u", now - pf); // frames since its last upload
+        at += snprintf(tex + at, sizeof tex - at, " s%d:%s%u%s%s", s, t ? "" : "-", t ? (unsigned)dsc.Format : 0u,
+                       t && dsc.Usage & D3DUSAGE_RENDERTARGET ? "rt" : "", age);
     }
     const uint32_t *rs = render_state();
-    logf("[draw] slow draw call %.1f ms, frame %u: ps %p (game %s 0x%x), vs %p (game 0x%x), fvf 0x%lx decl %p;%s; alphatest %u "
-         "fog %u blend %u lighting %u sprites %u", ms, g_frame_count.load(), g_ps_sent, g_st.pixel_shader ? "combiners" : "fixed",
+    static const char *const replay[3] = {"no record", "recorded this run", "replayed at start"};
+    logf("[draw] slow draw call %.1f ms (%s), frame %u: ps %p (game %s 0x%x), vs %p (game 0x%x), fvf 0x%lx decl %p;%s; alphatest %u "
+         "fog %u blend %u lighting %u sprites %u", ms, replay[drawwarm_status(host3d::dev(), (D3DPRIMITIVETYPE)0)], g_frame_count.load(), g_ps_sent, g_st.pixel_shader ? "combiners" : "fixed",
          g_st.pixel_shader, g_vs_sent, g_st.vertex_shader, g_fvf_sent, g_decl_sent, tex, rs[XRS_ALPHATESTENABLE],
          rs[XRS_FOGENABLE], rs[XRS_ALPHABLENDENABLE], rs[XRS_LIGHTING], rs[XRS_POINTSPRITEENABLE]);
 }

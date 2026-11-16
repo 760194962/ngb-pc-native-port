@@ -1930,15 +1930,20 @@ void pace_swap()
     last_vb = now_vb;
 }
 
-// --hitch-detail: the GPU's time for each frame, from timestamp queries -- one issued after the Present before the
-// frame (start), one before its own (end) -- read back a few frames later without waiting; a frame whose commands
-// took the GPU over 25 ms is logged. Tells a Present that waits for a busy GPU from one that waits for something else.
-void gpu_frame_marks(uint32_t frame, bool end)
+// --hitch-detail: the GPU's time for each frame, from timestamp queries -- before the frame's first draw (what 0; draw.cpp
+// DrawTimer), before and after the vblank wait in Swap (2, 3), before its Present (1) -- read back a few frames later
+// without waiting. "Work" is first draw to the wait plus the wait to the Present, "first draw to Present" the whole.
+// Read with care: a Direct3D 9 timestamp is taken when the GPU reaches it, and the driver hands the GPU its commands
+// when it flushes (at the Present, or when its buffer fills), so these show when commands reached the GPU more than
+// how long the GPU worked (2026-11-16: with the clocks locked at 1,800 MHz the title screen still read 15.9 ms of
+// "work" while nvidia-smi showed the GPU 10-20% busy; the movie's 2-3 ms fell to 1.1 ms, so short frames do scale).
+// A frame over 25 ms is logged.
+void gpu_frame_marks(uint32_t frame, int what)
 {
     struct Set {
-        IDirect3DQuery9 *disjoint = nullptr, *freq = nullptr, *t0 = nullptr, *t1 = nullptr;
+        IDirect3DQuery9 *disjoint = nullptr, *freq = nullptr, *t0 = nullptr, *t1 = nullptr, *p0 = nullptr, *p1 = nullptr;
         uint32_t frame = 0;
-        bool pending = false;
+        bool pending = false, paced = false;
     };
     static Set sets[8];
     static IDirect3DDevice9 *made_on;
@@ -1951,19 +1956,28 @@ void gpu_frame_marks(uint32_t frame, bool end)
             s = Set{};
             if (FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMPDISJOINT, &s.disjoint)) ||
                 FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMPFREQ, &s.freq)) ||
-                FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &s.t0)) || FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &s.t1))) {
+                FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &s.t0)) || FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &s.t1)) ||
+                FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &s.p0)) || FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &s.p1))) {
                 logf("[hitch] GPU timestamps not available on this device");
                 failed = true;
                 return;
             }
         }
     }
-    if (!end) { // after the Present: the next frame starts
+    if (what == 0) { // the frame's first draw (frame: the frames presented so far)
         Set &s = sets[(frame + 1) % 8];
         if (s.pending) return; // its last results never came: skip a frame
         s.frame = frame + 1;
+        s.paced = false;
         s.disjoint->Issue(D3DISSUE_BEGIN);
         s.t0->Issue(D3DISSUE_END);
+        return;
+    }
+    if (what == 2 || what == 3) { // around the vblank wait (frame: as for 0)
+        Set &s = sets[(frame + 1) % 8];
+        if (s.frame != frame + 1 || s.pending) return;
+        (what == 2 ? s.p0 : s.p1)->Issue(D3DISSUE_END);
+        if (what == 3) s.paced = true;
         return;
     }
     Set &s = sets[frame % 8];
@@ -1976,28 +1990,32 @@ void gpu_frame_marks(uint32_t frame, bool end)
     for (Set &p : sets) { // results that came in (no flush: never waits)
         if (!p.pending) continue;
         BOOL disjoint = TRUE;
-        UINT64 f = 0, a = 0, b = 0;
+        UINT64 f = 0, a = 0, b = 0, c = 0, e = 0;
         if (p.disjoint->GetData(&disjoint, sizeof disjoint, 0) != S_OK || p.freq->GetData(&f, sizeof f, 0) != S_OK ||
             p.t0->GetData(&a, sizeof a, 0) != S_OK || p.t1->GetData(&b, sizeof b, 0) != S_OK)
             continue;
+        if (p.paced && (p.p0->GetData(&c, sizeof c, 0) != S_OK || p.p1->GetData(&e, sizeof e, 0) != S_OK)) continue;
         p.pending = false;
-        double ms = f && !disjoint && b >= a ? (double)(b - a) * 1000.0 / (double)f : -1.0;
+        bool ok = f && !disjoint && b >= a && (!p.paced || (c >= a && e >= c && b >= e));
+        double span = ok ? (double)(b - a) * 1000.0 / (double)f : -1.0;
+        double ms = !ok ? -1.0 : p.paced ? (double)((c - a) + (b - e)) * 1000.0 / (double)f : span;
         static int logged;
-        if (ms > 25.0 && logged++ < 200) logf("[hitch] GPU: frame %u took the GPU %.1f ms", p.frame, ms);
+        if (ms > 25.0 && logged++ < 200) logf("[hitch] GPU: frame %u took the GPU %.1f ms (%.1f from its first draw to its Present)", p.frame, ms, span);
         // a check of the measuring itself: what came back over 600 frames
         static uint32_t got, bad, from = frame;
-        static double most, sum;
+        static double most, sum, span_sum;
         if (ms < 0) bad++;
         else {
             got++;
             sum += ms;
+            span_sum += span;
             most = std::max(most, ms);
         }
         if (frame - from >= 600) {
-            logf("[hitch] GPU timestamps, last %u frames: %u read (mean %.2f ms, most %.1f ms), %u disjoint or bad", frame - from,
-                 got, got ? sum / got : 0.0, most, bad);
+            logf("[hitch] GPU timestamps, last %u frames: %u read (work mean %.2f ms, most %.1f ms; first draw to Present %.2f ms), "
+                 "%u disjoint or bad", frame - from, got, got ? sum / got : 0.0, most, got ? span_sum / got : 0.0, bad);
             got = bad = 0;
-            most = sum = 0;
+            most = sum = span_sum = 0;
             from = frame;
         }
     }
@@ -2526,7 +2544,9 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     perf::swap_begin();
     {
         perf::DetScope ds(perf::kDetPace);
+        if (perf::g_detail) gpu_frame_marks(g_frame_count.load(), 2);
         pace_swap();
+        if (perf::g_detail) gpu_frame_marks(g_frame_count.load(), 3);
     }
     rt_cpu_upload();
     upload_cpu_backbuffer();
@@ -2571,12 +2591,11 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
         logf("[d3d] tests: a visibility test made; its occlusion query lives on");
     }
     HRESULT presented;
-    if (perf::g_detail) gpu_frame_marks(frames, true);
+    if (perf::g_detail) gpu_frame_marks(frames, 1);
     {
         perf::DetScope ds(perf::kDetPresent);
         presented = host3d::present();
     }
-    if (perf::g_detail) gpu_frame_marks(frames, false);
     perfhud::input_presented();
     static HRESULT last_presented = D3D_OK; // a changed result (S_PRESENT_OCCLUDED minimised, S_PRESENT_MODE_CHANGED...)
     if (presented != last_presented) {
