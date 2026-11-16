@@ -11,7 +11,7 @@ General Settings (rows 5-7, before Default Settings / Exit):
   Off takes it out of the inventory, Hurricane Pack / Black put it in when it is missing, from whatever save; both run
   where x2.1 switches the move's data (0x32F31, each frame in play).
 Controller Settings, in Intercept's row:
-- Ultimate Tech Camera (+0x12): Off / Left-Right / All. Lucaz's A' (github.com/760194962/Ninja-Gaiden-Black-Patch-
+- ET/UT Camera (+0x12): Off / Left-Right / All. Lucaz's A' (github.com/760194962/Ninja-Gaiden-Black-Patch-
   Research): while an Ultimate Technique runs ([0x5895E4] != 0) the camera loop at 0x47A37 reads the stick pair four
   bytes earlier; Left-Right also zeroes its first (up / down) axis, All keeps both. Ninpo is not touched.
 x2.1's chapter-1 corpse (yasik_cmn.afs: it checks for Intercept and gives it besides the elixir 0xBE, so an owned
@@ -50,7 +50,7 @@ X_IC_HELP_JA = 0xDC835C  # x2.1's Japanese help line for Intercept (in its own g
 
 # General Settings: three more rows (5-7) before Default Settings / Exit. Essence-Only Charging is the settings' byte
 # +0x05 bit 0 and Skip Any Cutscene +0x0A bit 0 (menu copy and saved copy), unused by the game and by x2.1; Intercept,
-# x2.1's own byte +0x15, moves here from Controller Settings (its row there now holds the Ultimate Tech Camera).
+# x2.1's own byte +0x15, moves here from Controller Settings (its row there now holds the ET/UT Camera).
 OPT_EO, OPT_SK = 0x05, 0x0A
 ON, OFF = 0x20016, 0x20017
 IC_VALUES = [0x20110, 0x20111, OFF]              # Hurricane Pack, Black, Off (ours: x2.1's 0x20Fxx texts only
@@ -73,14 +73,14 @@ MSGS = {
               'アルティメットテクニックは魂をとりこんだ時のみためられます'),  # the font has no 取
     0x2010A: ('Lets the START button skip cutscenes not watched before.',
               '見ていないムービーもスタートボタンでスキップできます'),
-    0x20100: ('Ultimate Tech Camera', 'Ultimate Tech Camera'),
+    0x20100: ('ET/UT Camera', 'ET/UT Camera'),
     0x20102: ('Left / Right', 'Left / Right'),
     0x20103: ('All Directions', 'All Directions'),
-    0x20104: ('Lets the left stick move the camera during Ultimate Techniques.',
+    0x20104: ('Left stick moves the camera while charging Essence/Ultimate Techniques.',
               'アルティメットテクニック中に左スティックでカメラ操作'),  # kana: the font has no 義
     0x20105: ('Selects the Intercept move: Hurricane Pack, Black, or Off.', X_IC_HELP_JA),
 }
-# Controller Settings: x2.1's seven rows, Intercept's (3) now the Ultimate Tech Camera
+# Controller Settings: x2.1's seven rows, Intercept's (3) now the ET/UT Camera
 LABELS = [0x2000C, 0x2000D, 0x20F11, 0x20100, 0x2000F, 0x20004, 0x20005]
 HELP = [0x40, 0x43, 0xF13, 0x104, 0x45, 0x3A, 0x3B]
 UT_VALUES = [OFF, 0x20102, 0x20103]              # Off (the game's), Left / Right, All Directions
@@ -423,7 +423,7 @@ def main():
 
     add_section(x, b'NGBX', SEC_VA, SEC_VSIZE, section)
 
-    # Controller Settings: x2.1's seven rows, our labels and help lines (row 3 the Ultimate Tech Camera)
+    # Controller Settings: x2.1's seven rows, our labels and help lines (row 3 the ET/UT Camera)
     x.wr(0x21D71B, bytes([0x8B, 0x04, 0xBD]) + struct.pack('<I', d['labels']))
     x.wr(0xDC7D8F, bytes([0x66, 0x8B, 0x04, 0x45]) + struct.pack('<I', d['help']))
     x.wr(MSG_GROUPS + 8, struct.pack('<I', d['msgs']))
