@@ -91,7 +91,7 @@ struct Config {
     bool vsync = false;          // present on the display's refresh (black.ini vsync); off: frames paced by the Xbox vblank only
     bool perfhud = false;        // the performance overlay (black.ini perfhud; d3d/perfhud.cpp)
     int aniso = 1;               // anisotropic texture filtering (black.ini aniso: 1 off = as the game sets, 2-16; d3d/draw.cpp)
-    bool seam_fill = true;     // fill hairline cracks between geometry pieces (PC SETTINGS, --no-seamfill)
+    bool seam_fill = false;    // fill hairline cracks between geometry pieces (PC SETTINGS, black.ini seamfill = 1; off by default since 2.2.32, --no-seamfill)
     bool autoaim = false;      // the game's view pull toward targets, off by default (input/autoaim.cpp; --autoaim, PC SETTINGS)
     float fov = 70.0f;         // horizontal field of view in play, degrees (fov.cpp; --fov, PC SETTINGS; the game's is 70)
     int language = 1;          // the console's language (EEPROM XC_LANGUAGE, kernel/k_misc.cpp): 1 English, 2 Japanese,

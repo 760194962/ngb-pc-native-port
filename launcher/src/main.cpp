@@ -2202,7 +2202,7 @@ struct Painter {
         text(S(Str::VSyncNote), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
         y += 40;
         label(Str::SeamFill);
-        segmented(kHitSeam, cx, y, {S(Str::On), S(Str::Off)}, black_ini("seamfill") == "0" ? 1 : 0, 72);
+        segmented(kHitSeam, cx, y, {S(Str::On), S(Str::Off)}, black_ini("seamfill") == "1" ? 0 : 1, 72); // off unless set (2.2.32)
         y += 40;
         label(Str::EffectsNative);
         segmented(kHitFx, cx, y, {S(Str::On), S(Str::Off)}, black_ini("effectsnative") == "1" ? 0 : 1, 72);
@@ -3109,7 +3109,7 @@ void reset_page(Page p)
         black_ini_set("aa", "1");
         black_ini_set("msaa", "0");
         black_ini_set("vsync", "0");
-        black_ini_set("seamfill", "1");
+        black_ini_set("seamfill", "0");
         black_ini_set("effectsnative", "0");
         black_ini_set("perfhud", "0");
         set_gpu_preference(2);
