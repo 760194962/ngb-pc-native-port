@@ -214,6 +214,7 @@ fresh cache before a release.
 | NG2004's title update (the one the Hurricane Packs use) not covered by the vertex program seed | that program given to the tool too | `tools/make_vsh_seed.py --xbe` | title update 0 of 7 -> 7 of 7 |
 | NG2004 not applying its saved volumes at a cold start (Black's problem, other encoding and save offsets) | the signature takes both encodings and works the offsets out | `--no-saved-volumes` | one place each in the disc, the title update and the six Black builds; a volume set to 39 read back at the next cold start (60 before), no question at the title (the author) |
 | Seam fill | off by default (the author's choice) | launcher / `black.ini seamfill = 1` | players whose black.ini already holds seamfill keep it |
+| The compile budget (2.2.31's command-line option) | an experimental switch as the launcher's last Graphics row, off by default (the author's choice); on, a frame compiles at most 4 ms at once and the rest go to background threads, their draws waiting | launcher / `black.ini compile_budget = 4` (`-1` off); `--compile-budget` still wins | a first visit to what the seed does not cover (2004, later chapters) stutters less, but a few frames may miss pieces (about 4 measured) |
 
 **The seeds now**: 441 shaders, 16,679 draw states, 194 texture shapes (the 24 MB cap), 7 game vertex programs, 10 ripple textures. From the
 title, the attract demo and the author's plays of chapters 1-2 (11-15) and 1-4 (11-16, MSAA 2x); each source checked with `--check`: 100%.
