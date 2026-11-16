@@ -1,8 +1,10 @@
 #include "d3d/apicount.h"
 #include "d3d/draw.h"
+#include "d3d/drawwarm.h"
 #include "d3d/host.h"
 #include "d3d/perfhud.h"
 #include "d3d/shader_cache.h"
+#include "d3d/vshader.h"
 
 #include "build_profile.h"
 #include "settings.h"
@@ -13,6 +15,11 @@
 
 #include <algorithm>
 #include <string>
+
+namespace xd3d {
+void texture_pool_start(IDirect3DDevice9 *dev); // texture.cpp: the texture pool filled to its targets
+void draw_ring_prepare(IDirect3DDevice9 *d);    // draw.cpp: the draw ring sets made and written at device creation
+}
 
 // Common controls 6 (themed message boxes): a manifest dependency the linker
 // embeds in blackrt.dll as resource 2; ui_thread activates it for every window it makes.
@@ -632,6 +639,10 @@ bool create_device_here()
     logf("host: Direct3D 9Ex device, back buffer %dx%d on '%s'; INTZ depth textures %s", g_bb_w, g_bb_h, id.Description,
          g_intz ? "supported" : "NOT supported (depth-buffer reads return zero)");
     xd3d::prewarm_shaders(g_dev); // the cached shaders' objects now, not in the frame that first draws with them
+    xd3d::vsh_seed_prewarm(g_dev); // the game's vertex programs the package locates in default.xbe (vshader.cpp)
+    xd3d::texture_pool_start(g_dev); // textures made ahead by shape, not in the frame an area first shows them
+    if (g_cfg.ring_rotate) xd3d::draw_ring_prepare(g_dev); // the draw ring sets made and written now (draw.cpp)
+    xd3d::drawwarm_replay(g_dev); // the recorded draw states drawn once, for the driver to build them now (drawwarm.cpp)
     return true;
 }
 

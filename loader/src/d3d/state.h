@@ -80,6 +80,9 @@ void texture_forget(const Resource *r);
 void texture_drop_device_copies();                                 // before a Reset: the DEFAULT copies (made again)
 void texture_drop_all();                                           // a new device: both copies (made again from Xbox memory)
 IDirect3DBaseTexture9 *texture_system_copy(IDirect3DBaseTexture9 *tex); // a game texture's lockable copy, or null
+void texture_pool_start(IDirect3DDevice9 *dev);                    // device creation: the pool filled to its targets
+void texture_pool_refill(IDirect3DDevice9 *dev, int64_t deadline); // the pacing wait: pairs made again while quiet
+void texture_pool_report();
 uint32_t texture_level_offset(const PixelContainer *pc, uint32_t face, uint32_t level, uint32_t *pitch, uint32_t *w,
                               uint32_t *h);
 void pixel_container_dims(const PixelContainer *pc, uint32_t *w, uint32_t *h, uint32_t *d, uint32_t *levels);

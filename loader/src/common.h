@@ -53,6 +53,9 @@ struct Config {
     bool trace = false;        // log every kernel call, not just the first of each kind
     bool verbose = false;      // --verbose: the whole log on the console too (default: only logc lines)
     bool log_sounds = false;   // --log-sounds: log every sound buffer Play (default: the first 60)
+    bool tex_pool = true;      // --no-tex-pool: no textures made ahead (d3d/texture.cpp texture pool; comparisons, a way out)
+    bool ring_rotate = true;   // --ring-discard: one draw ring set renamed with D3DLOCK_DISCARD, made at the first draw, as
+                               // before 2.2.31 (comparisons; d3d/draw.cpp)
     bool strict = false;       // stop at the first call to an unimplemented kernel function
     bool multicore = false;    // default: pin to one CPU like the Xbox
     int game_cpu = -1;         // --game-cpu N: the logical CPU for the game threads (default: first CPU of the last core)
@@ -215,6 +218,17 @@ struct Config {
     int zmode = 3;             // press-file "cfg:zmode:N": fixed-function sampling of a depth-format header (0 depth, 1 bytes, 2 shadow func vs 0, 3 back buffer colour)
     bool no_rdtsc = false;     // --no-rdtsc: leave rdtsc to the host TSC (diagnosis)
     bool host_ffp = false;     // --host-ffp: fixed-function draws use the host's pixel pipeline, not the generated stage shader
+    bool ffp_vs = false;       // --ffp-vs: fixed-function draws with 3D positions use the generated vertex shader (d3d/ffp_vs.cpp), not the host's pipeline
+    int ffp_vs_eye = -1;       // press-file "cfg:ffpvseye:1": the generated shader's viewer at infinity towards +z, not -z (tests)
+    int ffp_vs_blend = 1;      // press-file "cfg:ffpvsblend:N": how the generated shader blends positions (d3d/ffp_vs.cpp Key; tests)
+    unsigned ffp_vs_check = 0; // --ffp-vs-check N: N fixed-function draws drawn both ways and compared (d3d/draw.cpp ffp_vs_check)
+    bool draw_warm = true;     // --no-draw-warm: no draw states recorded and drawn at start (d3d/drawwarm.cpp)
+    std::wstring vsh_record;   // --vsh-record FILE (tests): every game vertex program translated, for tools/make_vsh_seed.py
+    bool log_vsh = false;      // --log-vsh: each game vertex program's disassembly in the log (d3d/vshader.cpp)
+    bool cpu_tex_verify = false; // --cpu-tex-verify (tests): kept ripple textures compared with the game's own, byte for byte
+    bool cpu_tex = true;       // --no-cpu-tex: the game's CPU-made ripple textures computed every time (ngb_cpu_textures.cpp)
+    bool saved_volumes = true; // --no-saved-volumes: a cold start keeps the default sound volumes, as the console (ngb_sound_boot.cpp)
+    double compile_budget_ms = -1; // --compile-budget MS: compiling on the render thread a frame before the rest go to threads and their draws are left out (-1, the default: all now)
     unsigned ffp_debug = 0;    // press-file "cfg:ffpdebug:N": the stage shader shows stage 1's texture colour (1) or alpha (2)
     std::wstring press_script; // --press: "frame:button,frame:button" scripted controller input
     std::wstring perf_at;      // --perf-at S:D: record performance for D seconds from S seconds after the first frame
@@ -241,6 +255,8 @@ void ng04_camera_apply();         // g_cfg's ng04_cam* into the game's code, at 
 void ng04_camera_set_on(bool on); // ng04_cam changed in play: the camera's state follows
 void install_ngb_aspect();        // black.ini aspect 16:10 / 21:9 for Ninja Gaiden Black x2.1 (ngb_aspect.cpp)
 void install_ngb_livedash();      // Ⓐ cancels Ranking's Xbox Live boxes instead of opening the dashboard (ngb_livedash.cpp)
+void install_cpu_textures(uint32_t text_va, uint32_t text_size); // the ripple textures Ninja Gaiden makes on the CPU, made once, then copied (ngb_cpu_textures.cpp)
+void install_saved_volumes(uint32_t text_va, uint32_t text_size); // the saved sound volumes at a cold start (ngb_sound_boot.cpp)
 void install_ng04_livedash();     // the same in Ninja Gaiden (2004)'s Master Ninja Tournament (ngb_livedash.cpp)
 void logv(const char *fmt, va_list ap);
 void logc(const char *fmt, ...); // the log file and the console: startup, setup errors, exit, crashes

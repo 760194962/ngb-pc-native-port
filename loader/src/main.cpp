@@ -27,6 +27,7 @@
 #include "usb_ohci.h"
 #include "net/online.h"
 #include "net/dashfonts.h"
+#include "perf.h"
 #include "xbe.h"
 #include "xthread.h"
 
@@ -185,6 +186,9 @@ bool parse_args()
         else if (a == L"--trace") g_cfg.trace = true;
         else if (a == L"--verbose") g_cfg.verbose = true;
         else if (a == L"--log-sounds") g_cfg.log_sounds = true;
+        else if (a == L"--hitch-detail") perf::g_detail = true; // tests: where a [hitch] frame's time went (perf.h)
+        else if (a == L"--no-tex-pool") g_cfg.tex_pool = false;
+        else if (a == L"--ring-discard") g_cfg.ring_rotate = false;
         else if (a == L"--trace-d3d") g_trace_d3d = true;
         else if (a == L"--screenshot") { if (!next(g_cfg.screenshot_dir)) return false; }
         else if (a == L"--watch") {
@@ -280,6 +284,25 @@ bool parse_args()
         else if (a == L"--no-reverb") { g_cfg.reverb = false; settings_mark_cli("reverb"); }
         else if (a == L"--no-fog") g_cfg.no_fog = true;
         else if (a == L"--host-ffp") g_cfg.host_ffp = true;
+        else if (a == L"--ffp-vs") g_cfg.ffp_vs = true; // tests: the generated fixed-function vertex shaders (off by default)
+        else if (a == L"--no-draw-warm") g_cfg.draw_warm = false;
+        else if (a == L"--log-vsh") g_cfg.log_vsh = true;
+        else if (a == L"--no-cpu-tex") g_cfg.cpu_tex = false;
+        else if (a == L"--no-saved-volumes") g_cfg.saved_volumes = false;
+        else if (a == L"--compile-budget") {
+            std::wstring v;
+            if (!next(v)) return false;
+            g_cfg.compile_budget_ms = _wtof(v.c_str());
+        }
+        else if (a == L"--cpu-tex-verify") g_cfg.cpu_tex_verify = true;
+        else if (a == L"--vsh-record") {
+            if (!next(g_cfg.vsh_record)) return false;
+        }
+        else if (a == L"--ffp-vs-check") {
+            std::wstring v;
+            if (!next(v)) return false;
+            g_cfg.ffp_vs_check = (unsigned)_wtoi(v.c_str());
+        }
         else if (a == L"--no-rdtsc") g_cfg.no_rdtsc = true;
         else if (a == L"--coverage") {
             if (!next(g_cfg.coverage)) return false;
@@ -850,6 +873,10 @@ int run(void *reserve, unsigned reserve_size)
     install_ng04_exitmenu(); // Ninja Gaiden (2004)'s title menu: the same, its own way
     install_ng04_camera();   // Ninja Gaiden (2004) update: the right-stick camera at start, inversion
     if (profile && !black && !profile->aux) install_music51_fix(); // the music player's six channels at -96 dB
+    if (profile && !black) // the ripple textures the game makes on the CPU, kept (ngb_cpu_textures.cpp)
+        if (const XbeSection *t = g_xbe.section_named(".text")) install_cpu_textures(t->vaddr, t->vsize);
+    if (profile && !black && !profile->aux) // the saved sound volumes at a cold start (ngb_sound_boot.cpp)
+        if (const XbeSection *t = g_xbe.section_named(".text")) install_saved_volumes(t->vaddr, t->vsize);
     if (profile && profile->wide2d) // the HUD's sides on a screen not 16:9: in play as the game's HUD routine says
         if (const XbeSection *t = g_xbe.section_named(".text")) xd3d::install_hud_probe((uint8_t *)(uintptr_t)t->vaddr, t->vsize);
     // Ⓐ in Ranking's Live boxes (and Ninja Gaiden (2004)'s Master Ninja Tournament): the port's Xbox Live dashboard when it

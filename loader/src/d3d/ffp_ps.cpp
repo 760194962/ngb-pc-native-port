@@ -4,9 +4,9 @@
 // texture when the stage's colour op only passed CURRENT through: Ninja Gaiden Black's sword trail (stage 1:
 // colour SELECTARG1 current, alpha MODULATE current x texture, its 128x128 DXT5 alpha ramp) came out as an opaque
 // white band (docs/04 §3.9). Generating the stage program ourselves follows the Direct3D 8/9 stage semantics
-// exactly, and reads an unbound stage's texture as opaque white (as the Xbox does; the nunchaku sweep). Fog and
-// the alpha test stay with the host (applied after the shader), lighting, texture transforms and coordinate
-// generation stay in the host's vertex pipeline.
+// exactly, and reads an unbound stage's texture as opaque white (as the Xbox does; the nunchaku sweep). The alpha test
+// stays with the host (applied after the shader); so does fog, except after the generated fixed-function vertex shader
+// (d3d/ffp_vs.cpp), where this shader applies it per pixel itself (g_ffp_fog).
 #include "d3d/ffp_ps.h"
 
 #include "d3d/host.h"
@@ -29,12 +29,10 @@ D3DTEXTUREOP conv_texop(uint32_t v); // draw.cpp: the Xbox op number -> D3DTEXTU
 uint32_t g_ffp_edge_stages;
 uint32_t g_ffp_quad_stages, g_ffp_quad_weighted;
 bool g_ffp_sprite_tc;
+int g_ffp_fog;
 
 namespace {
 
-std::unordered_map<std::string, IDirect3DPixelShader9 *> g_ffp_cache;
-std::string g_ffp_last_key; // the previous draw's key and shader
-IDirect3DPixelShader9 *g_ffp_last_ps;
 float g_ffp_c0[4] = {-1, -1, -1, -1}; // the texture factor last put in c0 (upload_ffp_constants)
 
 struct StageKey {
@@ -45,6 +43,31 @@ struct StageKey {
     uint32_t edge; // g_ffp_edge_stages: alpha 0 where this stage's coordinates leave 0..1
     uint32_t quad; // g_ffp_quad_stages / g_ffp_quad_weighted: 1 coordinates clamped, 2 also alpha-weighted texels
 };
+
+// ffp_pixel_shader's key: the four stages and the draw's options. Hashed a 32-bit word at a time with no copy made:
+// a std::string of it (a heap allocation and a byte-wise hash of ~250 bytes) was made at every draw whose key was
+// not the previous draw's.
+struct PsKey {
+    StageKey k[4];
+    uint32_t opt[2]; // first stage, sprite coordinates, colour flags, ffp_debug, untex, quad_grad, fog (one byte each)
+};
+struct PsKeyHash {
+    size_t operator()(const PsKey &k) const
+    {
+        const uint32_t *w = (const uint32_t *)&k;
+        uint32_t h = 0x811C9DC5u;
+        for (size_t i = 0; i < sizeof k / 4; i++) h = (h ^ w[i]) * 0x01000193u;
+        return h ^ (h >> 15);
+    }
+};
+struct PsKeyEq {
+    bool operator()(const PsKey &a, const PsKey &b) const { return !memcmp(&a, &b, sizeof a); }
+};
+static_assert(sizeof(PsKey) == sizeof(StageKey) * 4 + 8, "no padding: compared as bytes");
+std::unordered_map<PsKey, IDirect3DPixelShader9 *, PsKeyHash, PsKeyEq> g_ffp_cache;
+PsKey g_ffp_last_key; // the previous draw's key and shader
+bool g_ffp_last_valid;
+IDirect3DPixelShader9 *g_ffp_last_ps;
 
 // An argument (D3DTA_*) with its modifiers as an HLSL expression.
 std::string arg(uint32_t a, int stage)
@@ -112,17 +135,19 @@ bool op_reads_texture(D3DTEXTUREOP op, uint32_t a0, uint32_t a1, uint32_t a2, bo
     }
 }
 
-std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, bool def_specular, int first)
+std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, bool def_specular, int first, int fog)
 {
     std::string s =
         "float4 tfactor : register(c0);\n"
         "float4 qc[4] : register(c1); float4 qs[4] : register(c5);\n" // a 2D quad's clamp ranges and texture sizes
         "sampler2D s2d0 : register(s0); sampler2D s2d1 : register(s1); sampler2D s2d2 : register(s2); sampler2D s2d3 : register(s3);\n"
-        "samplerCUBE scu0 : register(s0); samplerCUBE scu1 : register(s1); samplerCUBE scu2 : register(s2); samplerCUBE scu3 : register(s3);\n"
-        "struct PSIn { float4 v0 : COLOR0; float4 v1 : COLOR1; float4 tc0 : TEXCOORD0; float4 tc1 : TEXCOORD1;\n"
-        "              float4 tc2 : TEXCOORD2; float4 tc3 : TEXCOORD3; };\n"
-        "float4 main(PSIn I) : COLOR0 {\n"
-        "  float4 tc[4] = { I.tc0, I.tc1, I.tc2, I.tc3 };\n";
+        "samplerCUBE scu0 : register(s0); samplerCUBE scu1 : register(s1); samplerCUBE scu2 : register(s2); samplerCUBE scu3 : register(s3);\n";
+    if (fog) s += "float4 fogk : register(c9); float4 fogc : register(c10);\n"; // upload_ffp_fog_constants
+    s += "struct PSIn { float4 v0 : COLOR0; float4 v1 : COLOR1; float4 tc0 : TEXCOORD0; float4 tc1 : TEXCOORD1;\n"
+         "              float4 tc2 : TEXCOORD2; float4 tc3 : TEXCOORD3;";
+    s += fog ? " float4 tc5 : TEXCOORD5; };\n" : " };\n";
+    s += "float4 main(PSIn I) : COLOR0 {\n"
+         "  float4 tc[4] = { I.tc0, I.tc1, I.tc2, I.tc3 };\n";
     // Point sprites: the sprite stage (3) reads the coordinate every driver replaces with the sprite's, the first set
     // (the draw passes one vertex coordinate through every stage: d3d/draw.cpp with_sprite_tc)
     if (first == 3 && g_ffp_sprite_tc) s += "  tc[3] = I.tc0;\n";
@@ -216,10 +241,21 @@ std::string build_hlsl(const StageKey (&k)[4], bool specular, bool def_diffuse, 
                  i, i, k[i].proj == 4 ? 'w' : 'z');
         s += b;
     }
-    if (g_cfg.ffp_debug == 1 && k[1].tex) s += "  return float4(t1.rgb, 1);\n}\n";        // cfg:ffpdebug:1
-    else if (g_cfg.ffp_debug == 2 && k[1].tex) s += "  return float4(t1.aaa, 1);\n}\n";   // cfg:ffpdebug:2
-    else s += specular ? "  return float4(saturate(cur.rgb + v1.rgb), cur.a);\n}\n" : "  return cur;\n}\n";
-    return s;
+    if (g_cfg.ffp_debug == 1 && k[1].tex) return s + "  return float4(t1.rgb, 1);\n}\n";      // cfg:ffpdebug:1
+    if (g_cfg.ffp_debug == 2 && k[1].tex) return s + "  return float4(t1.aaa, 1);\n}\n";      // cfg:ffpdebug:2
+    // Without fog the text is the same as before the fog was added, byte for byte: the shader cache and the shipped
+    // seed find shaders by their HLSL, so any change would compile every stage shader again at a player's next start
+    if (!fog) return s + (specular ? "  return float4(saturate(cur.rgb + v1.rgb), cur.a);\n}\n" : "  return cur;\n}\n");
+    s += specular ? "  float4 res = float4(saturate(cur.rgb + v1.rgb), cur.a);\n" : "  float4 res = cur;\n";
+    // Fog after a generated vertex shader (d3d/ffp_vs.cpp), per pixel as the host's table fog was: the depth is the
+    // eye distance, clip w over the projection's _34 (fogk.w); D3DFOG_EXP 1 exp(-d density), EXP2 2 exp(-(d density)^2),
+    // LINEAR 3 (end - d) / (end - start); the colour mixed in by 1 - the factor clamped to 0..1.
+    s += "  float fd = I.tc5.y * fogk.w;\n";
+    s += fog == 1 ? "  float ff = exp(-fd * fogk.z);\n"
+         : fog == 2 ? "  float ff = exp(-(fd * fogk.z) * (fd * fogk.z));\n"
+                    : "  float ff = (fogk.y - fd) * fogk.x;\n";
+    s += "  res.rgb = lerp(fogc.rgb, res.rgb, saturate(ff));\n";
+    return s + "  return res;\n}\n";
 }
 
 } // namespace
@@ -261,28 +297,32 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
     // coordinates; stages 0-2 take no part. Ninja Gaiden Black's particles keep a fire texture in stage 0 and the
     // round dot (16x16) in stage 3: colour = diffuse, alpha = dot * diffuse.
     int first = render_state()[XRS_POINTSPRITEENABLE] ? 3 : 0;
-    std::string key((const char *)k, sizeof k);
-    key.push_back((char)first);
-    key.push_back((char)(first == 3 && g_ffp_sprite_tc));
-    key.push_back((char)((specular ? 1 : 0) | (def_diffuse ? 2 : 0) | (def_specular ? 4 : 0)));
-    key.push_back((char)g_cfg.ffp_debug);
-    key.push_back((char)g_cfg.untex);
-    key.push_back((char)g_cfg.quad_grad);
-    if (key == g_ffp_last_key) return g_ffp_last_ps;
+    int fog = pretransformed ? 0 : g_ffp_fog;
+    PsKey key;
+    memcpy(key.k, k, sizeof k);
+    uint8_t opt[8] = {(uint8_t)first, (uint8_t)(first == 3 && g_ffp_sprite_tc),
+                      (uint8_t)((specular ? 1 : 0) | (def_diffuse ? 2 : 0) | (def_specular ? 4 : 0)), (uint8_t)g_cfg.ffp_debug,
+                      (uint8_t)g_cfg.untex, (uint8_t)g_cfg.quad_grad, (uint8_t)fog, 0};
+    memcpy(key.opt, opt, sizeof opt);
+    if (g_ffp_last_valid && !memcmp(&key, &g_ffp_last_key, sizeof key)) return g_ffp_last_ps;
     auto it = g_ffp_cache.find(key);
     if (it != g_ffp_cache.end()) {
         g_ffp_last_key = key;
+        g_ffp_last_valid = true;
         return g_ffp_last_ps = it->second;
     }
-    std::string hlsl = build_hlsl(k, specular, def_diffuse, def_specular, first);
+    std::string hlsl = build_hlsl(k, specular, def_diffuse, def_specular, first, fog);
     perf::Scope perf_scope(perf::kCompile);
     perf::add_compile();
     ID3DBlob *code = nullptr, *errors = nullptr;
-    HRESULT hr = cached_compile(hlsl, "ffp_ps", "ps_2_0", D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors);
-    if (FAILED(hr)) {
-        if (errors) errors->Release();
-        hr = cached_compile(hlsl, "ffp_ps", "ps_2_a", D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors);
+    static const char *const kProfiles[] = {"ps_2_0", "ps_2_a", nullptr};
+    const char *used = nullptr;
+    Compiled c = compile_now_or_later(hlsl, "ffp_ps", kProfiles, D3DCOMPILE_OPTIMIZATION_LEVEL2, &code, &errors, &used);
+    if (c == Compiled::kLater) { // on the compile thread: this draw is left out (not the host pipeline instead)
+        g_shader_later = true;
+        return nullptr;
     }
+    HRESULT hr = c == Compiled::kReady ? S_OK : E_FAIL;
     IDirect3DPixelShader9 *ps = nullptr;
     static int logged;
     if (FAILED(hr)) {
@@ -300,6 +340,7 @@ IDirect3DPixelShader9 *ffp_pixel_shader(bool has_diffuse, bool has_specular, boo
     if (errors) errors->Release();
     g_ffp_cache[key] = ps; // a failure is cached too: the host pipeline draws those
     g_ffp_last_key = key;
+    g_ffp_last_valid = true;
     return g_ffp_last_ps = ps;
 }
 
@@ -330,11 +371,34 @@ void upload_ffp_constants(IDirect3DDevice9 *d)
     d->SetPixelShaderConstantF(0, f, 1);
 }
 
+namespace {
+float g_fog_sent[2][4];
+bool g_fog_valid;
+}
+
+void upload_ffp_fog_constants(IDirect3DDevice9 *d, float w_scale)
+{
+    const uint32_t *rs = render_state();
+    float fs, fe, fd;
+    memcpy(&fs, &rs[XRS_FOGSTART], 4);
+    memcpy(&fe, &rs[XRS_FOGEND], 4);
+    memcpy(&fd, &rs[XRS_FOGDENSITY], 4);
+    if (fs == fe) fs = fe - 1.0f / 8192.0f; // as the host was given it (draw.cpp apply_render_states)
+    uint32_t c = rs[XRS_FOGCOLOR];
+    float k[2][4] = {{1.0f / (fe - fs), fe, fd, w_scale},
+                     {((c >> 16) & 255) / 255.0f, ((c >> 8) & 255) / 255.0f, (c & 255) / 255.0f, (c >> 24) / 255.0f}};
+    if (g_fog_valid && !memcmp(k, g_fog_sent, sizeof k)) return;
+    memcpy(g_fog_sent, k, sizeof k);
+    g_fog_valid = true;
+    d->SetPixelShaderConstantF(9, &k[0][0], 2);
+}
+
 // c0 rewritten by another (the combiners' constants, pshader.cpp) or a new device: the next upload sends it
 void ffp_forget_constants()
 {
     g_ffp_c0[0] = -1;
     g_quad_valid = false;
+    g_fog_valid = false;
 }
 
 void ffp_drop_all()
@@ -342,7 +406,7 @@ void ffp_drop_all()
     for (auto &kv : g_ffp_cache)
         if (kv.second) kv.second->Release();
     g_ffp_cache.clear();
-    g_ffp_last_key.clear();
+    g_ffp_last_valid = false;
     g_ffp_last_ps = nullptr;
     ffp_forget_constants();
 }

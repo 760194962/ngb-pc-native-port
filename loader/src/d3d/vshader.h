@@ -16,5 +16,8 @@ IDirect3DVertexShader9 *vs_host_shader(VertexShader *vs, uint32_t undivided_stag
 // BUMPENVMAP: those are handed on undivided and divided per pixel instead (cfg:vsdivide, docs/07 #10).
 uint32_t bump_divide_stages();
 uint32_t vs_input_mask(const VertexShader *vs); // vertex registers the declaration provides
+// At device creation, after prewarm_shaders: the game's vertex programs the package's vertex_programs.bin locates in
+// the player's default.xbe, compiled (into the cache, a first start only) and made (vshader.cpp)
+void vsh_seed_prewarm(IDirect3DDevice9 *d);
 
 } // namespace xd3d

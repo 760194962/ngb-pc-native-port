@@ -29,8 +29,12 @@
 namespace perf {
 
 volatile bool g_on;
+volatile bool g_detail;
 
 namespace {
+
+std::atomic<int64_t> g_det_ticks[kDetCount]; // --hitch-detail: this frame's (frame_end)
+std::atomic<uint32_t> g_det_discards;
 
 // [hitch] counters: kept whether or not recording (frame_end logs a slow frame's)
 std::atomic<uint32_t> g_h_compiles, g_h_uploads, g_h_upload_kb, g_h_rt_copies, g_h_reads, g_h_read_kb;
@@ -294,6 +298,95 @@ uint64_t others_delta()
     return sum;
 }
 
+// --hitch-detail: the host threads' CPU in each frame (the driver's own threads among them: D3D9On12 translates on a
+// thread of its own, which the render thread waits for at a Lock or a Present), listed for a [hitch] frame.
+struct DetThread {
+    HANDLE h;
+    DWORD tid;
+    std::string name;
+    uint64_t last, delta;
+};
+std::vector<DetThread> g_det_threads;
+double g_cycles_per_ms; // the time stamp counter's rate (QueryThreadCycleTime counts it)
+
+void det_threads_frame(uint32_t frame)
+{
+    if (!g_cycles_per_ms) { // measured once over 20 ms
+        LARGE_INTEGER f, a, b;
+        QueryPerformanceFrequency(&f);
+        QueryPerformanceCounter(&a);
+        uint64_t c0 = __rdtsc();
+        Sleep(20);
+        uint64_t c1 = __rdtsc();
+        QueryPerformanceCounter(&b);
+        g_cycles_per_ms = (double)(c1 - c0) / ((double)(b.QuadPart - a.QuadPart) * 1000.0 / (double)f.QuadPart);
+    }
+    // Threads come and go: a thread of its own looks for new ones every 5 s (a system thread snapshot takes tens of
+    // ms: taken on the render thread every 300 frames, it made a 60 ms frame each time); the render thread takes them
+    // over here
+    static std::mutex found_lock;
+    static std::vector<DetThread> found;
+    static bool scanning;
+    if (!scanning) {
+        scanning = true;
+        DWORD self = GetCurrentThreadId();
+        std::thread([self] {
+            std::vector<DWORD> known;
+            for (;;) {
+                HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+                if (snap != INVALID_HANDLE_VALUE) {
+                    THREADENTRY32 te = {sizeof te};
+                    DWORD me = GetCurrentProcessId(), scanner = GetCurrentThreadId();
+                    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+                        DWORD tid = te.th32ThreadID;
+                        if (te.th32OwnerProcessID != me || tid == self || tid == scanner ||
+                            std::find(known.begin(), known.end(), tid) != known.end())
+                            continue;
+                        known.push_back(tid);
+                        bool game;
+                        std::string name = thread_name(tid, &game);
+                        if (game) continue; // the game's own threads are counted elsewhere (others_delta)
+                        HANDLE h = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, tid);
+                        if (!h) continue;
+                        uint64_t c = 0;
+                        QueryThreadCycleTime(h, &c);
+                        std::lock_guard<std::mutex> g(found_lock);
+                        found.push_back({h, tid, name + " " + std::to_string(tid), c, 0});
+                    }
+                    CloseHandle(snap);
+                }
+                Sleep(5000);
+            }
+        }).detach();
+    }
+    {
+        std::lock_guard<std::mutex> g(found_lock);
+        for (DetThread &t : found) g_det_threads.push_back(t);
+        found.clear();
+    }
+    for (DetThread &t : g_det_threads) {
+        uint64_t c = 0;
+        QueryThreadCycleTime(t.h, &c);
+        t.delta = c > t.last ? c - t.last : 0;
+        t.last = c;
+    }
+}
+
+std::string det_threads_text()
+{
+    std::vector<const DetThread *> v;
+    for (const DetThread &t : g_det_threads)
+        if (t.delta / g_cycles_per_ms >= 1.0) v.push_back(&t);
+    std::sort(v.begin(), v.end(), [](const DetThread *a, const DetThread *b) { return a->delta > b->delta; });
+    std::string s;
+    char b[160];
+    for (size_t i = 0; i < v.size() && i < 6; i++) {
+        snprintf(b, sizeof b, "%s%s %.1f ms", i ? ", " : "", v[i]->name.c_str(), v[i]->delta / g_cycles_per_ms);
+        s += b;
+    }
+    return s.empty() ? "none over 1 ms" : s;
+}
+
 std::string now_text(const char *fmt)
 {
     SYSTEMTIME st;
@@ -492,6 +585,14 @@ void write_report(Recording *r)
     double cls[3][kClsCount] = {};
     std::map<std::string, double> self[3], incl[3];
     double frame_samples[3] = {}, idle = 0;
+    // Spikes: frames whose work took over 20 ms (a hitch, not a steady load); their samples alone, for what runs in a
+    // frame such as an area's first one (the slowest 5% mostly holds the steady heavy frames)
+    std::map<std::string, double> spike_self, spike_incl;
+    double spike_samples = 0;
+    size_t spike_frames = 0;
+    std::vector<uint8_t> spike(F.size());
+    for (size_t i = 0; i < F.size(); i++)
+        if (F[i].work > 20.0f) spike[i] = 1, spike_frames++;
     auto generic = [](const std::string &k) {
         for (const char *g : {"memcpy", "memset", "memmove", "malloc", "free", "ILT+", "operator new", "std::"})
             if (k.find(g) != std::string::npos) return true;
@@ -532,6 +633,12 @@ void write_report(Recording *r)
             self[g][key]++;
             if (smp.running)
                 for (const std::string &k : seen) incl[g][k]++;
+        }
+        if (smp.frame < spike.size() && spike[smp.frame]) {
+            spike_samples++;
+            spike_self[key]++;
+            if (smp.running)
+                for (const std::string &k : seen) spike_incl[k]++;
         }
     }
 
@@ -608,6 +715,19 @@ void write_report(Recording *r)
     };
     top("Hot spots, self time (percent of the frame-time samples; '<-' = the port/game function that called it):", self, 45);
     top("Hot spots, including callees (from return addresses found on the stack, a heuristic; running samples only):", incl, 30);
+    auto top1 = [&](const char *title, const std::map<std::string, double> &m, int count) {
+        std::vector<std::pair<double, std::string>> v;
+        for (auto &[k, n] : m) v.push_back({n, k});
+        std::sort(v.rbegin(), v.rend());
+        put("\n%s\n", title);
+        for (int i = 0; i < (int)v.size() && i < count; i++)
+            put("  %5.1f%% %4.0f  %s\n", 100.0 * v[i].first / std::max(1.0, spike_samples), v[i].first, v[i].second.c_str());
+    };
+    put("\nSpike frames (work over 20 ms): %zu frames, %.0f samples\n", spike_frames, spike_samples);
+    if (spike_samples) {
+        top1("  self time (percent of their samples, samples):", spike_self, 30);
+        top1("  including callees (running samples):", spike_incl, 30);
+    }
 
     // threads
     std::sort(r->threads.begin(), r->threads.end(), [](const ThreadCpu &a, const ThreadCpu &b) { return a.c1 - a.c0 > b.c1 - b.c0; });
@@ -752,7 +872,12 @@ void scripted()
 
 } // namespace
 
-Scope::Scope(Cat c) : cat(c), on(g_on)
+int64_t det_now() { return qpc(); }
+void det_add(Det d, int64_t ticks) { g_det_ticks[d] += ticks; }
+void det_count_discard() { g_det_discards++; }
+double det_ms(int64_t ticks) { return (double)ticks * tick_ms(); }
+
+Scope::Scope(Cat c) : cat(c), on(g_on || g_detail)
 {
     if (!on) return;
     int64_t now = qpc();
@@ -804,11 +929,44 @@ void frame_end(uint32_t render_w, uint32_t render_h)
         uint32_t c = g_h_compiles.exchange(0), u = g_h_uploads.exchange(0), ukb = g_h_upload_kb.exchange(0),
                  rc = g_h_rt_copies.exchange(0), r = g_h_reads.exchange(0), rkb = g_h_read_kb.exchange(0),
                  bus = g_h_build_us.exchange(0), cached = g_h_cached.exchange(0);
+        // --hitch-detail: this frame's category and part times (the recorder takes the categories itself while it runs)
+        float cat[kCatCount] = {}, det[kDetCount] = {};
+        if (g_detail) {
+            if (!(g_on && g_rec))
+                for (int i = 0; i < kCatCount; i++) cat[i] = ms(g_cat_ticks[i].exchange(0));
+            for (int i = 0; i < kDetCount; i++) det[i] = ms(g_det_ticks[i].exchange(0));
+        }
+        uint32_t discards = g_detail ? g_det_discards.exchange(0) : 0;
+        double render_cpu = 0; // --hitch-detail: the render thread's own CPU this frame (the rest of the frame it waited)
+        if (g_detail) {
+            det_threads_frame(frames);
+            static uint64_t last_cyc;
+            uint64_t c = 0;
+            QueryThreadCycleTime(GetCurrentThread(), &c);
+            render_cpu = last_cyc && g_cycles_per_ms ? (double)(c - last_cyc) / g_cycles_per_ms : 0;
+            last_cyc = c;
+        }
         static int logged;
         if (dt > 50.0 && frames > 2 && logged < 300) {
             logged++;
             logf("[hitch] frame %u took %.0f ms: new shaders %u (%.0f ms building, %u from the cache), texture uploads %u (%u KB), "
                  "render target copies %u, file reads %u (%u KB)", frames, dt, c, bus / 1000.0, cached, u, ukb, rc, r, rkb);
+            if (g_detail) {
+                float port = 0;
+                for (int i = 0; i < kCatCount; i++) port += cat[i];
+                // the rest: the game's own code, D3D calls outside the timed parts, waits
+                float rest = (float)dt - port - det[kDetPace] - det[kDetPresent];
+                logf("[hitch]   frame %u detail ms: draw %.1f (driver draw calls %.1f, ring locks %.1f + %.1f at %u restarts, "
+                     "shader binds %.1f, texture binds %.1f, constants %.1f, render states %.1f), vertex convert %.1f, "
+                     "textures %.1f (create %.1f, decode %.1f, upload %.1f), shaders %.1f (D3DCompile %.1f, create %.1f), "
+                     "rt copies %.1f; pace %.1f, present %.1f; rest %.1f",
+                     frames, cat[kDraw], det[kDetDrawCall], det[kDetRingLock], det[kDetRingDiscard], discards, det[kDetBind],
+                     det[kDetSetTexture], det[kDetConstants], det[kDetStates], cat[kConvert], cat[kTexture], det[kDetTexCreate],
+                     det[kDetTexFill], det[kDetTexPush], cat[kCompile], det[kDetD3DCompile], det[kDetShaderCreate],
+                     cat[kRtCopy], det[kDetPace], det[kDetPresent], rest);
+                logf("[hitch]   frame %u CPU: the render thread %.1f ms of its %.0f; other threads: %s", frames, render_cpu, dt,
+                     det_threads_text().c_str());
+            }
         }
     }
     scripted();

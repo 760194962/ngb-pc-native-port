@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(POLICY CMP0184)
   cmake_policy(SET CMP0184 NEW) # MSVC_RUNTIME_CHECKS property
 endif()
-project(black_loader VERSION 2.2.30 LANGUAGES C CXX) # the release number (About box, first log line)
+project(black_loader VERSION 2.2.31 LANGUAGES C CXX) # the release number (About box, first log line)
 set(NGB_VERSION_STRING "${PROJECT_VERSION}") # test packages carry -tN (1.1.5-t..1.1.8-t, 2.2.0-t1, -t2); releases none
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -42,6 +42,8 @@ add_library(blackrt SHARED
   src/ng04_exitmenu.cpp
   src/ng04_camera.cpp
   src/ngb_livedash.cpp
+  src/ngb_cpu_textures.cpp
+  src/ngb_sound_boot.cpp
   src/fe/calls.cpp
   src/fe/vars.cpp
   src/fe/pc_settings.cpp
@@ -97,6 +99,8 @@ add_library(blackrt SHARED
   src/d3d/nv2a_psh.cpp
   src/d3d/pshader.cpp
   src/d3d/ffp_ps.cpp
+  src/d3d/ffp_vs.cpp
+  src/d3d/drawwarm.cpp
   src/d3d/shader_cache.cpp
   src/d3d/perfhud.cpp
   src/audio/dsound.cpp

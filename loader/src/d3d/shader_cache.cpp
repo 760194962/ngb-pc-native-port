@@ -3,10 +3,14 @@
 #include "common.h"
 #include "perf.h"
 
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace xd3d {
@@ -95,33 +99,47 @@ bool cache_entry_current(const std::wstring &path)
     return bt.QuadPart <= gt.QuadPart; // .gen is written after .bin; a newer .bin came from another build
 }
 
-bool parse_file(const std::wstring &path, Entry *e)
+std::vector<uint8_t> read_all(const std::wstring &path, bool *ok)
 {
-    FILE *f = _wfopen(path.c_str(), L"rb");
-    if (!f) return false;
     std::vector<uint8_t> d;
+    FILE *f = _wfopen(path.c_str(), L"rb");
+    *ok = f != nullptr;
+    if (!f) return d;
     uint8_t buf[65536];
     for (size_t n; (n = fread(buf, 1, sizeof buf, f)) > 0;) d.insert(d.end(), buf, buf + n);
     fclose(f);
+    return d;
+}
+
+// One entry's bytes (a .bin file, or a record of the shipped seed)
+bool parse_bytes(const uint8_t *d, size_t size, Entry *e)
+{
     size_t at = 0;
     auto u32 = [&](uint32_t *v) {
-        if (at + 4 > d.size()) return false;
-        memcpy(v, &d[at], 4);
+        if (at + 4 > size) return false;
+        memcpy(v, d + at, 4);
         at += 4;
         return true;
     };
     auto field = [&](std::string *s) {
         uint32_t n;
-        if (!u32(&n) || at + n > d.size()) return false;
-        s->assign((const char *)&d[at], n);
+        if (!u32(&n) || n > size - at) return false;
+        s->assign((const char *)d + at, n);
         at += n;
         return true;
     };
     uint32_t magic, version, len;
     if (!u32(&magic) || magic != kMagic || !u32(&version) || version != kVersion || !u32(&e->flags)) return false;
-    if (!field(&e->profile) || !field(&e->hlsl) || !u32(&len) || at + len != d.size()) return false;
-    e->code.assign(d.begin() + at, d.end());
+    if (!field(&e->profile) || !field(&e->hlsl) || !u32(&len) || at + len != size) return false;
+    e->code.assign(d + at, d + size);
     return true;
+}
+
+bool parse_file(const std::wstring &path, Entry *e)
+{
+    bool ok;
+    std::vector<uint8_t> d = read_all(path, &ok);
+    return ok && parse_bytes(d.data(), d.size(), e);
 }
 
 // The entries read at start (prewarm_shaders), by file path: a lookup in play then reads no file. Opening one took about
@@ -197,7 +215,10 @@ std::unordered_multimap<uint64_t, Warm> g_warm;
 
 uint64_t code_key(const void *p, size_t n) { return fnv1a(0xCBF29CE484222325ull, p, n); }
 
-// A prewarmed object for this bytecode (its reference passes to the caller), or null.
+// A prewarmed object for this bytecode (a new reference for the caller), or null. The object stays for the next
+// caller with the same bytecode: different sources can compile to the same code (the generated fixed-function shaders'
+// states that differ only in what the code does not use), and each of those used to make the object again in play,
+// a CreateVertexShader that waited 2-3 ms on the driver's thread (RTX 3060, 2026-11-15).
 IUnknown *take_warm(IDirect3DDevice9 *d, bool vertex, ID3DBlob *code)
 {
     auto range = g_warm.equal_range(code_key(code->GetBufferPointer(), code->GetBufferSize()));
@@ -205,9 +226,8 @@ IUnknown *take_warm(IDirect3DDevice9 *d, bool vertex, ID3DBlob *code)
         const Warm &w = it->second;
         if (w.dev == d && w.vertex == vertex && w.code.size() == code->GetBufferSize() &&
             !memcmp(w.code.data(), code->GetBufferPointer(), w.code.size())) {
-            IUnknown *obj = w.obj;
-            g_warm.erase(it);
-            return obj;
+            w.obj->AddRef();
+            return w.obj;
         }
     }
     return nullptr;
@@ -227,6 +247,7 @@ HRESULT cached_compile(const std::string &hlsl, const char *name, const char *pr
     int cached = read_entry(path, hlsl, profile, flags, code);
     HRESULT hr = cached > 0 ? S_OK : E_FAIL;
     if (!cached) {
+        perf::DetScope ds(perf::kDetD3DCompile);
         hr = D3DCompile(hlsl.data(), hlsl.size(), name, nullptr, nullptr, "main", profile, flags, 0, code, errors);
         write_entry(path, hlsl, profile, flags, SUCCEEDED(hr) ? *code : nullptr);
     }
@@ -236,6 +257,171 @@ HRESULT cached_compile(const std::string &hlsl, const char *name, const char *pr
     return hr;
 }
 
+// ---- compiles within a budget, the rest on a thread (compile_now_or_later) ----
+bool g_shader_later;
+
+namespace {
+
+struct Job {
+    std::string hlsl, name;
+    std::vector<std::string> profiles; // those not known to fail, in order
+    UINT flags;
+};
+std::mutex g_jobs_lock;
+std::condition_variable g_jobs_cv;
+std::deque<Job> g_jobs;
+std::unordered_set<std::string> g_queued; // the jobs' sources (with their flags) queued or compiling
+bool g_worker_started;
+uint32_t g_budget_frame = ~0u;
+double g_budget_spent;                        // ms compiled on the render thread this frame
+uint32_t g_later_jobs, g_later_draws, g_later_done; // since the last report
+double g_later_ms;
+
+std::string job_id(const std::string &hlsl, UINT flags) { return hlsl + '\0' + std::to_string(flags); }
+
+uint32_t g_later_first = ~0u, g_later_last; // frames with a draw left out (since the last report)
+
+// The jobs in order on up to 4 threads (half the logical CPUs; D3DCompile is reentrant), at the normal priority: a draw
+// is left out until its shader is done. ngbrecomp 0.9.68 has one; with one, the first area's 26 new shaders (cold
+// cache, no seed, RTX 3060) took 0.24 s and their draws were left out about 14 frames (the title's fade cut short);
+// with four, 214 draws in 4 frames, then 12 in 2 (2026-11-15).
+void compile_worker()
+{
+    for (;;) {
+        Job j;
+        {
+            std::unique_lock<std::mutex> g(g_jobs_lock);
+            g_jobs_cv.wait(g, [] { return !g_jobs.empty(); });
+            j = std::move(g_jobs.front());
+            g_jobs.pop_front();
+        }
+        LARGE_INTEGER t0, t1, f;
+        QueryPerformanceCounter(&t0);
+        for (const std::string &p : j.profiles) {
+            ID3DBlob *code = nullptr, *errors = nullptr;
+            HRESULT hr = D3DCompile(j.hlsl.data(), j.hlsl.size(), j.name.c_str(), nullptr, nullptr, "main", p.c_str(), j.flags, 0,
+                                    &code, &errors);
+            std::wstring path = entry_path(j.hlsl, p.c_str(), j.flags);
+            write_entry(path, j.hlsl, p.c_str(), j.flags, SUCCEEDED(hr) ? code : nullptr); // (files: off the render thread)
+            Entry e;
+            e.flags = j.flags, e.profile = p, e.hlsl = j.hlsl;
+            if (SUCCEEDED(hr)) {
+                const uint8_t *c = (const uint8_t *)code->GetBufferPointer();
+                e.code.assign(c, c + code->GetBufferSize());
+            }
+            {
+                std::lock_guard<std::mutex> g(g_lock);
+                g_mem[path] = std::move(e); // the render thread's next lookup finds it here
+            }
+            if (code) code->Release();
+            if (errors) errors->Release();
+            if (SUCCEEDED(hr)) break;
+        }
+        QueryPerformanceCounter(&t1);
+        QueryPerformanceFrequency(&f);
+        std::lock_guard<std::mutex> g(g_jobs_lock);
+        g_queued.erase(job_id(j.hlsl, j.flags));
+        g_later_done++;
+        g_later_ms += (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+    }
+}
+
+} // namespace
+
+Compiled compile_now_or_later(const std::string &hlsl, const char *name, const char *const *profiles, UINT flags,
+                              ID3DBlob **code, ID3DBlob **errors, const char **profile)
+{
+    *code = nullptr;
+    if (errors) *errors = nullptr;
+    // What the cache knows: the first profile that compiles, or where the unknown ones start
+    // (a source the cache holds is made at once, budget or not: 0.9.68's #21, deferring those left walls and effects
+    // out for a while after every start)
+    std::vector<std::string> unknown;
+    {
+        std::lock_guard<std::mutex> g(g_lock);
+        for (const char *const *p = profiles; *p; p++) {
+            if (!unknown.empty()) {
+                unknown.push_back(*p);
+                continue;
+            }
+            int r = read_entry(entry_path(hlsl, *p, flags), hlsl, *p, flags, code);
+            if (r > 0) {
+                *profile = *p;
+                perf::add_shader_build(0, true);
+                return Compiled::kReady;
+            }
+            if (r == 0) unknown.push_back(*p);
+        }
+    }
+    if (unknown.empty()) return Compiled::kFailed; // every profile known not to compile it
+    std::string id = job_id(hlsl, flags);
+    {
+        std::lock_guard<std::mutex> g(g_jobs_lock);
+        if (g_queued.count(id)) return Compiled::kLater; // compiling already
+    }
+    uint32_t frame = g_frame_count.load(std::memory_order_relaxed);
+    if (frame != g_budget_frame) g_budget_frame = frame, g_budget_spent = 0;
+    double budget = g_cfg.compile_budget_ms;
+    if (budget < 0 || g_budget_spent < budget) { // now, as before
+        LARGE_INTEGER t0, t1, f;
+        QueryPerformanceCounter(&t0);
+        Compiled result = Compiled::kFailed;
+        for (const std::string &p : unknown) {
+            if (errors && *errors) (*errors)->Release(), *errors = nullptr;
+            const char *pp = nullptr;
+            for (const char *const *q = profiles; *q; q++)
+                if (p == *q) pp = *q;
+            if (SUCCEEDED(cached_compile(hlsl, name, pp, flags, code, errors))) {
+                *profile = pp;
+                result = Compiled::kReady;
+                break;
+            }
+        }
+        QueryPerformanceCounter(&t1);
+        QueryPerformanceFrequency(&f);
+        g_budget_spent += (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+        return result;
+    }
+    std::lock_guard<std::mutex> g(g_jobs_lock);
+    if (!g_worker_started) {
+        g_worker_started = true;
+        unsigned n = std::thread::hardware_concurrency() / 2;
+        n = n < 1 ? 1 : n > 4 ? 4 : n;
+        for (unsigned i = 0; i < n; i++) std::thread(compile_worker).detach();
+        logf("[shader cache] %u compile threads (shaders past the %.0f ms budget a frame)", n, budget);
+    }
+    g_queued.insert(id);
+    g_jobs.push_back(Job{hlsl, name, std::move(unknown), flags});
+    g_jobs_cv.notify_one();
+    g_later_jobs++;
+    return Compiled::kLater;
+}
+
+void compile_later_report()
+{
+    static uint32_t last;
+    uint32_t frame = g_frame_count.load(std::memory_order_relaxed);
+    if (frame - last < 60) return;
+    last = frame;
+    std::lock_guard<std::mutex> g(g_jobs_lock);
+    if (!g_later_jobs && !g_later_draws) return;
+    char span[64] = "";
+    if (g_later_draws) snprintf(span, sizeof span, " in frames %u-%u (%u)", g_later_first, g_later_last, g_later_last - g_later_first + 1);
+    logf("[shader cache] frame %u: %u shaders went to the compile threads (%u done, %.0f ms of compiling), %u draws left out%s", frame,
+         g_later_jobs, g_later_done, g_later_ms, g_later_draws, span);
+    g_later_jobs = g_later_draws = g_later_done = 0;
+    g_later_ms = 0;
+    g_later_first = ~0u, g_later_last = 0;
+}
+
+void compile_later_count_draw()
+{
+    g_later_draws++;
+    uint32_t f = g_frame_count.load(std::memory_order_relaxed);
+    if (g_later_first == ~0u) g_later_first = f;
+    g_later_last = f;
+}
+
 void prewarm_shaders(IDirect3DDevice9 *d)
 {
     std::lock_guard<std::mutex> g(g_lock);
@@ -243,7 +429,22 @@ void prewarm_shaders(IDirect3DDevice9 *d)
     QueryPerformanceCounter(&t0);
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW((cache_dir() + L"\\*.bin").c_str(), &fd);
-    unsigned nv = 0, np = 0, bad = 0, failed = 0, old = 0, migrated = 0;
+    unsigned nv = 0, np = 0, bad = 0, failed = 0, old = 0, migrated = 0, seeded = 0;
+    std::unordered_set<std::wstring> scanned; // the player's entries made this time (the seed skips those)
+    // An entry kept in g_mem made into its shader object, handed out later by take_warm
+    auto warm = [&](const Entry &kept) {
+        if (kept.code.empty()) return; // a source this profile does not compile
+        bool vertex = kept.profile.compare(0, 3, "vs_") == 0;
+        IUnknown *obj = nullptr;
+        HRESULT hr = vertex ? d->CreateVertexShader((const DWORD *)kept.code.data(), (IDirect3DVertexShader9 **)&obj)
+                            : d->CreatePixelShader((const DWORD *)kept.code.data(), (IDirect3DPixelShader9 **)&obj);
+        if (FAILED(hr)) {
+            failed++;
+            return;
+        }
+        (vertex ? nv : np)++;
+        g_warm.emplace(code_key(kept.code.data(), kept.code.size()), Warm{d, vertex, kept.code, obj});
+    };
     if (h != INVALID_HANDLE_VALUE) {
         do {
             std::wstring path = cache_dir() + L"\\" + fd.cFileName;
@@ -268,29 +469,70 @@ void prewarm_shaders(IDirect3DDevice9 *d)
                 bad++;
                 continue;
             }
-            Entry &kept = g_mem[path] = e;
-            if (e.code.empty()) continue; // a source this profile does not compile
-            bool vertex = e.profile.compare(0, 3, "vs_") == 0;
-            IUnknown *obj = nullptr;
-            HRESULT hr = vertex ? d->CreateVertexShader((const DWORD *)e.code.data(), (IDirect3DVertexShader9 **)&obj)
-                                : d->CreatePixelShader((const DWORD *)e.code.data(), (IDirect3DPixelShader9 **)&obj);
-            if (FAILED(hr)) {
-                failed++;
-                continue;
-            }
-            (vertex ? nv : np)++;
-            uint64_t key = code_key(e.code.data(), e.code.size());
-            g_warm.emplace(key, Warm{d, vertex, kept.code, obj});
+            warm(g_mem[path] = e);
+            scanned.insert(path);
         } while (FindNextFileW(h, &fd));
         FindClose(h);
     }
+    // The seed shipped beside the program (shader_seed.bin, tools/make_shader_seed.py): entries recorded in test runs
+    // over the chapters, so a first start has them too -- a new player otherwise compiled every shader the first time
+    // an area showed it, on the render thread (2-40 ms each, D3DCompile; ngbrecomp ships one for the same reason,
+    // packaging/d3d-seed.bin). Read-only: it stays out of cache\shaders, and an entry the player's cache holds (the
+    // same source, so the same bytecode) is not made twice. Records: "NGBSEED1", count, then each entry's file bytes
+    // with their length. The game's own vertex programs are not in it (their HLSL is the game's code translated).
+    {
+        bool ok;
+        std::vector<uint8_t> s = read_all(g_cfg.port_dir + L"\\shader_seed.bin", &ok);
+        unsigned in_seed = 0, seed_bad = 0;
+        if (ok && s.size() >= 12 && !memcmp(s.data(), "NGBSEED1", 8)) {
+            uint32_t count;
+            memcpy(&count, &s[8], 4);
+            size_t at = 12;
+            for (uint32_t i = 0; i < count && at + 4 <= s.size(); i++) {
+                uint32_t len;
+                memcpy(&len, &s[at], 4);
+                at += 4;
+                if (len > s.size() - at) break;
+                Entry e;
+                bool good = parse_bytes(&s[at], len, &e);
+                at += len;
+                in_seed++;
+                if (!good) {
+                    seed_bad++;
+                    continue;
+                }
+                std::wstring path = entry_path(e.hlsl, e.profile.c_str(), e.flags);
+                if (scanned.count(path)) continue; // the player's cache has it (made above)
+                warm(g_mem[path] = std::move(e));
+                seeded++;
+            }
+        } else if (ok) {
+            seed_bad = 1;
+        }
+        if (ok) logf("[shader cache] seed: %u entries, %u not in the player's cache added%s", in_seed, seeded,
+                     seed_bad ? " (part of shader_seed.bin unreadable)" : "");
+    }
     QueryPerformanceCounter(&t1);
     QueryPerformanceFrequency(&f);
-    logf("[shader cache] read %zu entries, made %u vertex and %u pixel shaders from %s in %.0f ms; %u old-generator kept, "
+    logf("[shader cache] read %zu entries, made %u vertex and %u pixel shaders from %s and the seed in %.0f ms; %u old-generator kept, "
          "%u legacy marked, %u unreadable deleted%s",
          g_mem.size(), nv, np, narrow(cache_dir()).c_str(),
          (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart, old, migrated, bad,
          failed ? " (the device refused some)" : "");
+}
+
+uint64_t shader_code_key(const void *code, size_t size) { return code_key(code, size); }
+
+IUnknown *warm_lookup(IDirect3DDevice9 *d, bool vertex, uint64_t key)
+{
+    std::lock_guard<std::mutex> g(g_lock);
+    auto range = g_warm.equal_range(key);
+    for (auto it = range.first; it != range.second; ++it)
+        if (it->second.dev == d && it->second.vertex == vertex) {
+            it->second.obj->AddRef();
+            return it->second.obj;
+        }
+    return nullptr;
 }
 
 void warm_drop_all()
@@ -309,7 +551,15 @@ HRESULT create_vertex_shader(IDirect3DDevice9 *d, ID3DBlob *code, IDirect3DVerte
             return S_OK;
         }
     }
-    return d->CreateVertexShader((const DWORD *)code->GetBufferPointer(), out);
+    perf::DetScope ds(perf::kDetShaderCreate);
+    HRESULT hr = d->CreateVertexShader((const DWORD *)code->GetBufferPointer(), out);
+    if (SUCCEEDED(hr)) { // kept for the next source with the same code (take_warm)
+        std::lock_guard<std::mutex> g(g_lock);
+        (*out)->AddRef();
+        const uint8_t *c = (const uint8_t *)code->GetBufferPointer();
+        g_warm.emplace(code_key(c, code->GetBufferSize()), Warm{d, true, std::vector<uint8_t>(c, c + code->GetBufferSize()), *out});
+    }
+    return hr;
 }
 
 HRESULT create_pixel_shader(IDirect3DDevice9 *d, ID3DBlob *code, IDirect3DPixelShader9 **out)
@@ -321,7 +571,15 @@ HRESULT create_pixel_shader(IDirect3DDevice9 *d, ID3DBlob *code, IDirect3DPixelS
             return S_OK;
         }
     }
-    return d->CreatePixelShader((const DWORD *)code->GetBufferPointer(), out);
+    perf::DetScope ds(perf::kDetShaderCreate);
+    HRESULT hr = d->CreatePixelShader((const DWORD *)code->GetBufferPointer(), out);
+    if (SUCCEEDED(hr)) { // kept for the next source with the same code (take_warm)
+        std::lock_guard<std::mutex> g(g_lock);
+        (*out)->AddRef();
+        const uint8_t *c = (const uint8_t *)code->GetBufferPointer();
+        g_warm.emplace(code_key(c, code->GetBufferSize()), Warm{d, false, std::vector<uint8_t>(c, c + code->GetBufferSize()), *out});
+    }
+    return hr;
 }
 
 } // namespace xd3d

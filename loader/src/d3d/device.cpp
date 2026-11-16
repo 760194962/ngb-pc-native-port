@@ -11,6 +11,8 @@
 #include "d3d/host.h"
 #include "d3d/shader_cache.h"
 #include "d3d/ffp_ps.h"
+#include "d3d/ffp_vs.h"
+#include "d3d/drawwarm.h"
 #include "d3d/nv2a_psh.h"
 #include "d3d/perfhud.h"
 #include "d3d/pshader.h"
@@ -280,6 +282,7 @@ HostRT &host_rt_at(uint32_t data, uint32_t w, uint32_t h)
         buffer_scale(mem_key(data, w, h), w, h, &rt.sx, &rt.sy);
         w = (uint32_t)lroundf(w * rt.sx);
         h = (uint32_t)lroundf(h * rt.sy);
+        int64_t t0 = perf::g_detail ? perf::det_now() : 0; // --hitch-detail: how long making it took
         host3d::dev()->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &rt.tex, nullptr);
         rt.w = w;
         rt.h = h;
@@ -288,7 +291,9 @@ HostRT &host_rt_at(uint32_t data, uint32_t w, uint32_t h)
             host3d::dev()->ColorFill(surf, nullptr, 0);
             surf->Release();
         }
-        logf("[d3d] render target texture %ux%u for surface data 0x%08x", w, h, data);
+        if (t0) logf("[d3d] render target texture %ux%u for surface data 0x%08x, made and cleared in %.1f ms", w, h, data,
+                     perf::det_ms(perf::det_now() - t0));
+        else logf("[d3d] render target texture %ux%u for surface data 0x%08x", w, h, data);
     }
     return rt;
 }
@@ -315,22 +320,28 @@ HostZ &host_z(const PixelContainer *z, uint32_t rt_w, uint32_t rt_h, uint64_t *k
     w = (uint32_t)lroundf(w * sx);
     h = (uint32_t)lroundf(h * sy);
     if (!hz.surf) {
+        int64_t t0 = perf::g_detail ? perf::det_now() : 0; // --hitch-detail
         if (host3d::intz() &&
             SUCCEEDED(host3d::dev()->CreateTexture(w, h, 1, D3DUSAGE_DEPTHSTENCIL, host3d::FMT_INTZ, D3DPOOL_DEFAULT, &hz.tex, nullptr)))
             hz.tex->GetSurfaceLevel(0, &hz.surf);
         else
             host3d::dev()->CreateDepthStencilSurface(w, h, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, FALSE, &hz.surf, nullptr);
-        logf("[d3d] depth surface %ux%u for surface data 0x%08x%s", w, h, z->Data, hz.tex ? " (INTZ)" : "");
+        logf("[d3d] depth surface %ux%u for surface data 0x%08x%s%s", w, h, z->Data, hz.tex ? " (INTZ)" : "",
+             t0 ? (", made in " + std::to_string(perf::det_ms(perf::det_now() - t0)) + " ms").c_str() : "");
     }
     return hz;
 }
 
+// The port's own pixel shaders (depth fill and reads, the anti-aliasing resolves), made at their first use: through the
+// shader cache and its prewarmed objects like the game's (shader_cache.cpp), so the shader seed covers them too. They
+// were compiled with D3DCompile at every start, in the frame that first needed one (an area's first scene: the
+// D3DCompile samples of its 28-43 ms frame, perf 2026-11-15).
 IDirect3DPixelShader9 *compile_ps(const char *src, const char *name, const char *profile = "ps_2_0")
 {
     IDirect3DPixelShader9 *ps = nullptr;
     ID3DBlob *code = nullptr, *errors = nullptr;
-    if (SUCCEEDED(D3DCompile(src, strlen(src), name, nullptr, nullptr, "main", profile, 0, 0, &code, &errors)))
-        host3d::dev()->CreatePixelShader((const DWORD *)code->GetBufferPointer(), &ps);
+    if (SUCCEEDED(cached_compile(src, name, profile, 0, &code, &errors)))
+        create_pixel_shader(host3d::dev(), code, &ps);
     else
         logf("[d3d] %s shader: %s", name, errors ? (const char *)errors->GetBufferPointer() : "?");
     if (code) code->Release();
@@ -1169,6 +1180,7 @@ void apply_viewport()
 // (+0x1DBC, waited on by D3DDevice_BlockUntilVerticalBlank and game threads) and calls the callback set
 // with SetVerticalBlankCallback (+0x1DB8) with a D3DVBLANKDATA {VBlank, Swap, Flags}.
 std::atomic<uint32_t> g_vblank_count, g_swap_count;
+std::atomic<int64_t> g_vblank_qpc; // QueryPerformanceCounter at the last vblank (pace_swap: the time left before its target)
 HANDLE g_vblank_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr); // wakes pace_swap at each vblank
 
 // The emulated vblank follows the display's when the display refreshes at about 60 Hz: DwmFlush returns after
@@ -1220,7 +1232,10 @@ void __stdcall vblank_thread(void *)
             now.QuadPart = now.QuadPart - due < period ? due : now.QuadPart;
         }
         last = now;
+        // the count first, then its time: a reader that races sees the new count with the old time and finds less time
+        // left than there is (pace_swap's pool refill then does less), never more
         uint32_t vb = ++g_vblank_count;
+        g_vblank_qpc.store(now.QuadPart);
         SetEvent(g_vblank_wake);
         from_display += synced;
         if (flush && vb % 3600 == 0) {
@@ -1896,11 +1911,96 @@ void pace_swap()
         // frames, so at 60 fps they expired while the cue was still on and were shown a second time (docs/05 §7).
         if (now >= target && !(iv & 0x80000000)) target = now + 1;
         if (g_trace_d3d) logf("[d3d] pace_swap: interval 0x%x n %u last_vb %u now %u target %u", iv, n, last_vb, now, target);
+        // Time to wait: the texture pool makes again what an area took (texture.cpp texture_pool_refill), by the target
+        // vblank's time: the last vblank's plus a period for each still to come (59.94 Hz, as the vblank thread counts)
+        uint32_t c = g_vblank_count.load();
+        int64_t q = g_vblank_qpc.load();
+        if (q && c < target) {
+            static const int64_t period = [] {
+                LARGE_INTEGER f;
+                QueryPerformanceFrequency(&f);
+                return f.QuadPart * 1001 / 60000;
+            }();
+            texture_pool_refill(host3d::dev(), q + (int64_t)(target - c) * period);
+        }
         while (g_vblank_count.load() < target) WaitForSingleObject(g_vblank_wake, 4); // Sleep(1) polling woke 0-2 ms late
     }
     uint32_t now_vb = g_vblank_count.load();
     perf::pace_end(now_vb - last_vb, n ? n : 1);
     last_vb = now_vb;
+}
+
+// --hitch-detail: the GPU's time for each frame, from timestamp queries -- one issued after the Present before the
+// frame (start), one before its own (end) -- read back a few frames later without waiting; a frame whose commands
+// took the GPU over 25 ms is logged. Tells a Present that waits for a busy GPU from one that waits for something else.
+void gpu_frame_marks(uint32_t frame, bool end)
+{
+    struct Set {
+        IDirect3DQuery9 *disjoint = nullptr, *freq = nullptr, *t0 = nullptr, *t1 = nullptr;
+        uint32_t frame = 0;
+        bool pending = false;
+    };
+    static Set sets[8];
+    static IDirect3DDevice9 *made_on;
+    static bool failed;
+    IDirect3DDevice9 *d = host3d::dev();
+    if (failed || !d) return;
+    if (made_on != d) { // a new device: new queries (the old ones went with it)
+        made_on = d;
+        for (Set &s : sets) {
+            s = Set{};
+            if (FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMPDISJOINT, &s.disjoint)) ||
+                FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMPFREQ, &s.freq)) ||
+                FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &s.t0)) || FAILED(d->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &s.t1))) {
+                logf("[hitch] GPU timestamps not available on this device");
+                failed = true;
+                return;
+            }
+        }
+    }
+    if (!end) { // after the Present: the next frame starts
+        Set &s = sets[(frame + 1) % 8];
+        if (s.pending) return; // its last results never came: skip a frame
+        s.frame = frame + 1;
+        s.disjoint->Issue(D3DISSUE_BEGIN);
+        s.t0->Issue(D3DISSUE_END);
+        return;
+    }
+    Set &s = sets[frame % 8];
+    if (s.frame == frame && !s.pending) {
+        s.t1->Issue(D3DISSUE_END);
+        s.freq->Issue(D3DISSUE_END);
+        s.disjoint->Issue(D3DISSUE_END);
+        s.pending = true;
+    }
+    for (Set &p : sets) { // results that came in (no flush: never waits)
+        if (!p.pending) continue;
+        BOOL disjoint = TRUE;
+        UINT64 f = 0, a = 0, b = 0;
+        if (p.disjoint->GetData(&disjoint, sizeof disjoint, 0) != S_OK || p.freq->GetData(&f, sizeof f, 0) != S_OK ||
+            p.t0->GetData(&a, sizeof a, 0) != S_OK || p.t1->GetData(&b, sizeof b, 0) != S_OK)
+            continue;
+        p.pending = false;
+        double ms = f && !disjoint && b >= a ? (double)(b - a) * 1000.0 / (double)f : -1.0;
+        static int logged;
+        if (ms > 25.0 && logged++ < 200) logf("[hitch] GPU: frame %u took the GPU %.1f ms", p.frame, ms);
+        // a check of the measuring itself: what came back over 600 frames
+        static uint32_t got, bad, from = frame;
+        static double most, sum;
+        if (ms < 0) bad++;
+        else {
+            got++;
+            sum += ms;
+            most = std::max(most, ms);
+        }
+        if (frame - from >= 600) {
+            logf("[hitch] GPU timestamps, last %u frames: %u read (mean %.2f ms, most %.1f ms), %u disjoint or bad", frame - from,
+                 got, got ? sum / got : 0.0, most, bad);
+            got = bad = 0;
+            most = sum = 0;
+            from = frame;
+        }
+    }
 }
 
 // D3DDevice_BlockUntilVerticalBlank: block until the *next* emulated vblank, whatever the vblank KEVENT's state. The
@@ -2056,15 +2156,63 @@ void rebind_game_target()
 
 } // namespace
 
+// A forced rebuild at the same render size (request_render_rebuild): the game's first 3D frame marks its glow chain's
+// small buffers to stay at their Xbox size (rt_texture_for), and every target was made again for it -- two 2880x1440,
+// a 2048x1536 and the rest released, made and copied over at once. On the Iris Xe the next call that had to wait for
+// D3D9On12's memory (a ring Lock, the shader constants, Present) then waited 45-115 ms, at every start (2026-11-15).
+// Only the targets whose scale rule now gives another scale are made again, with their pictures copied over.
+void rebuild_changed_targets()
+{
+    int64_t t0 = perf::g_detail ? perf::det_now() : 0; // --hitch-detail: how long it took
+    std::vector<uint64_t> keys;
+    for (auto &kv : g_rts) {
+        float sx, sy;
+        buffer_scale(kv.first, kv.second.xw, kv.second.xh, &sx, &sy);
+        if (kv.second.tex && (fabsf(sx - kv.second.sx) > 1e-4f || fabsf(sy - kv.second.sy) > 1e-4f)) keys.push_back(kv.first);
+    }
+    if (keys.empty()) return;
+    host3d::end_scene();
+    IDirect3DDevice9 *d = host3d::dev();
+    d->SetRenderTarget(0, g_host_backbuffer); // none of them bound while they go
+    d->SetDepthStencilSurface(g_host_depth);
+    for (uint64_t key : keys) {
+        HostRT old = g_rts[key];
+        ms_resolve(g_rts[key]); // (MSAA) its last draws into its texture first
+        old.tex = g_rts[key].tex;
+        if (g_ms_bound == &g_rts[key]) g_ms_bound = nullptr;
+        g_rts.erase(key);
+        HostRT &n = host_rt_at((uint32_t)(key >> 24), (uint32_t)(key >> 12) & 0xFFF, (uint32_t)key & 0xFFF);
+        IDirect3DSurface9 *a = nullptr, *b = nullptr;
+        if (n.tex && SUCCEEDED(old.tex->GetSurfaceLevel(0, &a)) && SUCCEEDED(n.tex->GetSurfaceLevel(0, &b)))
+            d->StretchRect(a, nullptr, b, nullptr, D3DTEXF_LINEAR);
+        if (a) a->Release();
+        if (b) b->Release();
+        for (IUnknown *p : {(IUnknown *)old.tex, (IUnknown *)old.smooth, (IUnknown *)old.reduced, (IUnknown *)old.soft,
+                            (IUnknown *)old.soft_tmp, (IUnknown *)old.ms})
+            if (p) p->Release();
+    }
+    g_cur_rt = nullptr;
+    rebind_game_target();
+    logf("[d3d] %zu of %zu targets made again at their own scale (the render size stays %ux%u)%s", keys.size(), g_rts.size(),
+         host_w(g_width), host_h(g_height),
+         t0 ? (", in " + std::to_string(perf::det_ms(perf::det_now() - t0)) + " ms").c_str() : "");
+}
+
 // Change the render size while running (between frames). Every host target was made at the old scale.
 void change_render_scale(int pic_w, int pic_h)
 {
     float ox = g_scale_x, oy = g_scale_y;
     setup_render_scale(pic_w, pic_h);
-    if (fabsf(ox - g_scale_x) < 1e-4f && fabsf(oy - g_scale_y) < 1e-4f && !g_force_rebuild.exchange(false)) return;
+    bool same = fabsf(ox - g_scale_x) < 1e-4f && fabsf(oy - g_scale_y) < 1e-4f;
+    if (same && !g_force_rebuild.exchange(false)) return;
+    if (same) { // the scale stays: only the targets whose rule changed (rebuild_changed_targets)
+        rebuild_changed_targets();
+        return;
+    }
     // The colour targets are made again at the new size with their pictures scaled over: the game does not redraw
     // all of them every frame (the pause menu's background is a frame it captured once), and new targets are black,
     // so changing PC SETTINGS > EFFECTS AT XBOX SIZE or the render size behind the menu turned it black.
+    int64_t t0 = perf::g_detail ? perf::det_now() : 0; // --hitch-detail: how long the rebuild took
     std::vector<std::pair<uint64_t, IDirect3DTexture9 *>> old;
     for (auto &kv : g_rts) ms_resolve(kv.second); // (MSAA) every target's last draws into its texture first
     for (auto &kv : g_rts)
@@ -2083,7 +2231,10 @@ void change_render_scale(int pic_w, int pic_h)
         o.second->Release();
     }
     rebind_game_target();
-    logf("[d3d] render size changed to %ux%u (x%.4g by x%.4g)", host_w(g_width), host_h(g_height), g_scale_x, g_scale_y);
+    logf("[d3d] render size changed to %ux%u (x%.4g by x%.4g)%s", host_w(g_width), host_h(g_height), g_scale_x, g_scale_y,
+         t0 ? (": " + std::to_string(old.size()) + " targets made again in " + std::to_string(perf::det_ms(perf::det_now() - t0)) +
+               " ms").c_str()
+            : "");
 }
 
 namespace {
@@ -2092,10 +2243,30 @@ namespace {
 const D3DTRANSFORMSTATETYPE kTransforms[10] = {D3DTS_VIEW,     D3DTS_PROJECTION,     D3DTS_TEXTURE0,       D3DTS_TEXTURE1,
                                                D3DTS_TEXTURE2, D3DTS_TEXTURE3,       D3DTS_WORLDMATRIX(0), D3DTS_WORLDMATRIX(1),
                                                D3DTS_WORLDMATRIX(2), D3DTS_WORLDMATRIX(3)};
+uint32_t g_host_xf_stale; // view, projection, world matrices the host does not hold yet (sync_transforms_from_device)
 D3DMATERIAL9 g_material;
 bool g_material_set;
 std::map<uint32_t, D3DLIGHT9> g_lights;
 std::map<uint32_t, BOOL> g_lights_on;
+} // namespace
+
+// For the generated fixed-function vertex shader (ffp_vs.cpp): what the host's pipeline is given
+uint32_t g_ffp_light_gen = 1;
+const D3DMATERIAL9 &ffp_material() { return g_material; }
+int ffp_enabled_lights(const D3DLIGHT9 **out, int max)
+{
+    int n = 0;
+    for (auto &kv : g_lights_on) {
+        if (!kv.second) continue;
+        auto it = g_lights.find(kv.first);
+        if (it == g_lights.end()) continue;
+        if (n < max) out[n] = &it->second;
+        n++;
+    }
+    return n;
+}
+
+namespace {
 
 // A Direct3D 9 device is lost when Windows takes the display from it: sleep and wake, the lock screen,
 // Ctrl+Alt+Del, a UAC prompt. Present then fails and everything drawn is thrown away, so the picture stopped at the
@@ -2140,6 +2311,7 @@ void resend_game_state(IDirect3DDevice9 *d)
 {
     forget_sent_state();
     for (int i = 0; i < 10; i++) d->SetTransform(kTransforms[i], &g_st.transforms[i]);
+    g_host_xf_stale = 0;
     if (g_material_set) d->SetMaterial(&g_material);
     for (auto &kv : g_lights) d->SetLight(kv.first, &kv.second);
     for (auto &kv : g_lights_on) d->LightEnable(kv.first, kv.second);
@@ -2174,6 +2346,8 @@ void drop_device_objects()
     texture_drop_all();
     pshader_drop_all();
     ffp_drop_all();
+    ffp_vs_drop_all();
+    drawwarm_drop_all();
     vs_drop_host_all();
     warm_drop_all();
     perfhud::release_all();
@@ -2346,12 +2520,20 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     DTRACE("0x%x", Flags);
     game_load::on_swap(); // the engine's load figure for the frame it hands over (game_load.cpp)
     if (g_cfg.widescreen && g_cfg.aspect_w * 9 != g_cfg.aspect_h * 16) xd3d::wide_hud_frame_end();
+    drawwarm_frame();
+    compile_later_report(); // the shaders compiled on the thread and the draws left out meanwhile (shader_cache.cpp)
     pb_flush();
     perf::swap_begin();
-    pace_swap();
+    {
+        perf::DetScope ds(perf::kDetPace);
+        pace_swap();
+    }
     rt_cpu_upload();
     upload_cpu_backbuffer();
-    present_backbuffer();
+    {
+        perf::DetScope ds(perf::kDetPresent);
+        present_backbuffer();
+    }
     if (perfhud::active()) { // the performance overlay / an online message over the finished picture
         RECT frame, pic;
         host3d::frame_layout(&frame, &pic);
@@ -2388,7 +2570,13 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
         vis_end(0);
         logf("[d3d] tests: a visibility test made; its occlusion query lives on");
     }
-    HRESULT presented = host3d::present();
+    HRESULT presented;
+    if (perf::g_detail) gpu_frame_marks(frames, true);
+    {
+        perf::DetScope ds(perf::kDetPresent);
+        presented = host3d::present();
+    }
+    if (perf::g_detail) gpu_frame_marks(frames, false);
     perfhud::input_presented();
     static HRESULT last_presented = D3D_OK; // a changed result (S_PRESENT_OCCLUDED minimised, S_PRESENT_MODE_CHANGED...)
     if (presented != last_presented) {
@@ -2499,6 +2687,36 @@ Surface *__stdcall D3DDevice_GetDepthStencilSurface2()
 // (FUN_00042690+0x68: rep movsd of its view matrix into device+0xC60, then or [0x3D83D0], 0xFF0200; 762 sites set
 // that dirty word) and the library reads them at draw time. So the HLE does the same: before a fixed-function draw,
 // whatever differs between the device's copy and what the host was last given is pushed to the host.
+//
+// The view, projection and world matrices reach the host only when a draw is to use its fixed-function vertex
+// pipeline (flush_host_transforms): the generated vertex shaders (d3d/ffp_vs.cpp) take them from g_st.transforms, and
+// a SetTransform per world change was paid for nothing by their draws (measured with them: the state work of a
+// generated-shader draw ~2,450 TSC ticks against the ~1,000 its draw call saves, 2026-11-15). Texture matrices go
+// at once (host_texture_transform_changed keeps what the host holds).
+namespace {
+constexpr uint32_t kDeferredTransforms = 1u << 0 | 1u << 1 | 1u << 6 | 1u << 7 | 1u << 8 | 1u << 9; // view, projection, world 0-3
+
+void host_transform_changed(int i, const D3DMATRIX *m)
+{
+    if (kDeferredTransforms >> i & 1) {
+        g_host_xf_stale |= 1u << i;
+        return;
+    }
+    host3d::dev()->SetTransform(kTransforms[i], m);
+    host_texture_transform_changed(i - 2, m); // TEXTURE0..3 are entries 2..5
+}
+} // namespace
+
+void flush_host_transforms(IDirect3DDevice9 *d)
+{
+    while (g_host_xf_stale) {
+        unsigned long i;
+        _BitScanForward(&i, g_host_xf_stale);
+        g_host_xf_stale &= g_host_xf_stale - 1;
+        d->SetTransform(kTransforms[i], &g_st.transforms[i]);
+    }
+}
+
 int sync_transforms_from_device()
 {
     if (!g_dev) return 0;
@@ -2507,8 +2725,7 @@ int sync_transforms_from_device()
         const D3DMATRIX *m = (const D3DMATRIX *)(g_dev + DEV_TRANSFORMS + i * 0x40);
         if (memcmp(m, &g_st.transforms[i], sizeof(D3DMATRIX)) == 0) continue;
         g_st.transforms[i] = *m;
-        host3d::dev()->SetTransform(kTransforms[i], m);
-        host_texture_transform_changed(i - 2, m); // TEXTURE0..3 are entries 2..5
+        host_transform_changed(i, m);
         changed |= 1 << i;
     }
     return changed;
@@ -2525,6 +2742,7 @@ bool sync_material_from_device()
     if (g_material_set && memcmp(m, &g_material, sizeof(D3DMATERIAL9)) == 0) return false;
     g_material = *m;
     g_material_set = true;
+    g_ffp_light_gen++;
     host3d::dev()->SetMaterial(m);
     return true;
 }
@@ -2901,8 +3119,7 @@ void __stdcall D3DDevice_SetTransform(uint32_t State, const D3DMATRIX *pMatrix)
              pMatrix->_41, pMatrix->_42, pMatrix->_43, pMatrix->_44);
     g_st.transforms[State] = *pMatrix;
     memcpy(g_dev + DEV_TRANSFORMS + State * 0x40, pMatrix, 0x40);
-    host3d::dev()->SetTransform(kTransforms[State], pMatrix);
-    host_texture_transform_changed((int)State - 2, pMatrix);
+    host_transform_changed((int)State, pMatrix);
 }
 
 // Ninja Gaiden 2004's update.xbe reads transforms back (its device keeps them at another offset than the HLE's)
@@ -3022,6 +3239,7 @@ void __stdcall D3DDevice_SetMaterial(const D3DMATERIAL9 *pMaterial)
              pMaterial->Emissive.g, pMaterial->Emissive.b, pMaterial->Power);
     g_material = *pMaterial;
     g_material_set = true;
+    g_ffp_light_gen++;
     host3d::dev()->SetMaterial(pMaterial);
 }
 
@@ -3064,6 +3282,7 @@ void __stdcall D3DDevice_SetLight(uint32_t Index, const D3DLIGHT9 *pLight)
              pLight->Direction.x, pLight->Direction.y, pLight->Direction.z, pLight->Position.x, pLight->Position.y, pLight->Position.z,
              pLight->Range);
     g_lights[Index] = *pLight;
+    g_ffp_light_gen++;
     if (uint8_t *e = light_entry(Index)) {
         memcpy(e, pLight, sizeof(D3DLIGHT9)); // D3DLIGHT8 and D3DLIGHT9 have the same 104-byte layout
         *(uint32_t *)(e + LE_FLAGS) |= 3;
@@ -3080,6 +3299,7 @@ void __stdcall D3DDevice_LightEnable(uint32_t Index, BOOL bEnable)
     DTRACE("%u, %d", Index, bEnable);
     if (debug_frame_active()) logf("[rt] LightEnable %u, %d", Index, bEnable);
     g_lights_on[Index] = bEnable;
+    g_ffp_light_gen++;
     if (!g_lights.count(Index)) {
         D3DLIGHT9 l = {};
         l.Type = D3DLIGHT_DIRECTIONAL;

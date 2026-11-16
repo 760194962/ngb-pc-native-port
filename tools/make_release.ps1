@@ -5,7 +5,13 @@
 # The launcher installs the game into game\ inside that folder by default, where the game program also looks when it
 # is double-clicked; what the programs write stays there too (savedata\, black.ini, cache\). The script checks that
 # the game program has its icon (a build made with PORT_ICON empty has none). blackrt.pdb and blackrt.map go into a
-# separate -symbols zip, kept to read crash reports.
+# separate -symbols zip, kept to read crash reports. seed\shader_seed.bin (tools\make_shader_seed.py) goes beside the
+# game program: the shaders made at the first start instead of as each area first shows them; check it before a
+# release with tools\make_shader_seed.py --check <a test run's cache\shaders>. seed\texture_pool.txt
+# (tools\make_texture_seed.py) goes there too: the textures made ahead by shape (d3d\texture.cpp). So does
+# seed\draw_states.bin (tools\make_draw_seed.py): the draw states drawn once at start for the driver (d3d\drawwarm.cpp).
+# And seed\vertex_programs.bin (tools\make_vsh_seed.py): where the game's vertex programs are in default.xbe, compiled
+# at a first start from the player's copy (d3d\vshader.cpp); it holds no game code.
 # Build first (PORT_ICON defaults to launcher/art/icon.ico):
 #   cmake -S loader -B ..\build\release -A Win32
 #   cmake --build ..\build\release --config RelWithDebInfo
@@ -25,6 +31,14 @@ $Bin = (Resolve-Path $Bin).Path
 $game = "$Bin\Ninja Gaiden Black Any.exe"
 $launcher = "$Bin\Ninja Gaiden Black Any Launcher.exe"
 foreach ($f in $game, $launcher, "$Bin\blackrt.dll") { if (-not (Test-Path $f)) { throw "missing ${f}: build first" } }
+$seed = "$root\seed\shader_seed.bin"
+if (-not (Test-Path $seed)) { throw "missing ${seed}: tools\make_shader_seed.py makes it" }
+$texseed = "$root\seed\texture_pool.txt"
+if (-not (Test-Path $texseed)) { throw "missing ${texseed}: tools\make_texture_seed.py makes it" }
+$drawseed = "$root\seed\draw_states.bin"
+if (-not (Test-Path $drawseed)) { throw "missing ${drawseed}: tools\make_draw_seed.py makes it" }
+$vshseed = "$root\seed\vertex_programs.bin"
+if (-not (Test-Path $vshseed)) { throw "missing ${vshseed}: tools\make_vsh_seed.py makes it" }
 
 # The programs' icon (icon group 1): a build made with PORT_ICON empty would ship without one
 Add-Type @"
@@ -67,7 +81,7 @@ $stage = "$dist\_stage-$PID"
 $sym = "$stage-symbols"
 $out = "$stage\NGB-Hurricane"
 New-Item -ItemType Directory -Force $out, $sym | Out-Null
-Copy-Item $launcher, $game, "$Bin\blackrt.dll" $out
+Copy-Item $launcher, $game, "$Bin\blackrt.dll", $seed, $texseed, $drawseed, $vshseed $out
 Copy-Item "$root\README.md", "$root\README.en.md" $out
 Copy-Item "$root\LICENSE" "$out\LICENSE.txt"
 Copy-Item "$Bin\blackrt.pdb", "$Bin\blackrt.map" $sym
