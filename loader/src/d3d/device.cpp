@@ -3654,4 +3654,34 @@ void request_screenshot(const char *tag)
     g_shot_requested = true;
 }
 
+// --compile-port-shaders (tests, for the shader seed): every variant of the port's own pixel shaders, compiled now through
+// the shader cache as their first use would. Which ones a run makes depends on its settings (MSAA's copy, the resolve
+// variants by the frame's size per picture pixel, FXAA and the seam fill below some scales, the overlay), so the seed
+// made from test runs at one set of settings lacked the others (2026-11-16: MSAA 2/4/8 compiled the copy, render
+// scale 8 the 4x4 box resolve). The two resolves through their own functions (the same text as in play).
+void compile_all_port_shaders()
+{
+    unsigned made = 0;
+    auto keep = [&](IDirect3DPixelShader9 *ps) {
+        if (ps) made++, ps->Release();
+    };
+    keep(compile_ps(kZFillPS, "zfill"));
+    keep(compile_ps(kZDepthPS, "zdepth"));
+    keep(compile_ps(kZViewPS, "zview"));
+    keep(compile_ps(kGammaPS, "gamma"));
+    keep(compile_ps(kFxaaPS, "fxaa", "ps_2_a"));
+    keep(compile_ps(kSeamPS, "seamfill", "ps_2_a"));
+    keep(compile_ps(kCopyPS, "mscopy"));
+    keep(compile_ps(kBoxPS, "box"));
+    keep(compile_ps(kSoftPS, "soft"));
+    for (int n = 1; n <= kResolveMax; n++) {
+        int got = 0;
+        if (resolve_ps(n, &got) && got == n) made++;
+    }
+    for (int n = 1; n <= kAreaMax; n++)
+        if (area_ps(n)) made++;
+    if (perfhud::prepare_shader(host3d::dev())) made++;
+    logf("[shader cache] --compile-port-shaders: %u of the port's pixel shaders made", made);
+}
+
 } // namespace xd3d

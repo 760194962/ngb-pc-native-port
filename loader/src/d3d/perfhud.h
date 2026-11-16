@@ -18,6 +18,7 @@ void input_presented();                            // after Present: the input-t
 void draw(IDirect3DDevice9 *d, const RECT &pic);   // over the host back buffer, inside the picture
 void release();                                    // before a Reset (a state block must not outlive it)
 void release_all();                                // a new device: every object of the overlay (made again)
+bool prepare_shader(IDirect3DDevice9 *d); // the overlay's pixel shader, through the shader cache (--compile-port-shaders too)
 
 // A one-line message at the picture's bottom-right for ms milliseconds (online play's status, net/online.cpp), shown
 // whether or not the overlay is on; any thread. Nothing is drawn or checked beyond one atomic load while none shows.

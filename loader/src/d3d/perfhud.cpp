@@ -2,6 +2,7 @@
 
 #include "d3d/draw.h"
 #include "d3d/host.h"
+#include "d3d/shader_cache.h"
 #include "common.h"
 
 #include <d3dcompiler.h>
@@ -702,10 +703,30 @@ void draw(IDirect3DDevice9 *d, const RECT &pic)
     draw_quad(d, pic, g_hud, false);
     QueryPerformanceCounter(&b);
     if (!f.QuadPart) QueryPerformanceFrequency(&f);
+    double ms = (double)(b.QuadPart - a.QuadPart) * 1000.0 / (double)f.QuadPart;
+    static int slow;
+    if (ms > 2.0 && slow < 20) { // where the overlay itself held the render thread (its first draw: the shader, the program)
+        slow++;
+        logf("[perfhud] drawing the overlay took %.1f ms, frame %u", ms, ::g_frame_count.load());
+    }
     sum.QuadPart += b.QuadPart - a.QuadPart;
     if (++n == 1200) // ~20 s: the render thread's cost of the overlay
         logf("[perfhud] drawing the overlay: %.3f ms a frame on the render thread (average of %u frames)",
              sum.QuadPart * 1000.0 / f.QuadPart / n, n);
+}
+
+// The overlay's pixel shader, through the shader cache (and so the seed) like the port's others: it was compiled with
+// D3DCompile at every start, in the frame that first showed the overlay
+bool prepare_shader(IDirect3DDevice9 *d)
+{
+    if (g_ps) return true;
+    const char src[] = "sampler2D t : register(s0);\n"
+                       "float4 main(float2 uv : TEXCOORD0) : COLOR0 { return tex2D(t, uv); }\n";
+    ID3DBlob *code = nullptr, *errors = nullptr;
+    if (SUCCEEDED(xd3d::cached_compile(src, "perfhud", "ps_2_0", 0, &code, &errors))) xd3d::create_pixel_shader(d, code, &g_ps);
+    if (code) code->Release();
+    if (errors) errors->Release();
+    return g_ps != nullptr;
 }
 
 void draw_quad(IDirect3DDevice9 *d, const RECT &pic, Panel &panel, bool bottom)
@@ -735,16 +756,7 @@ void draw_quad(IDirect3DDevice9 *d, const RECT &pic, Panel &panel, bool bottom)
     }
     IDirect3DTexture9 *tex = panel.tex.tex;
     if (!tex) return;
-    if (!g_ps) {
-        const char src[] = "sampler2D t : register(s0);\n"
-                           "float4 main(float2 uv : TEXCOORD0) : COLOR0 { return tex2D(t, uv); }\n";
-        ID3DBlob *code = nullptr;
-        if (SUCCEEDED(D3DCompile(src, sizeof src - 1, "perfhud", nullptr, nullptr, "main", "ps_2_0", 0, 0, &code, nullptr))) {
-            d->CreatePixelShader((const DWORD *)code->GetBufferPointer(), &g_ps);
-            code->Release();
-        }
-        if (!g_ps) return;
-    }
+    if (!prepare_shader(d)) return;
     // One premultiplied quad at the picture's top-right (the game's health bar is at the top-left) or bottom-right, 1:1,
     // over the back buffer; the states it sets are captured first and put back after
     auto set_states = [&] {

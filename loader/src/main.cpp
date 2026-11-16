@@ -254,6 +254,7 @@ bool parse_args()
             settings_mark_cli("online_insigniadns");
         }
         else if (a == L"--multicore") { g_cfg.multicore = true; settings_mark_cli("multicore"); }
+        else if (a == L"--set" && i + 1 < argc) settings_cli_set(narrow(argv[++i])); // a black.ini line, e.g. --set shadowsoft=0 (tests)
         else if (a == L"--msaa" && i + 1 < argc) { g_cfg.msaa = std::clamp(_wtoi(argv[++i]), 0, 16); settings_mark_cli("msaa"); }
         else if (a == L"--game-cpu") {
             std::wstring v;
@@ -292,6 +293,7 @@ bool parse_args()
             g_cfg.compile_budget_ms = _wtof(v.c_str());
         }
         else if (a == L"--cpu-tex-verify") g_cfg.cpu_tex_verify = true;
+        else if (a == L"--compile-port-shaders") g_cfg.compile_port_shaders = true;
         else if (a == L"--vsh-record") {
             if (!next(g_cfg.vsh_record)) return false;
         }
@@ -710,10 +712,10 @@ int run(void *reserve, unsigned reserve_size)
     logf("address-space stub: reserve %p + 0x%x", reserve, reserve_size);
     // What black.ini (the launcher's pages) and the command line set, as read: the launcher's choices can be checked here
     logf("settings: render %s, scale %.2f, aa %d, seamfill %d, effectsnative %d, shadow %d, vsync %d, perfhud %d, aniso %d, widescreen %d, fullscreen %d, "
-         "window %dx%d, fullscreen_res %s, gain %.2f, gamma %.2f",
+         "window %dx%d, fullscreen_res %s, gain %.2f, gamma %.2f, shadowsoft %d, msaa %d",
          g_cfg.render_native ? "native" : g_cfg.render_h ? std::to_string(g_cfg.render_h).c_str() : "scale", g_cfg.scale,
          g_cfg.aa, g_cfg.seam_fill, g_cfg.effects_native, g_cfg.shadow_scale, g_cfg.vsync, g_cfg.perfhud, g_cfg.aniso, g_cfg.widescreen, g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0,
-         g_cfg.window_w, g_cfg.window_h, g_cfg.fs_window_res ? "window" : "screen", g_cfg.gain, g_cfg.gamma);
+         g_cfg.window_w, g_cfg.window_h, g_cfg.fs_window_res ? "window" : "screen", g_cfg.gain, g_cfg.gamma, g_cfg.shadow_pcf, g_cfg.msaa);
 
     std::string err;
     if (!g_xbe.load(g_cfg.xbe_path, err)) {

@@ -221,6 +221,7 @@ struct Config {
     std::wstring vsh_record;   // --vsh-record FILE (tests): every game vertex program translated, for tools/make_vsh_seed.py
     bool log_vsh = false;      // --log-vsh: each game vertex program's disassembly in the log (d3d/vshader.cpp)
     bool cpu_tex_verify = false; // --cpu-tex-verify (tests): kept ripple textures compared with the game's own, byte for byte
+    bool compile_port_shaders = false; // --compile-port-shaders (tests): every variant of the port's own pixel shaders into the cache at start, for the seed (d3d/device.cpp)
     bool cpu_tex = true;       // --no-cpu-tex: the game's CPU-made ripple textures computed every time (ngb_cpu_textures.cpp)
     bool saved_volumes = true; // --no-saved-volumes: a cold start keeps the default sound volumes, as the console (ngb_sound_boot.cpp)
     double compile_budget_ms = -1; // --compile-budget MS: compiling on the render thread a frame before the rest go to threads and their draws are left out (-1, the default: all now)

@@ -44,6 +44,8 @@ void compile_later_count_draw(); // a draw left out for one (begin_draw)
 
 // At device creation: make the shader objects of every cached entry.
 void prewarm_shaders(IDirect3DDevice9 *d);
+// --compile-port-shaders (tests): every variant of the port's own pixel shaders compiled into the cache (d3d/device.cpp)
+void compile_all_port_shaders();
 // The key the shader objects are kept by (an FNV-1a hash of the bytecode), and the object kept for one (a new
 // reference), or null: the recorded draw states name their shaders this way (drawwarm.cpp)
 uint64_t shader_code_key(const void *code, size_t size);
