@@ -19,6 +19,7 @@ written sorted by their bytes: the same inputs make the same file.
 """
 import argparse
 import os
+import re
 import struct
 import sys
 
@@ -42,6 +43,14 @@ def read(path):
 
 def vname(v):
     return v.rstrip(b'\0').decode()
+
+
+def vorder(v):
+    """A version's order: its numbers, a test suffix ranking below the release ("2.2.30-t1" < "2.2.30" < "2.2.31").
+    Each part's leading digits count: the suffixed part used to drop out whole, so 2.2.30-t1 sorted as 2.2."""
+    main, dash, suffix = vname(v).partition('-')
+    nums = tuple(int(re.match(r'\d*', n).group() or 0) for n in main.split('.'))
+    return nums, 0 if dash else 1, suffix
 
 
 # Record offsets (loader/src/d3d/drawwarm.cpp Rec, 528 bytes): D3DRS_MULTISAMPLEANTIALIAS among the render states,
@@ -113,7 +122,7 @@ def main():
             # Records do not depend on the program version: what a release can change under them is its shaders, and
             # --shader-seed leaves out every record whose shaders the current seed lacks. The newest version is stamped.
             print('note: %s written by %s, the others by %s; merged' % (f, vname(v), vname(version)))
-            v = max(v, version, key=lambda x: tuple(int(n) for n in vname(x).split('.') if n.isdigit()))
+            v = max(v, version, key=vorder)
         size, version = s, v
         recs.update(canonical_msaa(x) for x in r)
     if a.check:
