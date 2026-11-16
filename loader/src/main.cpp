@@ -291,6 +291,7 @@ bool parse_args()
             std::wstring v;
             if (!next(v)) return false;
             g_cfg.compile_budget_ms = _wtof(v.c_str());
+            settings_mark_cli("compile_budget");
         }
         else if (a == L"--cpu-tex-verify") g_cfg.cpu_tex_verify = true;
         else if (a == L"--compile-port-shaders") g_cfg.compile_port_shaders = true;

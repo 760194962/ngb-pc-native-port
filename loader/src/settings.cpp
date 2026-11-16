@@ -91,6 +91,7 @@ bool apply_line(const char *line, bool from_cli)
         else if (k == "seamfill") g_cfg.seam_fill = v != 0;
         else if (k == "effectsnative") g_cfg.effects_native = v != 0;
         else if (k == "shadow") g_cfg.shadow_scale = std::clamp(atoi(val), 1, 16);
+        else if (k == "compile_budget") g_cfg.compile_budget_ms = v < 0 ? -1.0 : std::min(v, 100.0f); // ms a frame; -1 off (d3d/shader_cache.cpp)
         else if (k == "shadowsoft") g_cfg.shadow_pcf = v != 0 ? 1 : 0; // soft shadow edges (d3d/nv2a_psh.cpp; 1: over the host map, 2.2.18)
         else if (k == "vsync") g_cfg.vsync = v != 0;
         else if (k == "perfhud") g_cfg.perfhud = v != 0;
@@ -234,6 +235,7 @@ void write_all(FILE *f)
     fprintf(f, "seamfill = %d\n", g_cfg.seam_fill ? 1 : 0);
     fprintf(f, "effectsnative = %d\n", g_cfg.effects_native ? 1 : 0);
     fprintf(f, "shadowsoft = %d\n", g_cfg.shadow_pcf ? 1 : 0);
+    fprintf(f, "compile_budget = %g\n", g_cfg.compile_budget_ms < 0 ? -1.0 : g_cfg.compile_budget_ms);
     fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\naniso = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0,
             g_cfg.perfhud ? 1 : 0, g_cfg.aniso);
     fprintf(f, "multicore = %d\nmsaa = %d\n", g_cfg.multicore ? 1 : 0, g_cfg.msaa);

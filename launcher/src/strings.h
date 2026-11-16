@@ -425,6 +425,9 @@ enum class Str {
     RebuildConsole, // the button, for a console whose files are damaged or do not match
     AskRebuildTitle,
     AskRebuild,
+    CompileBudget, // Graphics: the compile budget (black.ini compile_budget), experimental
+    CompileBudgetNote,
+    HelpCompileBudget,
     Count
 };
 

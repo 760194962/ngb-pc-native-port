@@ -702,6 +702,22 @@ const Pair kText[(int)Str::Count] = {
      L"This console’s files are damaged or do not match and cannot be used.\n\n"
      L"Rebuild renames the old files to .old in the save folder and makes a new console. It has to be registered again (Register, then the dashboard’s connection test); earlier gamertags are recovered in the dashboard as Insignia’s website explains.\n\n"
      L"Played online in xemu before? Import from xemu below is simpler, with no rebuild."},
+    {L"编译预算（实验性）",
+     L"Compile budget"},
+    {L"未收录的着色器改到后台编译，期间可能短暂缺画面",
+     L"Experimental: shaders not yet cached compile in the background; pieces may be missing briefly"},
+    {L"实验性功能，默认关闭。\n\n"
+     L"游戏第一次用到某个着色器时要先编译，每个 2–40 ms。发布包附带的种子已经包含作者录过的内容（标题、待机演示、黑之章第 1–4 章），"
+     L"这些地方不会现编；种子还没覆盖的地方（比如 2004、后面的章节），第一次进去时可能卡一下。\n\n"
+     L"打开后，每帧当场编译最多用 4 ms，超出的着色器放到后台线程编译，编好之前用到它的东西先不画。"
+     L"这样卡顿变短（实测没有种子时最差一帧 237 → 98 ms），代价是进新区域时可能有几帧缺东西（实测约 4 帧），之后恢复正常。\n\n"
+     L"已经编过一次的着色器会记进缓存，以后不再受影响。觉得缺画面比卡一下更难受就保持关闭。",
+     L"Experimental, off by default.\n\n"
+     L"The first time the game uses a shader it has to be compiled, 2-40 ms each. The package's seed covers what the author recorded (the title, the attract demo, "
+     L"chapters 1-4 of Black), so nothing compiles there; where the seed does not reach yet (2004, later chapters) a first visit may stutter.\n\n"
+     L"On, a frame spends at most 4 ms compiling; the shaders past that compile on background threads, and what uses them is not drawn until they are ready. "
+     L"Shorter stutters (with no seed, the worst frame 237 -> 98 ms measured), but entering a new area may show a few frames with pieces missing (about 4 measured), then all is back.\n\n"
+     L"A shader compiled once is kept in the cache and never affects later play. Keep it off if missing pieces bother you more than a brief stutter."},
 };
 
 } // namespace
