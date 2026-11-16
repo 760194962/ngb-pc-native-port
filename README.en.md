@@ -33,7 +33,36 @@ This repository is a fork of [akirahayabusa/ngb-pc-native-port](https://github.c
 - **Automatic releases**: a GitHub Action checks upstream daily; when upstream publishes a release, it is merged into
   `main`, built (MSVC, Win32), packed and published here as `v<version>-fork1`. A merge conflict or failed build publishes nothing.
 
+This branch (main) checks upstream for new releases every hour (`.github/workflows/follow-upstream.yml`): a new upstream
+release is merged in, built and packed, and published as `v<version>-fork1` with the patches and notes of the previous
+fork release; older releases stay. A merge conflict or a failed build publishes nothing, and GitHub mails the failure.
+
 Release notes are mostly in Chinese; this section is the English summary. Details of each patch are under "Menu patches (this fork)" below.
+
+## Menu patches (this fork)
+
+Two patches that put options into the game's own OPTIONS menu; only tested in this native pc port and emulators, didn't work on Xbox 360 for me it seems.
+The scripts are in `tools/`; the patches come with the release, both made against the Redump disc images (USA), and
+can be install from the launcher's Install page.
+
+- **Ninja Gaiden Black Hurricane vb-jp-x2.1** (`tools/ngb_x21_menu.py`)
+  - GENERAL SETTINGS:
+    - Essence-Only Charging: Ultimate Techniques charge only from absorbed essence (as in the 2004 game); holding the
+      button no longer counts up.
+    - Skip Any Cutscene: START skips cutscenes not watched before.
+    - Intercept: Hurricane Pack / Black / Off. Off removes the item when a save loads, missions included.
+  - CONTROLLER SETTINGS: Ultimate Tech Camera, the left stick moves the camera during ET/UT charging: Off,
+    Left / Right (sideways only) or All Directions.
+  - The chapter 1 corpse uses the original `yasik_cmn.afs` (the only place x2.1 changed it: it checks for Intercept
+    and gives it besides the elixir, so an owned Intercept leaves the corpse "can't carry more"). Intercept comes from
+    the option when a save loads instead. That file is not in the XBE patch; the release's disc patch keeps the US one.
+  - **Note**: with Essence-Only Charging on, the Ultimate Technique count stays 0 while the button is held, and the
+    Ultimate Tech Camera reads that count to tell an Ultimate Technique is on, so the left stick does not move the
+    camera before essence is absorbed.
+- **Ninja Gaiden (2004) 1.06** (`tools/ng04_camera_menu.py`): the third-person free camera options in CONTROLLER
+  SETTINGS (on at start by default). The release's patch is made against the Redump disc's 1.02 `default.xbe` and
+  gives the 1.06 update with these options, run from the disc folder; on the launcher's 2004 Install page, choose it
+  as the Patch and it is applied once the image is unpacked. (I guess you still need the dlc files to make everything work, please check og Xbox live connection guide for this.)
 
 ## Screenshots
 
@@ -145,35 +174,6 @@ Redump's "Ninja Gaiden (USA, Asia) (En,Ja)" runs too: the same 1.02.04 with one 
 - **Exit game**: the title menu has a last row, EXIT GAME (its letters cut from the menu's own words), that asks "Exit
   the game?" in the game's own box.
 - Black's fixes (widescreen, 16:9 movies on 21:9, the load timing) apply to 2004 as well.
-
-## Menu patches (this fork)
-
-Two patches that put options into the game's own OPTIONS menu; they work on the console, in emulators and in this
-port. The scripts are in `tools/`; the patches come with the release, both made against the Redump disc images, and
-install from the launcher's Install page.
-
-This branch (main) checks upstream for new releases every hour (`.github/workflows/follow-upstream.yml`): a new upstream
-release is merged in, built and packed, and published as `v<version>-fork1` with the patches and notes of the previous
-fork release; older releases stay. A merge conflict or a failed build publishes nothing, and GitHub mails the failure.
-
-- **Ninja Gaiden Black Hurricane vb-jp-x2.1** (`tools/ngb_x21_menu.py`)
-  - GENERAL SETTINGS:
-    - Essence-Only Charging: Ultimate Techniques charge only from absorbed essence (as in the 2004 game); holding the
-      button no longer counts up.
-    - Skip Any Cutscene: START skips cutscenes not watched before.
-    - Intercept: Hurricane Pack / Black / Off. Off removes the item when a save loads, missions included.
-  - CONTROLLER SETTINGS: Ultimate Tech Camera, the left stick moves the camera during Ultimate Techniques: Off,
-    Left / Right (sideways only) or All Directions.
-  - The chapter 1 corpse uses the original `yasik_cmn.afs` (the only place x2.1 changed it: it checks for Intercept
-    and gives it besides the elixir, so an owned Intercept leaves the corpse "can't carry more"). Intercept comes from
-    the option when a save loads instead. That file is not in the XBE patch; the release's disc patch keeps the US one.
-  - **Note**: with Essence-Only Charging on, the Ultimate Technique count stays 0 while the button is held, and the
-    Ultimate Tech Camera reads that count to tell an Ultimate Technique is on, so the left stick does not move the
-    camera before essence is absorbed.
-- **Ninja Gaiden (2004) 1.06** (`tools/ng04_camera_menu.py`): the third-person free camera options in CONTROLLER
-  SETTINGS (on at start by default). The release's patch is made against the Redump disc's 1.02 `default.xbe` and
-  gives the 1.06 update with these options, run from the disc folder; on the launcher's 2004 Install page, choose it
-  as the Patch and it is applied once the image is unpacked.
 
 ## Status
 
