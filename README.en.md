@@ -132,7 +132,7 @@ Two patches that put options into the game's own OPTIONS menu; they work on the 
 port. The scripts are in `tools/`; the patches come with the release, both made against the Redump disc images, and
 install from the launcher's Install page.
 
-This branch (main) checks upstream for new releases every day (`.github/workflows/follow-upstream.yml`): a new upstream
+This branch (main) checks upstream for new releases every hour (`.github/workflows/follow-upstream.yml`): a new upstream
 release is merged in, built and packed, and published as `v<version>-fork1` with the patches and notes of the previous
 fork release; older releases stay. A merge conflict or a failed build publishes nothing, and GitHub mails the failure.
 
