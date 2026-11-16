@@ -21,8 +21,8 @@ This repository is a fork of [akirahayabusa/ngb-pc-native-port](https://github.c
 (branch `native`). The port itself (loader, HLE, rendering) is upstream's work and is merged in unchanged. On top of it, the fork's `main` branch adds:
 
 - **Launcher**: recognises any Ninja Gaiden Black (title ID `5443000D`) and Ninja Gaiden 2004 (`54430003`) `default.xbe`
-  instead of a fixed list of hashes, and has xdelta built in, so a Redump ISO plus a patch installs in one step
-  (no separate xdelta3 or base image needed).
+  instead of a fixed list of hashes, and has xdelta built in, so your own Redump ISO plus a patch installs in one step
+  (no separate xdelta3 tool, and no pre-converted base ISO, is needed; you still supply your own Redump image).
 - **Loader**: tells the Chinese and Japanese x2.1 Hurricane builds apart (Japanese menu text and the EXIT GAME box
   display correctly), and runs unknown-but-identically-structured XBEs (e.g. the patched ones below) as the matching build.
 - **Ninja Gaiden 2004**: the Hurricane pack's third-person camera works in every stage and supports inversion.
