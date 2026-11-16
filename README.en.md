@@ -15,6 +15,27 @@ support is kept.
 
 **You need your own copy of the game.** This repository contains no game code or data and no Microsoft XDK code.
 
+## What this fork changes (short version)
+
+This repository is a fork of [akirahayabusa/ngb-pc-native-port](https://github.com/akirahayabusa/ngb-pc-native-port)
+(branch `native`). The port itself (loader, HLE, rendering) is upstream's work and is merged in unchanged. On top of it, the fork's `main` branch adds:
+
+- **Launcher**: recognises any Ninja Gaiden Black (title ID `5443000D`) and Ninja Gaiden 2004 (`54430003`) `default.xbe`
+  instead of a fixed list of hashes, and has xdelta built in, so a Redump ISO plus a patch installs in one step
+  (no separate xdelta3 or base image needed).
+- **Loader**: tells the Chinese and Japanese x2.1 Hurricane builds apart (Japanese menu text and the EXIT GAME box
+  display correctly), and runs unknown-but-identically-structured XBEs (e.g. the patched ones below) as the matching build.
+- **Ninja Gaiden 2004**: the Hurricane pack's third-person camera works in every stage and supports inversion.
+- **Two menu patches** (xdelta, made against Redump images; work on console, emulators and this port):
+  - *NG 2004 1.06 camera menu*: Camera Control (Normal/Reverse), 3rd Person Camera (On/Off at start) and 3rd Person Camera Stages
+    (Hurricane/All) in OPTIONS → CONTROLLER SETTINGS.
+  - *Black Hurricane x2.1 (JP/EN) menu*: Essence-Only Charging, Skip Any Cutscene, Intercept (Hurricane Pack/Black/Off)
+    and Ultimate Tech Camera; chapter 1's corpse restored to the original behaviour.
+- **Automatic releases**: a GitHub Action checks upstream daily; when upstream publishes a release, it is merged into
+  `main`, built (MSVC, Win32), packed and published here as `v<version>-fork1`. A merge conflict or failed build publishes nothing.
+
+Release notes are mostly in Chinese; this section is the English summary. Details of each patch are under "Menu patches (this fork)" below.
+
 ## Screenshots
 
 From the game's own attract demo (it plays when the title screen is left alone) and from saves, rendered at 1440 lines and scaled down.
