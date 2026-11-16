@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <set>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -66,15 +67,20 @@ LARGE_INTEGER g_t0;
 uint32_t g_hits, g_made, g_verified, g_mismatched;
 
 std::wstring file_path() { return g_cfg.port_dir + L"\\cache\\cpu_textures.bin"; }
+// The package's seed beside the program (tools/make_cputex_seed.py from test runs' cache files): a new player's first
+// start then makes none of them either (it was the one fixed spike left on a first start: 10 textures, ~40 ms in one
+// frame, 4 of 4 runs from an empty cache, RTX 3060, 2026-11-16). Keys carry the constants' hash of the build that made
+// them, so another build's entries are never used.
+std::wstring seed_path() { return g_cfg.port_dir + L"\\cpu_textures.bin"; }
+std::set<Key> g_seed_keys; // in the seed: not written to the player's file again
 
-void load()
+size_t read_file(const std::wstring &path, bool seed)
 {
-    if (g_loaded) return;
-    g_loaded = true;
-    FILE *f = _wfopen(file_path().c_str(), L"rb");
-    if (!f) return;
+    FILE *f = _wfopen(path.c_str(), L"rb");
+    if (!f) return 0;
     char magic[8];
     uint32_t count = 0;
+    size_t got = 0;
     if (fread(magic, 8, 1, f) == 1 && !memcmp(magic, "NGBCPUT1", 8) && fread(&count, 4, 1, f) == 1) {
         for (uint32_t i = 0; i < count && i < 4096; i++) {
             Key k;
@@ -82,16 +88,28 @@ void load()
             if (fread(&k, sizeof k, 1, f) != 1 || fread(&n, 4, 1, f) != 1 || n != k.w * k.h * 2 || n > (8u << 20)) break;
             std::vector<uint8_t> v(n);
             if (fread(v.data(), 1, n, f) != n) break;
+            if (seed) g_seed_keys.insert(k);
+            if (k.consts == g_consts) got++; // this build's
             g_kept[k] = std::move(v);
         }
     }
     fclose(f);
-    logf("[cputex] %zu kept ripple textures read", g_kept.size());
+    return got;
+}
+
+void load()
+{
+    if (g_loaded) return;
+    g_loaded = true;
+    size_t seed = read_file(seed_path(), true), learned = read_file(file_path(), false);
+    logf("[cputex] kept ripple textures for this build: %zu from the seed, %zu learned", seed, learned);
 }
 
 void save_async()
 {
-    std::map<Key, std::vector<uint8_t>> copy = g_kept;
+    std::map<Key, std::vector<uint8_t>> copy;
+    for (auto &kv : g_kept)
+        if (!g_seed_keys.count(kv.first)) copy.insert(kv);
     std::wstring path = file_path();
     std::thread([copy = std::move(copy), path] {
         CreateDirectoryW((g_cfg.port_dir + L"\\cache").c_str(), nullptr);

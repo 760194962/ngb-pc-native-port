@@ -12,6 +12,8 @@
 # seed\draw_states.bin (tools\make_draw_seed.py): the draw states drawn once at start for the driver (d3d\drawwarm.cpp).
 # And seed\vertex_programs.bin (tools\make_vsh_seed.py): where the game's vertex programs are in default.xbe, compiled
 # at a first start from the player's copy (d3d\vshader.cpp); it holds no game code.
+# And seed\cpu_textures.bin (tools\make_cputex_seed.py): the ripple textures the game computes on the CPU, as
+# it computes them (ngb_cpu_textures.cpp), so a first start does not (data, no code; the user, 2026-11-16).
 # Build first (PORT_ICON defaults to launcher/art/icon.ico):
 #   cmake -S loader -B ..\build\release -A Win32
 #   cmake --build ..\build\release --config RelWithDebInfo
@@ -39,6 +41,8 @@ $drawseed = "$root\seed\draw_states.bin"
 if (-not (Test-Path $drawseed)) { throw "missing ${drawseed}: tools\make_draw_seed.py makes it" }
 $vshseed = "$root\seed\vertex_programs.bin"
 if (-not (Test-Path $vshseed)) { throw "missing ${vshseed}: tools\make_vsh_seed.py makes it" }
+$cputexseed = "$root\seed\cpu_textures.bin"
+if (-not (Test-Path $cputexseed)) { throw "missing ${cputexseed}: tools\make_cputex_seed.py makes it" }
 
 # The programs' icon (icon group 1): a build made with PORT_ICON empty would ship without one
 Add-Type @"
@@ -81,7 +85,7 @@ $stage = "$dist\_stage-$PID"
 $sym = "$stage-symbols"
 $out = "$stage\NGB-Hurricane"
 New-Item -ItemType Directory -Force $out, $sym | Out-Null
-Copy-Item $launcher, $game, "$Bin\blackrt.dll", $seed, $texseed, $drawseed, $vshseed $out
+Copy-Item $launcher, $game, "$Bin\blackrt.dll", $seed, $texseed, $drawseed, $vshseed, $cputexseed $out
 Copy-Item "$root\README.md", "$root\README.en.md" $out
 Copy-Item "$root\LICENSE" "$out\LICENSE.txt"
 Copy-Item "$Bin\blackrt.pdb", "$Bin\blackrt.map" $sym
