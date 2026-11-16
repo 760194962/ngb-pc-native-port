@@ -44,6 +44,25 @@ def vname(v):
     return v.rstrip(b'\0').decode()
 
 
+# Record offsets (loader/src/d3d/drawwarm.cpp Rec, 528 bytes): D3DRS_MULTISAMPLEANTIALIAS among the render states,
+# rt_ms, rt_msq, z_format
+RS_MSAA, RT_MS, RT_MSQ, Z_FORMAT = 156 + 4 * 31, 440, 444, 448
+D3DFMT_D24S8, FMT_INTZ = 75, 0x5A544E49
+
+
+def canonical_msaa(r):
+    """A record made on a multisampled target as it is without MSAA, as drawwarm.cpp canonical_msaa records it since
+    2.2.32 (recordings of earlier versions with black.ini msaa hold them as they were)"""
+    if len(r) != 528 or struct.unpack_from('<I', r, RT_MS)[0] == 0:
+        return r
+    b = bytearray(r)
+    struct.pack_into('<II', b, RT_MS, 0, 0)
+    if struct.unpack_from('<I', b, Z_FORMAT)[0] == D3DFMT_D24S8:
+        struct.pack_into('<I', b, Z_FORMAT, FMT_INTZ)
+    struct.pack_into('<I', b, RS_MSAA, 1)
+    return bytes(b)
+
+
 def shader_keys(seed_path):
     """The bytecode keys (FNV-1a 64 of the code, shader_cache.cpp code_key) of the shader seed's entries"""
     d = open(seed_path, 'rb').read()
@@ -96,7 +115,7 @@ def main():
             print('note: %s written by %s, the others by %s; merged' % (f, vname(v), vname(version)))
             v = max(v, version, key=lambda x: tuple(int(n) for n in vname(x).split('.') if n.isdigit()))
         size, version = s, v
-        recs.update(r)
+        recs.update(canonical_msaa(x) for x in r)
     if a.check:
         _, _, seed = read(a.seed)
         seed = set(seed)
