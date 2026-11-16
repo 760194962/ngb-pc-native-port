@@ -6,9 +6,11 @@ their programs then and not in the frame an area first shows them.
          [--vsh-seed seed/vertex_programs.bin]] FILE [FILE ...]
   check: python -I tools/make_draw_seed.py --check FILE [--seed seed/draw_states.bin]
 
-A FILE is a cache\\draw_states.bin. Header: "NGBDRAW2", the record size, the count, the version of the program that
-wrote it (16 bytes). Records are fixed-size (a file of another size is a different build's and is refused); the
-files must be of one version, which the seed carries (the program drops learned files of another version). Taken: every distinct record. With --shader-seed, records whose shaders the shader
+A FILE is a cache\\draw_states.bin (or an earlier seed). Header: "NGBDRAW2", the record size, the count, the version
+of the program that wrote it (16 bytes). Records are fixed-size (a file of another size is a different build's and is
+refused); files of different versions are merged (a note says so) and the newest version is stamped: a record does not
+depend on the version, only on its shaders, which --shader-seed checks against the current shader seed (the program
+itself uses a seed of any version and drops only learned files of another one). Taken: every distinct record. With --shader-seed, records whose shaders the shader
 seed does not have are left out (a player's first start could not draw them: their shader is made only after the
 game first uses it); the game's own vertex programs are such (make_shader_seed.py leaves them out). Records are
 written sorted by their bytes: the same inputs make the same file.
@@ -89,7 +91,10 @@ def main():
         if size is not None and s != size:
             sys.exit('%s: records of %d bytes, the others %d' % (f, s, size))
         if version is not None and v != version:
-            sys.exit('%s: written by %s, the others by %s' % (f, vname(v), vname(version)))
+            # Records do not depend on the program version: what a release can change under them is its shaders, and
+            # --shader-seed leaves out every record whose shaders the current seed lacks. The newest version is stamped.
+            print('note: %s written by %s, the others by %s; merged' % (f, vname(v), vname(version)))
+            v = max(v, version, key=lambda x: tuple(int(n) for n in vname(x).split('.') if n.isdigit()))
         size, version = s, v
         recs.update(r)
     if a.check:
