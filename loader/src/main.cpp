@@ -822,7 +822,7 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && !black) // the ripple textures the game makes on the CPU, kept (ngb_cpu_textures.cpp)
         if (const XbeSection *t = g_xbe.section_named(".text")) install_cpu_textures(t->vaddr, t->vsize);
     // the saved sound volumes at a cold start: Black and Ninja Gaiden (2004), not the bundled programs (ngb_sound_boot.cpp)
-    if (profile && !black && (!profile->aux || !strncmp(profile->aux, "NG04", 4)))
+    if (profile && !black && (!profile->aux || !strcmp(profile->aux, "NG04TU") || !strcmp(profile->aux, "NG04DISC")))
         if (const XbeSection *t = g_xbe.section_named(".text")) install_saved_volumes(t->vaddr, t->vsize);
     if (profile && profile->wide2d) // the HUD's sides on a screen not 16:9: in play as the game's HUD routine says
         if (const XbeSection *t = g_xbe.section_named(".text")) xd3d::install_hud_probe((uint8_t *)(uintptr_t)t->vaddr, t->vsize);
