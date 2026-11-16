@@ -29,12 +29,28 @@ void settings_mark_cli(const char *key) { g_cli.insert(key); }
 
 void load_file();
 void take_base();
+bool apply_line(const char *line, bool from_cli);
+
+namespace {
+std::vector<std::string> g_cli_lines; // --set key=value, in order
+}
+
+void settings_cli_set(const std::string &key_value) { g_cli_lines.push_back(key_value); }
 
 void settings_load()
 {
-    if (g_cfg.background) return;
-    load_file();
-    take_base();
+    // --background (scripted runs) reads no black.ini, so a test's settings come only from its command line; --set
+    // gives any of them in black.ini's own form (2026-11-16: a settings sweep wrote black.ini, and every run of it
+    // ran with the defaults)
+    if (!g_cfg.background) load_file();
+    for (const std::string &kv : g_cli_lines) {
+        std::string line = kv;
+        size_t eq = line.find('=');
+        if (eq != std::string::npos) line = line.substr(0, eq) + " = " + line.substr(eq + 1);
+        if (!apply_line(line.c_str(), true)) logf("settings: --set %s not understood", kv.c_str());
+        else logf("settings: --set %s", kv.c_str());
+    }
+    if (!g_cfg.background) take_base();
 }
 
 void load_file()
@@ -42,18 +58,26 @@ void load_file()
     FILE *f = nullptr;
     if (_wfopen_s(&f, ini_file().c_str(), L"r") || !f) return;
     char line[1024];
-    while (fgets(line, sizeof line, f)) {
+    while (fgets(line, sizeof line, f)) apply_line(line, false);
+    fclose(f);
+}
+
+// One black.ini line. from_cli: a --set, which wins over the file and is marked so settings_save keeps the file's value
+bool apply_line(const char *line, bool from_cli)
+{
+    {
         char key[64] = "", val[128] = "";
-        if (line[0] == '#' || sscanf_s(line, " %63[^= ] = %127s", key, (unsigned)sizeof key, val, (unsigned)sizeof val) != 2) continue;
+        if (line[0] == '#' || sscanf_s(line, " %63[^= ] = %127s", key, (unsigned)sizeof key, val, (unsigned)sizeof val) != 2) return false;
         std::string k = key;
-        if (cli(k.c_str())) continue; // the command line wins for this run; the file keeps its value (settings_save)
+        if (from_cli) settings_mark_cli(k.c_str());
+        else if (cli(k.c_str())) return true; // the command line wins for this run; the file keeps its value (settings_save)
         if (k == "online_eeprom" || k == "online_hdd" || k == "online_dns") { // paths: the rest of the line, spaces included
             std::string rest = strchr(line, '=') + 1;
             while (!rest.empty() && strchr(" \t\r\n\"", rest.back())) rest.pop_back();
             size_t b = rest.find_first_not_of(" \t\"");
             std::wstring w = widen(b == std::string::npos ? "" : rest.substr(b));
             (k == "online_eeprom" ? g_cfg.online_eeprom : k == "online_hdd" ? g_cfg.online_hdd : g_cfg.online_dns) = w;
-            continue;
+            return true;
         }
         float v = (float)atof(val); // the C runtime's default "C" locale: '.' decimals
         if (k == "render") {
@@ -67,6 +91,7 @@ void load_file()
         else if (k == "seamfill") g_cfg.seam_fill = v != 0;
         else if (k == "effectsnative") g_cfg.effects_native = v != 0;
         else if (k == "shadow") g_cfg.shadow_scale = std::clamp(atoi(val), 1, 16);
+        else if (k == "compile_budget") g_cfg.compile_budget_ms = v < 0 ? -1.0 : std::min(v, 100.0f); // ms a frame; -1 off (d3d/shader_cache.cpp)
         else if (k == "shadowsoft") g_cfg.shadow_pcf = v != 0 ? 1 : 0; // soft shadow edges (d3d/nv2a_psh.cpp; 1: over the host map, 2.2.18)
         else if (k == "vsync") g_cfg.vsync = v != 0;
         else if (k == "perfhud") g_cfg.perfhud = v != 0;
@@ -117,7 +142,7 @@ void load_file()
         else if (padkeys::load_ini(k.c_str(), val)) {} // kb_<input> = Key[,Key], padmap_<input> = <input> (Ninja Gaiden Black)
         else bindings::load_ini(k.c_str(), val); // key_<action> = Key[,Key] (BLACK)
     }
-    fclose(f);
+    return true;
 }
 
 // Every setting as black.ini lines, in file order: (key, whole line)
@@ -216,6 +241,7 @@ void write_all(FILE *f)
     fprintf(f, "seamfill = %d\n", g_cfg.seam_fill ? 1 : 0);
     fprintf(f, "effectsnative = %d\n", g_cfg.effects_native ? 1 : 0);
     fprintf(f, "shadowsoft = %d\n", g_cfg.shadow_pcf ? 1 : 0);
+    fprintf(f, "compile_budget = %g\n", g_cfg.compile_budget_ms < 0 ? -1.0 : g_cfg.compile_budget_ms);
     fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\naniso = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0,
             g_cfg.perfhud ? 1 : 0, g_cfg.aniso);
     fprintf(f, "multicore = %d\nmsaa = %d\n", g_cfg.multicore ? 1 : 0, g_cfg.msaa);

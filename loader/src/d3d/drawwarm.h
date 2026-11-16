@@ -27,5 +27,7 @@ void drawwarm_frame();    // each frame: the new states written to the learned f
 // The enabled lights' shapes hashed (what of them shapes the driver's fixed-function program), for draw.cpp's
 // signature of a lit fixed-function draw; recomputed only when the lights or the material changed
 uint32_t drawwarm_light_sig();
+// --hitch-detail, a slow draw call: 2 its state was replayed at start, 1 recorded this run, 0 no record (prim 0: any)
+int drawwarm_status(IDirect3DDevice9 *d, D3DPRIMITIVETYPE prim);
 
 } // namespace xd3d

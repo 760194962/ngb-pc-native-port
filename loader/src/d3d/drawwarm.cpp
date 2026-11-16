@@ -96,6 +96,23 @@ uint8_t shape_of(const D3DLIGHT9 &l)
     return s;
 }
 
+// A draw on a multisampled target (black.ini msaa) recorded as it is without MSAA: no samples, the depth buffer's
+// own format instead of its multisampled twin's D24S8 (device.cpp ms_depth: INTZ where the card has it), and
+// MULTISAMPLEANTIALIAS at its default (the screen-space 2D turns it off on the multisampled target). The drivers'
+// programs do not depend on these: with MSAA 2x the attract demo's area entry was as smooth replaying only the
+// records without MSAA as replaying their MSAA forms too (RTX 3060: no frame over 33 ms either way, 3 without the
+// replay; Iris Xe: no difference, its D3D12 cache keeps the programs on disk; 2026-11-16). Recorded as they were, an
+// MSAA player learned thousands of the seed's records again (4,230 of a chapters 1-4 play's 13,982) and replayed
+// them at every start.
+void canonical_msaa(Rec &r)
+{
+    if (r.rt_ms == D3DMULTISAMPLE_NONE) return;
+    r.rt_ms = D3DMULTISAMPLE_NONE, r.rt_msq = 0;
+    if (r.z_format == D3DFMT_D24S8 && host3d::intz()) r.z_format = host3d::FMT_INTZ;
+    for (int i = 0; i < kNumRs; i++)
+        if (kRs[i] == D3DRS_MULTISAMPLEANTIALIAS) r.rs[i] = TRUE;
+}
+
 // The enabled lights' shapes, worked out again only when a light, its enabling or the material changed
 const uint8_t *light_shapes(uint32_t *n, uint32_t *packed_hash)
 {
@@ -385,6 +402,7 @@ bool capture(IDirect3DDevice9 *d, D3DPRIMITIVETYPE prim, Rec &r)
         r.z_format = ds.Format;
         z->Release();
     }
+    canonical_msaa(r);
     return true;
 }
 
@@ -496,6 +514,28 @@ uint32_t drawwarm_light_sig()
     uint32_t n, h;
     light_shapes(&n, &h);
     return h;
+}
+
+// --hitch-detail, a draw call over 1 ms (draw.cpp note_slow_draw): was its state replayed at start? 2: yes (the driver
+// built its program anyway: it keys on something the record does not hold), 1: recorded this run (new to the seed and
+// the learned file), 0: no record of it (prim: the draw's, or 0 to try every primitive type).
+int drawwarm_status(IDirect3DDevice9 *d, D3DPRIMITIVETYPE prim)
+{
+    if (!g_cfg.draw_warm) return 0;
+    static std::unordered_set<uint64_t> at_start;
+    std::lock_guard<std::mutex> g(g_lock);
+    load();
+    if (at_start.empty()) // the records the replay drew: those read at start (seed and learned file)
+        for (size_t i = 0; i < g_recs.size() - g_new; i++) at_start.insert(fnv(&g_recs[i], sizeof g_recs[i]));
+    int best = 0;
+    for (int p = prim ? prim : 1; p <= (prim ? prim : 6); p++) {
+        Rec r;
+        if (!capture(d, (D3DPRIMITIVETYPE)p, r)) continue;
+        uint64_t h = fnv(&r, sizeof r);
+        if (at_start.count(h)) return 2;
+        if (g_have.count(h)) best = 1;
+    }
+    return best;
 }
 
 void drawwarm_note(IDirect3DDevice9 *d, D3DPRIMITIVETYPE prim, uint64_t sig)

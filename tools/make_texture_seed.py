@@ -1,9 +1,11 @@
 """The texture pool seed shipped beside the game program (texture_pool.txt, read by loader/src/d3d/texture.cpp
 texture_pool_start): for each texture shape, how many the pool keeps made ahead.
 
-  python -I tools/make_texture_seed.py -o seed/texture_pool.txt LOG [LOG ...]
+  python -I tools/make_texture_seed.py -o seed/texture_pool.txt INPUT [INPUT ...]   (logs and / or target files)
 
-Each LOG is a black.log of a run with --hitch-detail, whose "[tex] made" lines give every texture made, its frame and
+An input is either a black.log of a run with --hitch-detail, or a file of targets in this seed's format: an earlier
+seed (to add to it) or a player's cache\\texture_pool.txt (d3d/texture.cpp writes there every target its runs reached,
+the seed's included), its counts taken as they are. Each LOG is a black.log of a run with --hitch-detail, whose "[tex] made" lines give every texture made, its frame and
 shape. A shape's count is the most of it made in one burst -- textures less than 30 frames apart, the quiet gap the
 pool waits for before it is filled again (kQuietFrames in texture.cpp) -- the largest over the logs. Left out as the loader leaves them: cube maps, textures over 512 KB a copy,
 and shapes past 24 MB in all (the largest counts first). Lines: width height levels d3dformat count.
@@ -45,6 +47,24 @@ def burst_counts(path):
     return need, made
 
 
+def targets(path):
+    """A file of lines "width height levels d3dformat count" (# comments): the shapes and counts as written"""
+    need = collections.Counter()
+    for line in open(path, encoding='utf-8', errors='replace'):
+        f = line.split()
+        if line.startswith('#') or len(f) != 5:
+            continue
+        w, h, l, fmt, n = (int(x) for x in f)
+        if fmt in FMT.values() and nbytes(w, h, l, fmt) <= MAX_TEXTURE:
+            need[(w, h, l, fmt)] = max(need[(w, h, l, fmt)], min(n, 256))
+    return need
+
+
+def is_targets(path):
+    with open(path, encoding='utf-8', errors='replace') as f:
+        return f.readline().startswith('# texture pool')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('logs', nargs='+')
@@ -52,12 +72,16 @@ def main():
     a = ap.parse_args()
     need = collections.Counter()
     for p in a.logs:
-        n, made = burst_counts(p)
-        print('%s: %d textures made, %d shapes' % (p, made, len(n)))
+        if is_targets(p):
+            n = targets(p)
+            print('%s: targets of %d shapes' % (p, len(n)))
+        else:
+            n, made = burst_counts(p)
+            print('%s: %d textures made, %d shapes' % (p, made, len(n)))
         for k, v in n.items():
             need[k] = max(need[k], v)
     if not need:
-        sys.exit('no "[tex] made" lines: record with --hitch-detail')
+        sys.exit('no shapes: logs need "[tex] made" lines (record with --hitch-detail)')
     kept, total = [], 0
     for k, n in sorted(need.items(), key=lambda kv: -kv[1]):
         b = nbytes(*k)

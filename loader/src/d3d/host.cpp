@@ -639,6 +639,7 @@ bool create_device_here()
     logf("host: Direct3D 9Ex device, back buffer %dx%d on '%s'; INTZ depth textures %s", g_bb_w, g_bb_h, id.Description,
          g_intz ? "supported" : "NOT supported (depth-buffer reads return zero)");
     xd3d::prewarm_shaders(g_dev); // the cached shaders' objects now, not in the frame that first draws with them
+    if (g_cfg.compile_port_shaders) xd3d::compile_all_port_shaders(); // tests: for the shader seed (device.cpp)
     xd3d::vsh_seed_prewarm(g_dev); // the game's vertex programs the package locates in default.xbe (vshader.cpp)
     xd3d::texture_pool_start(g_dev); // textures made ahead by shape, not in the frame an area first shows them
     if (g_cfg.ring_rotate) xd3d::draw_ring_prepare(g_dev); // the draw ring sets made and written now (draw.cpp)
@@ -689,9 +690,25 @@ bool recreate_device() { return SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceRecre
 
 IDirect3DDevice9 *dev() { return g_dev; }
 
+// CPU texture steps over 2 ms logged (the first 20): where the render thread waited on the driver for one
+static void cpu_texture_slow(const char *what, int w, int h, const LARGE_INTEGER &t0)
+{
+    static int logged;
+    LARGE_INTEGER t1, f;
+    QueryPerformanceCounter(&t1);
+    QueryPerformanceFrequency(&f);
+    double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart;
+    if (ms > 2.0 && logged < 20) {
+        logged++;
+        logf("[d3d] CPU texture %dx%d: %s took %.1f ms, frame %u", w, h, what, ms, g_frame_count.load());
+    }
+}
+
 bool CpuTexture::make(int width, int height)
 {
     if (tex && w == width && h == height) return true;
+    LARGE_INTEGER t0;
+    QueryPerformanceCounter(&t0);
     release();
     if (!g_dev || FAILED(g_dev->CreateTexture(width, height, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr)) ||
         FAILED(g_dev->CreateTexture(width, height, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, nullptr))) {
@@ -700,13 +717,17 @@ bool CpuTexture::make(int width, int height)
     }
     w = width;
     h = height;
+    cpu_texture_slow("making it", w, h, t0);
     return true;
 }
 
 void *CpuTexture::lock(int *pitch)
 {
     D3DLOCKED_RECT lr;
+    LARGE_INTEGER t0;
+    QueryPerformanceCounter(&t0);
     if (!sys || FAILED(sys->LockRect(0, &lr, nullptr, 0))) return nullptr;
+    cpu_texture_slow("the lock", w, h, t0);
     *pitch = lr.Pitch;
     return lr.pBits;
 }

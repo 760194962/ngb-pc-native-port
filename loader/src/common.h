@@ -91,7 +91,7 @@ struct Config {
     bool vsync = false;          // present on the display's refresh (black.ini vsync); off: frames paced by the Xbox vblank only
     bool perfhud = false;        // the performance overlay (black.ini perfhud; d3d/perfhud.cpp)
     int aniso = 1;               // anisotropic texture filtering (black.ini aniso: 1 off = as the game sets, 2-16; d3d/draw.cpp)
-    bool seam_fill = true;     // fill hairline cracks between geometry pieces (PC SETTINGS, --no-seamfill)
+    bool seam_fill = false;    // fill hairline cracks between geometry pieces (PC SETTINGS, black.ini seamfill = 1; off by default since 2.2.32, --no-seamfill)
     bool autoaim = false;      // the game's view pull toward targets, off by default (input/autoaim.cpp; --autoaim, PC SETTINGS)
     float fov = 70.0f;         // horizontal field of view in play, degrees (fov.cpp; --fov, PC SETTINGS; the game's is 70)
     int language = 1;          // the console's language (EEPROM XC_LANGUAGE, kernel/k_misc.cpp): 1 English, 2 Japanese,
@@ -226,6 +226,7 @@ struct Config {
     std::wstring vsh_record;   // --vsh-record FILE (tests): every game vertex program translated, for tools/make_vsh_seed.py
     bool log_vsh = false;      // --log-vsh: each game vertex program's disassembly in the log (d3d/vshader.cpp)
     bool cpu_tex_verify = false; // --cpu-tex-verify (tests): kept ripple textures compared with the game's own, byte for byte
+    bool compile_port_shaders = false; // --compile-port-shaders (tests): every variant of the port's own pixel shaders into the cache at start, for the seed (d3d/device.cpp)
     bool cpu_tex = true;       // --no-cpu-tex: the game's CPU-made ripple textures computed every time (ngb_cpu_textures.cpp)
     bool saved_volumes = true; // --no-saved-volumes: a cold start keeps the default sound volumes, as the console (ngb_sound_boot.cpp)
     double compile_budget_ms = -1; // --compile-budget MS: compiling on the render thread a frame before the rest go to threads and their draws are left out (-1, the default: all now)

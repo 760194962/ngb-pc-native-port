@@ -6,9 +6,11 @@ their programs then and not in the frame an area first shows them.
          [--vsh-seed seed/vertex_programs.bin]] FILE [FILE ...]
   check: python -I tools/make_draw_seed.py --check FILE [--seed seed/draw_states.bin]
 
-A FILE is a cache\\draw_states.bin. Header: "NGBDRAW2", the record size, the count, the version of the program that
-wrote it (16 bytes). Records are fixed-size (a file of another size is a different build's and is refused); the
-files must be of one version, which the seed carries (the program drops learned files of another version). Taken: every distinct record. With --shader-seed, records whose shaders the shader
+A FILE is a cache\\draw_states.bin (or an earlier seed). Header: "NGBDRAW2", the record size, the count, the version
+of the program that wrote it (16 bytes). Records are fixed-size (a file of another size is a different build's and is
+refused); files of different versions are merged (a note says so) and the newest version is stamped: a record does not
+depend on the version, only on its shaders, which --shader-seed checks against the current shader seed (the program
+itself uses a seed of any version and drops only learned files of another one). Taken: every distinct record. With --shader-seed, records whose shaders the shader
 seed does not have are left out (a player's first start could not draw them: their shader is made only after the
 game first uses it); the game's own vertex programs are such (make_shader_seed.py leaves them out). Records are
 written sorted by their bytes: the same inputs make the same file.
@@ -17,6 +19,7 @@ written sorted by their bytes: the same inputs make the same file.
 """
 import argparse
 import os
+import re
 import struct
 import sys
 
@@ -40,6 +43,33 @@ def read(path):
 
 def vname(v):
     return v.rstrip(b'\0').decode()
+
+
+def vorder(v):
+    """A version's order: its numbers, a test suffix ranking below the release ("2.2.30-t1" < "2.2.30" < "2.2.31").
+    Each part's leading digits count: the suffixed part used to drop out whole, so 2.2.30-t1 sorted as 2.2."""
+    main, dash, suffix = vname(v).partition('-')
+    nums = tuple(int(re.match(r'\d*', n).group() or 0) for n in main.split('.'))
+    return nums, 0 if dash else 1, suffix
+
+
+# Record offsets (loader/src/d3d/drawwarm.cpp Rec, 528 bytes): D3DRS_MULTISAMPLEANTIALIAS among the render states,
+# rt_ms, rt_msq, z_format
+RS_MSAA, RT_MS, RT_MSQ, Z_FORMAT = 156 + 4 * 31, 440, 444, 448
+D3DFMT_D24S8, FMT_INTZ = 75, 0x5A544E49
+
+
+def canonical_msaa(r):
+    """A record made on a multisampled target as it is without MSAA, as drawwarm.cpp canonical_msaa records it since
+    2.2.32 (recordings of earlier versions with black.ini msaa hold them as they were)"""
+    if len(r) != 528 or struct.unpack_from('<I', r, RT_MS)[0] == 0:
+        return r
+    b = bytearray(r)
+    struct.pack_into('<II', b, RT_MS, 0, 0)
+    if struct.unpack_from('<I', b, Z_FORMAT)[0] == D3DFMT_D24S8:
+        struct.pack_into('<I', b, Z_FORMAT, FMT_INTZ)
+    struct.pack_into('<I', b, RS_MSAA, 1)
+    return bytes(b)
 
 
 def shader_keys(seed_path):
@@ -89,9 +119,12 @@ def main():
         if size is not None and s != size:
             sys.exit('%s: records of %d bytes, the others %d' % (f, s, size))
         if version is not None and v != version:
-            sys.exit('%s: written by %s, the others by %s' % (f, vname(v), vname(version)))
+            # Records do not depend on the program version: what a release can change under them is its shaders, and
+            # --shader-seed leaves out every record whose shaders the current seed lacks. The newest version is stamped.
+            print('note: %s written by %s, the others by %s; merged' % (f, vname(v), vname(version)))
+            v = max(v, version, key=vorder)
         size, version = s, v
-        recs.update(r)
+        recs.update(canonical_msaa(x) for x in r)
     if a.check:
         _, _, seed = read(a.seed)
         seed = set(seed)

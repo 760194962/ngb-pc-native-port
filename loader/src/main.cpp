@@ -257,6 +257,7 @@ bool parse_args()
             settings_mark_cli("online_insigniadns");
         }
         else if (a == L"--multicore") { g_cfg.multicore = true; settings_mark_cli("multicore"); }
+        else if (a == L"--set" && i + 1 < argc) settings_cli_set(narrow(argv[++i])); // a black.ini line, e.g. --set shadowsoft=0 (tests)
         else if (a == L"--msaa" && i + 1 < argc) { g_cfg.msaa = std::clamp(_wtoi(argv[++i]), 0, 16); settings_mark_cli("msaa"); }
         else if (a == L"--game-cpu") {
             std::wstring v;
@@ -293,8 +294,10 @@ bool parse_args()
             std::wstring v;
             if (!next(v)) return false;
             g_cfg.compile_budget_ms = _wtof(v.c_str());
+            settings_mark_cli("compile_budget");
         }
         else if (a == L"--cpu-tex-verify") g_cfg.cpu_tex_verify = true;
+        else if (a == L"--compile-port-shaders") g_cfg.compile_port_shaders = true;
         else if (a == L"--vsh-record") {
             if (!next(g_cfg.vsh_record)) return false;
         }
@@ -761,10 +764,10 @@ int run(void *reserve, unsigned reserve_size)
     logf("address-space stub: reserve %p + 0x%x", reserve, reserve_size);
     // What black.ini (the launcher's pages) and the command line set, as read: the launcher's choices can be checked here
     logf("settings: render %s, scale %.2f, aa %d, seamfill %d, effectsnative %d, shadow %d, vsync %d, perfhud %d, aniso %d, widescreen %d, fullscreen %d, "
-         "window %dx%d, fullscreen_res %s, gain %.2f, gamma %.2f",
+         "window %dx%d, fullscreen_res %s, gain %.2f, gamma %.2f, shadowsoft %d, msaa %d",
          g_cfg.render_native ? "native" : g_cfg.render_h ? std::to_string(g_cfg.render_h).c_str() : "scale", g_cfg.scale,
          g_cfg.aa, g_cfg.seam_fill, g_cfg.effects_native, g_cfg.shadow_scale, g_cfg.vsync, g_cfg.perfhud, g_cfg.aniso, g_cfg.widescreen, g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0,
-         g_cfg.window_w, g_cfg.window_h, g_cfg.fs_window_res ? "window" : "screen", g_cfg.gain, g_cfg.gamma);
+         g_cfg.window_w, g_cfg.window_h, g_cfg.fs_window_res ? "window" : "screen", g_cfg.gain, g_cfg.gamma, g_cfg.shadow_pcf, g_cfg.msaa);
 
     std::string err;
     if (!g_xbe.load(g_cfg.xbe_path, err)) {
@@ -875,7 +878,8 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && !black && !profile->aux) install_music51_fix(); // the music player's six channels at -96 dB
     if (profile && !black) // the ripple textures the game makes on the CPU, kept (ngb_cpu_textures.cpp)
         if (const XbeSection *t = g_xbe.section_named(".text")) install_cpu_textures(t->vaddr, t->vsize);
-    if (profile && !black && !profile->aux) // the saved sound volumes at a cold start (ngb_sound_boot.cpp)
+    // the saved sound volumes at a cold start: Black and Ninja Gaiden (2004), not the bundled programs (ngb_sound_boot.cpp)
+    if (profile && !black && (!profile->aux || !strcmp(profile->aux, "NG04TU") || !strcmp(profile->aux, "NG04DISC")))
         if (const XbeSection *t = g_xbe.section_named(".text")) install_saved_volumes(t->vaddr, t->vsize);
     if (profile && profile->wide2d) // the HUD's sides on a screen not 16:9: in play as the game's HUD routine says
         if (const XbeSection *t = g_xbe.section_named(".text")) xd3d::install_hud_probe((uint8_t *)(uintptr_t)t->vaddr, t->vsize);
