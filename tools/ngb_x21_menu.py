@@ -3,6 +3,17 @@ of its default.xbe (the console, emulators and the PC port alike).
 
     python tools/ngb_x21_menu.py <vb-jp-x2.1 default.xbe> <out.xbe>      (needs keystone-engine)
 
+The release ships it as a whole-disc patch, vb-jp-x2.1-menu-redump.xdelta (the launcher's Black install takes only
+whole-disc patches, against the base image it builds from a Redump disc). To remake it after a change here:
+1. base.iso from the Redump disc: python -I tools/make_base_iso.py <Redump .iso> base.iso (checks the SHA-1).
+2. The previous release's patch decoded: xdelta3 -d -s base.iso vb-jp-x2.1-menu-redump.xdelta old.iso
+   (vb-jp-x2.1's own default.xbe, this script's input, comes from the translator's jp patch decoded the same way).
+3. The new default.xbe written over the old one in old.iso, in place: same start sector, 0xFF to the sector's end,
+   the root directory entry's size changed (in the 2026-11-16 image: sector 3075040, 2238 sectors, size field at
+   byte 0x8498C). Only while the sector count does not change; otherwise the image needs repacking.
+4. xdelta3 -e -9 -S lzma -s base.iso new.iso vb-jp-x2.1-menu-redump.xdelta, decoded again to check; then base.iso
+   and the images can be deleted. The translator's xdelta3.exe cannot open paths with non-ASCII characters.
+
 General Settings (rows 5-7, before Default Settings / Exit):
 - Essence-Only Charging (settings +0x05 bit 0): holding the button no longer counts the Ultimate Technique charge up
   (0x23B04); absorbed essence still does, as in Ninja Gaiden (2004).
