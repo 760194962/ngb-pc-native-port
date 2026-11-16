@@ -28,7 +28,8 @@ Controller Settings, in Intercept's row:
 x2.1's chapter-1 corpse (yasik_cmn.afs: it checks for Intercept and gives it besides the elixir 0xBE, so an owned
 Intercept leaves the corpse "can't carry more") is not this patch's: the release keeps the US yasik_cmn.afs, the only
 place x2.1 changed it. The settings bytes used are unused by the game and by x2.1 (menu copy 0xDA42E0, saved copy
-0xDB9400). New code and data: a section of its own (NGBX, 0xE17000), as tools/ng04_camera_menu.py does it.
+0xDB9400). New code and data: a section of its own (NGBX, 0xE17000), as tools/ng04_camera_menu.py does it. The
+certificate's title, region and allowed media are the US release's again (the Hurricane base image had changed them).
 """
 import hashlib
 import os
@@ -471,6 +472,17 @@ def main():
     call(0x220A22, entries['cave_help'], 7)
     call(0x23B04, entries['cave_eo'], 8)
     call(0x1DC052, entries['cave_cs'], 6)
+
+    # The certificate as on the US release's disc: the Hurricane patches' base image renamed the title "Ninja Gaiden:
+    # Black" and opened every region and every medium (x2.1 kept that). Back to "NINJA GAIDEN Black", region 1 (North
+    # America), allowed media 0x202 (the DVD and the hard disk).
+    cert = struct.unpack_from('<I', x.d, 0x118)[0] - x.base
+    title = lambda s: s.encode('utf-16-le').ljust(80, b'\0')
+    if bytes(x.d[cert + 0x0C:cert + 0x5C]) != title('Ninja Gaiden: Black') or \
+            bytes(x.d[cert + 0x9C:cert + 0xA4]) != bytes.fromhex('ff01004007000000'):
+        raise SystemExit('certificate: not the Hurricane base image\'s')
+    x.d[cert + 0x0C:cert + 0x5C] = title('NINJA GAIDEN Black')
+    x.d[cert + 0x9C:cert + 0xA4] = struct.pack('<II', 0x202, 1)
 
     open(out, 'wb').write(x.d)
     print('%s: section NGBX %d bytes (code %d), sha256 %s' % (out, len(section), len(code), hashlib.sha256(x.d).hexdigest()))
