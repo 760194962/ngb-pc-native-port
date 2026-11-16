@@ -202,7 +202,48 @@ fresh cache before a release.
   60, and a player who had changed them was asked "Apply changes to the sound settings?" at the title every time. Now
   the saved volumes apply from the start (after ngbrecomp 0.9.54 #182). `--no-saved-volumes` keeps the console's way.
 
+### 2.2.32: the seeds completed, a new player's last first-start spike, what was looked into
+
+**What changed**
+
+| Item | What the port does | Switch / tool | Measured |
+|---|---|---|---|
+| A new player's last fixed first-start spike: the game computing 10 ripple textures on the CPU before a cutscene (a frame of ~40 ms) | the package carries a ripple texture seed, `cpu_textures.bin` (data the game's code computes, no code; the author agreed); read before the player's own file | `tools/make_cputex_seed.py`; `--no-cpu-tex` still turns the whole cache off | from an empty cache: frames over 33 ms 1 a run -> 0, worst 40-41 -> 28-32 ms (RTX 3060). The five Black builds and NG2004's disc and title update have the same constants and share these 10 |
+| MSAA players learning the seed's states again (the records held the sample count and the multisampled depth format) | draws on multisampled targets recorded as without MSAA; the merge tool converts older recordings the same way | - | experiment: with MSAA 2x, replaying only the non-MSAA forms kept the area entry smooth (RTX 3060 no frame over 33 ms, 3 without the replay; Iris Xe no difference): the drivers' programs do not depend on MSAA. Since: the attract demo with MSAA learns 19 new states (20 without); a chapters 1-4 MSAA recording had 4,417 of the seed's |
+| The port's own shaders missing for some settings (MSAA's copy, the resolves at other scales: 12) | a test option compiles every variant once into the seed | `--compile-port-shaders` | MSAA 2/4/8 and scale 8 compile none any more; box resolve AT 5 needs 655 of ps_2_a's 512 slots and goes to the old resolve as designed, its "does not compile" record is in the seed |
+| NG2004's title update (the one the Hurricane Packs use) not covered by the vertex program seed | that program given to the tool too | `tools/make_vsh_seed.py --xbe` | title update 0 of 7 -> 7 of 7 |
+| NG2004 not applying its saved volumes at a cold start (Black's problem, other encoding and save offsets) | the signature takes both encodings and works the offsets out | `--no-saved-volumes` | one place each in the disc, the title update and the six Black builds; a volume set to 39 read back at the next cold start (60 before), no question at the title (the author) |
+| Seam fill | off by default (the author's choice) | launcher / `black.ini seamfill = 1` | players whose black.ini already holds seamfill keep it |
+
+**The seeds now**: 441 shaders, 16,679 draw states, 194 texture shapes (the 24 MB cap), 7 game vertex programs, 10 ripple textures. From the
+title, the attract demo and the author's plays of chapters 1-2 (11-15) and 1-4 (11-16, MSAA 2x); each source checked with `--check`: 100%.
+Cost at start, to frame 60: RTX 3060 about 3.0 -> 3.1 s, Iris Xe about 2.2 -> 2.3 s; frame times in play unchanged (Iris Xe, 3 runs each,
+interleaved).
+
+**Looked into, not the port or ruled out** (each measured, 2026-11-16):
+- Every graphics setting (MSAA 2/4/8, soft shadows, FXAA, seam fill, render scale 1/2/8, native, effects at Xbox size, shadows 1/16, 21:9 /
+  16:10 / 4:3, anisotropic filtering, vsync, the overlay) run from an empty cache: no game shader compiled, no frame over 50 ms. (A first
+  sweep ran every configuration with the defaults, because `--background` reads no black.ini; withdrawn, rerun with `--set`, each run's
+  settings checked in its log.)
+- The small hitches left: after the replay, 10-20 draw calls of 1-11 ms per 170 s (frames of 20-32 ms, none over 33 ms), nearly all
+  fixed-function. Ruled out: states the replay missed (every one "replayed at start"), new textures (mostly uploaded hundreds of frames
+  before, the slowest had none bound), low GPU clocks (locked at 1,800 MHz they stayed, the GPU 10-20% busy), the driver's program cache
+  overflowing (replaying only the 1,865 states used gave the same as all 16,679). Taken as the NVIDIA driver's own work. Without the
+  replay: 50 of them and 3 frames over 33 ms.
+- A few 50-108 ms hitches in the sweep: none in 6 reruns of those settings nor in 20+ default runs; interference during the tests.
+- One 40-60 ms frame early on the Iris Xe: the performance recorder (`--perf-at`) starting on the render thread; players never use it.
+
+**Test options** (new in 2.2.32): `--set key=value` (any black.ini setting, also in background runs; the settings line in the log now
+gives soft shadows and MSAA too), `--compile-port-shaders`. `--hitch-detail` writes each slow draw's replay status and how many frames ago
+its textures were uploaded; its GPU timestamps show when the driver handed the GPU its commands, not the GPU's work.
+
+**Recording seeds while playing**: add to launcher.ini in the game folder
+`args = --vsh-record "<game folder>\vsh_record.bin" --hitch-detail`, play, then give the author `cache\shaders\`,
+`cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
+updating to a new version**: a new version drops the draw states learned locally.
+
 ## Known issues
+- Now and then a frame of 20-32 ms (one dropped) on entering an area or a scene: the NVIDIA driver spending 1-11 ms in a few draw calls, inside the driver (see 2.2.32 above).
 - Entering play from the main menu can hold the picture about 0.6 s: the game is deleting earlier chapters' cutscene
   packs from its hard-disk cache (`rtm_*.afs`); its CRI file system advances a step a frame (60 Hz) and each file takes
   two. The console does the same; not the port (found with `--trace`, 2026-11-15).
@@ -541,6 +582,8 @@ Start options for tracking down performance and hitches:
 | `--trace` | log every kernel call (a large log) |
 | `--log-vsh` | write each vertex program's disassembly |
 | `--compile-budget MS` | the compile budget (off by default; see Smoothness above) |
+| `--set key=value` | any black.ini setting from the command line (background test runs read no black.ini) |
+| `--compile-port-shaders` | every variant of the port's own shaders compiled into the cache at start, for the seed |
 | `--no-draw-warm` / `--no-tex-pool` / `--no-cpu-tex` / `--ring-discard` | turn the matching smoothness change off, to compare |
 | `--cpu-tex-verify` | the game still computes every ripple texture, compared byte for byte with the kept one |
 | `--ffp-vs` / `--ffp-vs-check N` | generated vertex shaders instead of D3D9's fixed-function pipeline (off) / both drawn and compared per pixel |
