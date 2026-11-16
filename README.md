@@ -120,7 +120,7 @@ Redump 的「Ninja Gaiden (USA, Asia) (En,Ja)」也支持：同一个 1.02.04，
 
 ## 菜单补丁（本分支）
 
-两个补丁，把选项做进游戏自己的 OPTIONS 菜单；实机、模拟器和本移植都能用。生成脚本在 `tools/`，补丁文件随 release
+两个补丁，把选项做进游戏自己的 OPTIONS 菜单；只在本移植版和模拟器上测试过，在 Xbox 360 上似乎不能用。生成脚本在 `tools/`，补丁文件随 release
 发布，都以 Redump 原版镜像为底，启动器「安装」页选上就能装。
 
 本分支（main）每小时自动检查上游的新版本（`.github/workflows/follow-upstream.yml`）：上游发布新版后，合并进来、编译打包，

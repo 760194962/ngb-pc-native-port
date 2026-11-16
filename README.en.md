@@ -29,8 +29,8 @@ This repository is a fork of [akirahayabusa/ngb-pc-native-port](https://github.c
   - *NG 2004 1.06 camera menu*: Camera Control (Normal/Reverse), 3rd Person Camera (On/Off at start) and 3rd Person Camera Stages
     (Hurricane/All) in OPTIONS → CONTROLLER SETTINGS.
   - *Black Hurricane x2.1 (JP/EN) menu*: Essence-Only Charging, Skip Any Cutscene, Intercept (Hurricane Pack/Black/Off)
-    and Left Stick for Camera when charging ET/UT (This won't work well with Essence-Only Charging on); chapter 1's corpse restored to the original behaviour.
-- **Automatic releases**: a GitHub Action checks upstream daily; when upstream publishes a release, it is merged into
+    and Left Stick for Camera when charging EUT (This won't work well with Essence-Only Charging on); chapter 1's corpse restored to the original behaviour.
+- **Automatic releases**: a GitHub Action checks upstream every hour; when upstream publishes a release, it is merged into
   `main`, built (MSVC, Win32), packed and published here as `v<version>-fork1`. A merge conflict or failed build publishes nothing.
 
 This branch (main) checks upstream for new releases every hour (`.github/workflows/follow-upstream.yml`): a new upstream
@@ -51,7 +51,7 @@ can be install from the launcher's Install page.
       button no longer counts up.
     - Skip Any Cutscene: START skips cutscenes not watched before.
     - Intercept: Hurricane Pack / Black / Off. Off removes the item when a save loads, missions included.
-  - CONTROLLER SETTINGS: Ultimate Tech Camera, the left stick moves the camera during ET/UT charging: Off,
+  - CONTROLLER SETTINGS: Ultimate Tech Camera, the left stick moves the camera during EUT charging: Off,
     Left / Right (sideways only) or All Directions.
   - The chapter 1 corpse uses the original `yasik_cmn.afs` (the only place x2.1 changed it: it checks for Intercept
     and gives it besides the elixir, so an owned Intercept leaves the corpse "can't carry more"). Intercept comes from
