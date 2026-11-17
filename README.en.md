@@ -245,6 +245,16 @@ updating to a new version**: a new version drops the draw states learned locally
 
 ### 2.2.34: exclusive fullscreen on a high-refresh screen without judder, its clock from the display
 
+**The low-latency present is off by default again (experimental)**: a player on a 60 Hz display with integrated graphics
+found windowed play less smooth with it on. 2.2.33's measurements covered the game's pacing and when pictures were sent,
+not what the screen showed: sent as soon as it is drawn, a frame only has until the desktop compositor's deadline before
+the next vblank instead of a whole frame, so a heavy one can miss it (the last picture shown twice) and then two frames
+land in one composition (one never shown). A likely cause, not measured yet. While it was on by default, 2.2.33 and the
+first 2.2.34 wrote `present_early = 1` into every player's black.ini, so the setting is `low_latency_present` now
+(default 0) and `present_early` is not read; players who want it turn "Low-latency present" on again on the launcher's
+Graphics page. It also waits for frame 300 (about 5 s): around frame 30 at the boot (the opening files loading, a black
+screen) it now and then made a frame 50-56 ms (6 of 31 starts with it, 0 of 30 without, Iris Xe).
+
 **60 Hz with V-Sync (on by default)**: the game makes 60 frames a second. On a 120, 144 or 165 Hz screen exclusive
 fullscreen kept the desktop's refresh, and V-Sync could only line frames up with it: at 165 Hz each frame stayed for 3, 3,
 3, 2 refreshes in turn (18 / 12 ms), a judder. Now exclusive fullscreen with V-Sync on a desktop outside 59-61 Hz takes a
@@ -276,7 +286,7 @@ players do not get; exclusive fullscreen is measured with foreground runs.
 
 ### 2.2.33: low-latency present, the seed's duplicates gone, NG2004 in the seed
 
-**Low-latency present (on by default)**: the game runs on the console's beat, 60 frames a second: each frame reads the pad
+**Low-latency present (on by default in this release; off again from 2.2.34, see above)**: the game runs on the console's beat, 60 frames a second: each frame reads the pad
 at its start, is worked out and drawn, then waits for the next beat. A finished frame also waited for that beat before it
 went to the screen, a dozen milliseconds for nothing; now it goes as soon as it is drawn and the wait comes after. The
 game's own timing is exactly as before, only the picture comes out sooner (after ngbrecomp 0.9.70's presentation,
