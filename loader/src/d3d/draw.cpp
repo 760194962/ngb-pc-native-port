@@ -2958,6 +2958,7 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
                      rs[XRS_SRCBLEND], rs[XRS_DESTBLEND]);
             std::string key = t;
             for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
+            if (g_hud_vars[2]) snprintf(t, sizeof t, " (HUD word 0x%04x)", *(volatile uint16_t *)(uintptr_t)g_hud_vars[2]), key += t;
             if (seen_fq.size() < 200 && seen_fq.insert(key).second)
                 logf("[hudtrace] frame %u 3d %u plain full-screen quad, colour 0x%08x, %s", g_frame_count.load(), g_wh.threed, c, key.c_str());
         }
@@ -3457,9 +3458,13 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
 // render target, added at ONE/ONE, after 3D this frame (the menus draw the same glow with no 3D: kept). NG2004 flashes
 // the same moments with a plain white quad instead (colour 0xA0FFFFFF added at SRCALPHA/ONE over the whole screen after
 // 230 3D draws, FUN_00300990 of the disc program 1.02.04; the user, 2026-11-17: "和黑一样的白色屏幕闪烁"): a light-coloured
-// untextured full-screen quad added on (destination ONE) over the 3D is left out too. Fades (black, or blended over the
-// picture with INVSRCALPHA) are not added on and stay. Each call chain so left out is logged once, with the HUD's state,
-// so other users of such a draw would show.
+// untextured full-screen quad added on (destination ONE) over the 3D is left out too. While a move or an event hides
+// the HUD (the HUD routine's word not 0xFFFF) a light plain quad laid over the picture at INVSRCALPHA goes as well: Black's
+// event 0x63 covered the whole screen white so (colour 0xFFFFFFFF, FUN_003238A0, frame 6663, while it loaded the next
+// room); the user, shown it and its absence: "黑之章的盖白也纳入开关". NG2004 title update 1.06.04 does the same in its event
+// 0x40 (FUN_00314A70, frame 2587), and adds white for pickups (word 0xFFFF, HUD hidden) and moves (HUD shown) with the same
+// routine; all three left out, black fades kept (the user: "既没有白光也没有盖白"). Fades with the word at 0xFFFF (scene
+// changes, black or white) stay. Each call chain so left out is logged once, with the HUD's state, so other users of such a draw would show.
 uint32_t g_flash_skipped;
 bool skip_move_flash(const DrawCtx &ctx, const void *data, uint32_t count, uint32_t stride)
 {
@@ -3467,9 +3472,11 @@ bool skip_move_flash(const DrawCtx &ctx, const void *data, uint32_t count, uint3
     if (ctx.path != Path::Fvf || (ctx.fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW) return false;
     if (!g_st.render_target || !is_backbuffer(g_st.render_target)) return false;
     const uint32_t *rs = render_state();
-    if (!rs[XRS_ALPHABLENDENABLE] || rs[XRS_DESTBLEND] != 1) return false; // added on
-    float w = (float)backbuffer_width(), h = (float)backbuffer_height();
     const bool textured = (ctx.fvf & D3DFVF_TEXCOUNT_MASK) != 0 && g_st.textures[0];
+    const bool event_cover = !textured && rs[XRS_ALPHABLENDENABLE] && rs[XRS_DESTBLEND] == 0x303 && g_hud_vars[2] &&
+                             *(volatile uint16_t *)(uintptr_t)g_hud_vars[2] != 0xFFFF; // laid over during a move / event
+    if (!event_cover && (!rs[XRS_ALPHABLENDENABLE] || rs[XRS_DESTBLEND] != 1)) return false; // added on
+    float w = (float)backbuffer_width(), h = (float)backbuffer_height();
     if (textured) { // Black's glow: a render target in place, ONE / ONE
         if (!g_stage0_rendered || rs[XRS_SRCBLEND] != 1) return false;
     } else { // NG2004's flash: plain and light
@@ -3492,10 +3499,12 @@ bool skip_move_flash(const DrawCtx &ctx, const void *data, uint32_t count, uint3
     static std::set<std::string> seen;
     uint32_t by[6] = {};
     int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 6);
-    std::string key;
-    char t[16];
+    std::string key = textured ? " glow" : event_cover ? " white laid over" : " white added";
+    char t[32];
     for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
-    key += hud_in_play() ? " (HUD shown)" : " (HUD hidden)";
+    key += hud_in_play() ? " (HUD shown" : " (HUD hidden";
+    if (g_hud_vars[2]) snprintf(t, sizeof t, ", word 0x%04x)", *(volatile uint16_t *)(uintptr_t)g_hud_vars[2]), key += t;
+    else key += ")";
     if (seen.size() < 64 && seen.insert(key).second)
         logf("[draw] frame %u: a move's glow left out (move_flash = 0, %u so far):%s", g_frame_count.load(), g_flash_skipped + 1, key.c_str());
     g_flash_skipped++;

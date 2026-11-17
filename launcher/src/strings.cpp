@@ -765,17 +765,20 @@ const Pair kText[(int)Str::Count] = {
     {L"默认开启，和原版一样。\n\n"
      L"跳墙斩、一些技能，以及捡道具、开宝箱时，游戏会让整个画面闪一下白光：\n"
      L"• 黑之章：叠三层场景的图像，一层亮的场景、一层放大模糊的上一帧，以及一层整屏加亮叠加的泛光，晃眼的是这层泛光；\n"
-     L"• 2004：直接在整个画面上加亮叠一层白色。\n\n"
-     L"关闭后只去掉这层整屏加亮的白光，招式的模糊、亮光和光芒特效仍然保留；菜单、淡入淡出和正常的战斗画面不受影响。\n\n"
-     L"程序按白光的画法来认（铺满整屏、加亮叠加、这一帧已经画过 3D），黑之章和 2004 都实测过。",
+     L"• 2004：直接在整个画面上加亮叠一层白色。\n"
+     L"另外，一些游戏事件进行中（例如进入下一个区域时）会用一层白色把整个画面盖住。\n\n"
+     L"关闭后去掉这些整屏白光，招式的模糊、亮光和光芒特效仍然保留；菜单、普通场景切换的淡入淡出和正常的战斗画面不受影响。\n\n"
+     L"程序按白光的画法来认（铺满整屏、这一帧已经画过 3D，加亮叠加，或在招式 / 事件进行中盖上的白色），黑之章和 2004 都实测过。",
      L"On by default, as in the original.\n\n"
      L"The wall-run slash, some techniques, picking up an item and opening a chest flash the whole screen white:\n"
      L"• Black lays three pictures of the scene over it: a bright one, a zoomed blur of the last frame, and a glow added over the whole "
      L"screen; the glow is what dazzles;\n"
-     L"• NG2004 adds a white layer over the whole screen.\n\n"
-     L"Off leaves out that full-screen white only; the moves keep their blur, light and rays. Menus, fades and normal play are not "
-     L"affected.\n\n"
-     L"The flash is told by how it is drawn (the whole screen, added on, after the frame's 3D); tested in Black and NG2004."},
+     L"• NG2004 adds a white layer over the whole screen.\n"
+     L"Some game events (entering the next area, say) also cover the whole screen with white.\n\n"
+     L"Off leaves out these full-screen whites; the moves keep their blur, light and rays. Menus, the fades of ordinary scene changes "
+     L"and normal play are not affected.\n\n"
+     L"Told by how it is drawn (the whole screen after the frame's 3D, added on, or white laid over during a move or an event); tested in "
+     L"Black and NG2004."},
 };
 
 } // namespace
