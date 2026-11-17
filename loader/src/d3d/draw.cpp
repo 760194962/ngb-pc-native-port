@@ -2182,9 +2182,10 @@ uint64_t draw_state_sig(D3DPRIMITIVETYPE prim)
         if (!g_vs_sent) mix(g_ts_sent[st][28] ^ (g_ts_valid[st][28] ? 0 : 0x80000000u), g_ts_sent[st][21] ^ (g_ts_valid[st][21] ? 0 : 0x80000000u));
     }
     if (!g_vs_sent && rs[XRS_LIGHTING]) mix(drawwarm_light_sig(), 0x4C); // the host's pipeline lighting: its lights' shapes
-    if (!g_vs_sent) { // the host pipeline's matrices: which elements are 0 and which 1 (drawwarm's record), 4 at a time
-        const D3DMATRIX *m[7] = {&g_st.transforms[0], &g_st.transforms[1], &g_st.transforms[6], nullptr, nullptr, nullptr, nullptr};
-        for (int s = 0; s < 4; s++) m[3 + s] = g_texm_valid[s] ? &g_texm_sent[s] : &g_st.transforms[2 + s];
+    if (!g_vs_sent) { // the host pipeline's matrices: which elements are 0 and which 1 (drawwarm's record), 4 at a time:
+        // the projection and the texture matrices (not the view and world, drawwarm.cpp canonical_xf)
+        const D3DMATRIX *m[5] = {&g_st.transforms[1], nullptr, nullptr, nullptr, nullptr};
+        for (int s = 0; s < 4; s++) m[1 + s] = g_texm_valid[s] ? &g_texm_sent[s] : &g_st.transforms[2 + s];
         const __m128 zero = _mm_setzero_ps(), one = _mm_set1_ps(1.0f);
         for (const D3DMATRIX *x : m) {
             const float *f = &x->_11;

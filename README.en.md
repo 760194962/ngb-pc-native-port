@@ -292,6 +292,41 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.33: low-latency present, the seed's duplicates gone, NG2004 in the seed
+
+**Low-latency present (on by default)**: the game runs on the console's beat, 60 frames a second: each frame reads the pad
+at its start, is worked out and drawn, then waits for the next beat. A finished frame also waited for that beat before it
+went to the screen, a dozen milliseconds for nothing; now it goes as soon as it is drawn and the wait comes after. The
+game's own timing is exactly as before, only the picture comes out sooner (after ngbrecomp 0.9.70's presentation,
+`docs/TECHNICAL.md` "Presentation"). The launcher's Graphics page "Low-latency present" turns it off,
+`black.ini present_early = 0`; the log's settings line names `present_early`.
+
+| From the game reading the pad to the picture going out (median) | Before | Now |
+|---|---|---|
+| windowed, Iris Xe / RTX 3060, 3x and 4x / 8x | 16.2-16.9 ms | 2.3-2.6 ms |
+| exclusive fullscreen at 165 Hz, vsync on or off | about 18 ms | 8.1-8.5 ms |
+| NG2004 (title update) | 17.5 ms | 1.5 ms |
+
+Late frames (6.7%, the attract demo's loads and movie), game speed and the 30 fps movie's pacing are unchanged; windowed
+the frame time's average is the same or lower (Iris Xe 4x 4.91 -> 4.44 ms) and the presents' spacing varies about
+0.15 ms more (the desktop shows them on its refresh: not visible); exclusive, the p99 frame time is 20 -> 24 ms (the
+Present's wait for its flip now comes before the beat's wait; no frame is later for it). Presenting at a steady time
+after the frame's start (ngbrecomp's pace_target) was tried too: 4-12 ms only, and exclusive 60-160 more late frames a
+run, so not taken. Measured with `--hitch-detail`, which logs a `[lat]` line every 600 frames.
+
+**The seed's duplicates gone, NG2004 shares Black's seed**: a draw-state record held which elements of the view and world
+matrices were exactly 0 or 1, and these follow the camera and the object, so one way of drawing was recorded many times:
+Black's 16,679 records were 6,818 states, and the author's 2,958-record NG2004 play matched none of Black's (the author
+found that odd; this was why). Those two are recorded as a plain affine matrix's now (the projection and texture
+matrices stay: they do shape the driver's program), older files merged the same way when read. Measured (attract demo,
+empty caches, 4-5 interleaved runs each): replaying only the 6,818 left no more draws for the driver to build than the
+16,679 (Iris Xe 26 against 33 a run, RTX 3060 20 against 23); this build with the new seed against 2.2.32: Iris Xe
+average frame 4.61 / 4.65 ms and 1.2 / 1.2 hitches, RTX 3060 4.16 / 4.13 ms and 0 / 0.
+
+**The seeds now**: 8,481 draw states (Black's 6,818 + the author's NG2004 chapter 1 and half of 2 + more Black; 32% of
+the NG2004 states are Black's too, 0% before), 446 shaders, 194 texture-pool shapes, the game's 7 vertex programs, 10
+ripple textures. NG2004's title update replays all 8,481 at start, none left out.
+
 ## Known issues
 - Now and then a frame of 20-32 ms (one dropped) on entering an area or a scene: the NVIDIA driver spending 1-11 ms in a few draw calls, inside the driver (see 2.2.32 above).
 - Entering play from the main menu can hold the picture about 0.6 s: the game is deleting earlier chapters' cutscene
@@ -691,6 +726,9 @@ See `LICENSE`.
   - the saved volumes applied at a cold start (0.9.54 #182, `src/sound_boot.c`), 2.2.31.
   - the compile budget: shaders past it compile in the background, cached ones are always made at once (0.9.68 #94,
     #21), 2.2.31, as an option that is off by default.
+  - presenting a picture as soon as it is drawn, not on the beat (0.9.70 `docs/TECHNICAL.md` "Presentation"), 2.2.33's
+    low-latency present; its steady-time present (pace_target) was tried too and gave more late frames under this
+    project's D3D9 exclusive fullscreen, so it was not taken.
   - ngbrecomp also ships a draw-state warm-up table (`packaging/shader-seed/states.bin`); this project's draw-state
     replay was worked out by measuring the D3D9 drivers (lights' shapes, the matrices' 0/1 structure, ...), with its
     own format and method.

@@ -149,7 +149,7 @@ enum {
     kHitSave, kHitDiscard, kHitAskAlt, kHitPickPatch, kHitClearPatch,
     kHitHelpSet = 400, // + the setting's index in kSettingHelp: its "?"
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
-    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitBudget = 298, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370, kHitCpuMode = 380,
+    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitBudget = 298, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370, kHitCpuMode = 380, kHitPresent = 384,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitClearCache = 495, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitNewConsole, kHitRegister, kHitDashboard, kHitRebuildConsole, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
@@ -209,6 +209,7 @@ const struct {
     {Str::EffectsNative, Str::HelpEffectsNative},
     {Str::PerfHud, Str::HelpPerfHud},
     {Str::CompileBudget, Str::HelpCompileBudget},
+    {Str::PresentEarly, Str::HelpPresentEarly},
     {Str::GpuCard, Str::HelpGpuCard},
     {Str::ConsoleCard, Str::HelpConsole},
     {Str::SavesCard, Str::HelpSavesCard},
@@ -2247,7 +2248,7 @@ struct Painter {
     void graphics_page()
     {
         D2D1_RECT_F c;
-        float y = settings_page(Str::NavGraphics, Str::Rendering, 10, &c);
+        float y = settings_page(Str::NavGraphics, Str::Rendering, 11, &c);
         const float lx = c.left + 26, cx = c.left + 210;
         auto label = [&](Str s) { setting_label(s, lx, y, cx); };
         label(Str::Resolution);
@@ -2277,6 +2278,10 @@ struct Painter {
         label(Str::VSync); // black.ini vsync: off by default (frames paced by the Xbox vblank alone)
         segmented(kHitVsync, cx, y, {S(Str::On), S(Str::Off)}, black_ini("vsync") == "1" ? 0 : 1, 72);
         text(S(Str::VSyncNote), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
+        y += 40;
+        label(Str::PresentEarly); // black.ini present_early: the Present before the vblank wait (on unless 0, 2.2.33)
+        segmented(kHitPresent, cx, y, {S(Str::On), S(Str::Off)}, black_ini("present_early") == "0" ? 1 : 0, 72);
+        text(S(Str::PresentEarlyNote), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
         y += 40;
         label(Str::SeamFill);
         segmented(kHitSeam, cx, y, {S(Str::On), S(Str::Off)}, black_ini("seamfill") == "1" ? 0 : 1, 72); // off unless set (2.2.32)
@@ -3195,6 +3200,7 @@ void reset_page(Page p)
         black_ini_set("vsync", "0");
         black_ini_set("seamfill", "0");
         black_ini_set("compile_budget", "-1");
+        black_ini_set("present_early", "1");
         black_ini_set("effectsnative", "0");
         black_ini_set("perfhud", "0");
         set_gpu_preference(2);
@@ -3497,6 +3503,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id == kHitResetPage) g.ask = kAskReset;
         else if (id >= kHitSeam && id < kHitSeam + 2) black_ini_set("seamfill", id == kHitSeam ? "1" : "0");
         else if (id >= kHitBudget && id < kHitBudget + 2) black_ini_set("compile_budget", id == kHitBudget ? "4" : "-1");
+        else if (id >= kHitPresent && id < kHitPresent + 2) black_ini_set("present_early", id == kHitPresent ? "1" : "0");
         else if (id >= kHitFx && id < kHitFx + 2) black_ini_set("effectsnative", id == kHitFx ? "1" : "0");
         else if (id >= kHitVsync && id < kHitVsync + 2) black_ini_set("vsync", id == kHitVsync ? "1" : "0");
         else if (id >= kHitFsRes && id < kHitFsRes + 2) black_ini_set("fullscreen_res", id == kHitFsRes ? "screen" : "window");

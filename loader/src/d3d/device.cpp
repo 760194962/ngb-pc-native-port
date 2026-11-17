@@ -37,6 +37,7 @@
 #include <unordered_set>
 
 std::atomic<uint32_t> g_frame_count;
+extern std::atomic<int64_t> g_input_poll_qpc; // input/xinput.cpp: the game's last pad read
 
 namespace xd3d {
 
@@ -2533,6 +2534,57 @@ void swap_callback_after_swap()
     cb(data);
 }
 
+// present_early (black.ini, --present-early 0|1; after ngbrecomp 0.9.70 docs/TECHNICAL.md "Presentation": a picture
+// presented at the vblank tick waited a whole refresh, theirs is presented at the game's Swap): the Present at the Swap,
+// then the wait for the vblank the frame is paced to. The game sees no difference (its next frame still starts after that
+// wait); the picture reaches the screen sooner. Measured 2026-11-17 (attract demo, empty caches, 3 runs a variant
+// windowed, 2 exclusive): the game reads the pad near its frame's start, and from that read to the Present returning took
+// a median 16.2-16.9 ms windowed, 18 exclusive, and with present_early 2.3-2.6 windowed, 8.1-8.5 exclusive (vsync on or
+// off), on the Iris Xe and the RTX 3060, at 3x and at 4x / 8x; late frames, game speed and the movie's slipped frames
+// the same, the frame time's average the same or lower. Presenting at a steady time after the frame start instead (as
+// ngbrecomp's pace_target; tried as mode 2) gave less (4-12 ms) and on an exclusive device 60-160 more late frames.
+// With --hitch-detail, [lat] every 600 frames: that age and the Presents' spacing.
+namespace {
+int64_t qpc_now()
+{
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    return t.QuadPart;
+}
+int64_t qpc_per_ms()
+{
+    static const int64_t f = [] {
+        LARGE_INTEGER q;
+        QueryPerformanceFrequency(&q);
+        return q.QuadPart / 1000;
+    }();
+    return f;
+}
+void lat_note(int64_t presented)
+{
+    static std::vector<float> ages, gaps;
+    static int64_t last;
+    int64_t poll = g_input_poll_qpc.load(std::memory_order_relaxed);
+    double per = (double)qpc_per_ms();
+    if (poll && presented > poll && presented - poll < 200 * qpc_per_ms()) ages.push_back((float)((presented - poll) / per));
+    if (last && presented - last < 100 * qpc_per_ms()) gaps.push_back((float)((presented - last) / per));
+    last = presented;
+    if (gaps.size() < 600) return;
+    auto pct = [](std::vector<float> &v, double p) { return v.empty() ? 0.0f : v[(size_t)(p * (v.size() - 1))]; };
+    double sum = 0, sq = 0;
+    for (float g : gaps) sum += g, sq += (double)g * g;
+    double mean = sum / gaps.size(), sd = sqrt(std::max(0.0, sq / gaps.size() - mean * mean));
+    std::sort(ages.begin(), ages.end());
+    std::sort(gaps.begin(), gaps.end());
+    logf("[lat] present_early %d: input age at Present median %.2f ms, 95%% %.2f, max %.2f (%zu frames); Present spacing mean %.2f "
+         "ms, sd %.2f, 1%% %.2f, 99%% %.2f",
+         g_cfg.present_early, pct(ages, 0.5), pct(ages, 0.95), ages.empty() ? 0.0f : ages.back(), ages.size(), mean, sd,
+         pct(gaps, 0.01), pct(gaps, 0.99));
+    ages.clear();
+    gaps.clear();
+}
+} // namespace
+
 uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
 {
     DTRACE("0x%x", Flags);
@@ -2542,12 +2594,15 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     compile_later_report(); // the shaders compiled on the thread and the draws left out meanwhile (shader_cache.cpp)
     pb_flush();
     perf::swap_begin();
-    {
+    const bool early = g_cfg.present_early;
+    auto pace = [early] {
         perf::DetScope ds(perf::kDetPace);
-        if (perf::g_detail) gpu_frame_marks(g_frame_count.load(), 2);
+        if (perf::g_detail && !early) gpu_frame_marks(g_frame_count.load(), 2);
         pace_swap();
-        if (perf::g_detail) gpu_frame_marks(g_frame_count.load(), 3);
-    }
+        if (perf::g_detail && !early) gpu_frame_marks(g_frame_count.load(), 3);
+    };
+    if (early) perf::early_present(true);
+    else pace();
     rt_cpu_upload();
     upload_cpu_backbuffer();
     {
@@ -2597,6 +2652,11 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
         presented = host3d::present();
     }
     perfhud::input_presented();
+    if (perf::g_detail) lat_note(qpc_now());
+    if (early) {
+        perf::early_present(false);
+        pace();
+    }
     static HRESULT last_presented = D3D_OK; // a changed result (S_PRESENT_OCCLUDED minimised, S_PRESENT_MODE_CHANGED...)
     if (presented != last_presented) {
         static int noted;
