@@ -2603,6 +2603,10 @@ void swap_callback_after_swap()
 // the same, the frame time's average the same or lower. Presenting at a steady time after the frame start instead (as
 // ngbrecomp's pace_target; tried as mode 2) gave less (4-12 ms) and on an exclusive device 60-160 more late frames.
 // With --hitch-detail, [lat] every 600 frames: that age and the Presents' spacing.
+// Not in the first kEarlyAfter frames: at the boot, around frame 30 (the title loading its files, a black screen), a frame
+// with it now and then took 50-56 ms, its render thread waiting in the driver (12 ms of CPU): 6 of 31 starts against 0
+// of 30 without it (Iris Xe, no recorder; with the recorder from frame 1 neither showed it, 0 of 24). Nobody plays there.
+constexpr uint32_t kEarlyAfter = 300;
 namespace {
 int64_t qpc_now()
 {
@@ -2653,7 +2657,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     compile_later_report(); // the shaders compiled on the thread and the draws left out meanwhile (shader_cache.cpp)
     pb_flush();
     perf::swap_begin();
-    const bool early = g_cfg.present_early;
+    const bool early = g_cfg.present_early && g_frame_count.load() >= kEarlyAfter;
     auto pace = [early] {
         perf::DetScope ds(perf::kDetPace);
         if (perf::g_detail && !early) gpu_frame_marks(g_frame_count.load(), 2);
