@@ -517,11 +517,41 @@ void mouse_take(int *dx, int *dy, int *wheel)
 
 D3DPRESENT_PARAMETERS g_pp; // as created; Reset uses the same
 
-// Exclusive fullscreen: the desktop's display mode on the default adapter (if it cannot be read: stays windowed)
+// The display mode of an exclusive device (9Ex takes it besides the parameters): the desktop's. With vsync on and a desktop
+// refreshing outside 59-61 Hz (a 144 or 165 Hz panel), a mode of the same size at 59-61 Hz when the display has one: the
+// game makes 60 frames a second, and at 165 Hz vsync showed them for 3, 3, 3, 2 refreshes (18.2 / 12.1 ms, judder); at
+// 60 Hz each is shown for one. --keep-refresh keeps the desktop's (tests).
+D3DDISPLAYMODEEX exclusive_mode()
+{
+    D3DDISPLAYMODEEX m = {sizeof m};
+    if (FAILED(g_d3d->GetAdapterDisplayModeEx(D3DADAPTER_DEFAULT, &m, nullptr))) m.Width = 0;
+    if (!m.Width || !g_cfg.vsync || g_cfg.keep_refresh || (m.RefreshRate >= 59 && m.RefreshRate <= 61)) return m;
+    D3DDISPLAYMODEFILTER f = {sizeof f, m.Format, D3DSCANLINEORDERING_PROGRESSIVE};
+    UINT n = g_d3d->GetAdapterModeCountEx(D3DADAPTER_DEFAULT, &f);
+    D3DDISPLAYMODEEX best = m;
+    for (UINT i = 0; i < n; i++) {
+        D3DDISPLAYMODEEX c = {sizeof c};
+        if (FAILED(g_d3d->EnumAdapterModesEx(D3DADAPTER_DEFAULT, &f, i, &c))) continue;
+        if (c.Width != m.Width || c.Height != m.Height || c.RefreshRate < 59 || c.RefreshRate > 61) continue;
+        if (best.RefreshRate == m.RefreshRate || abs((int)c.RefreshRate - 60) < abs((int)best.RefreshRate - 60)) best = c;
+    }
+    static UINT logged;
+    if (logged != m.RefreshRate) {
+        logged = m.RefreshRate;
+        if (best.RefreshRate != m.RefreshRate)
+            logf("host: exclusive fullscreen with vsync: %ux%u at %u Hz instead of the desktop's %u Hz (60 frames a second shown evenly)",
+                 best.Width, best.Height, best.RefreshRate, m.RefreshRate);
+        else
+            logf("host: exclusive fullscreen with vsync: no 60 Hz mode at %ux%u, the desktop's %u Hz kept", m.Width, m.Height, m.RefreshRate);
+    }
+    return best;
+}
+
+// Exclusive fullscreen: exclusive_mode() on the default adapter (if it cannot be read: stays windowed)
 D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp)
 {
-    D3DDISPLAYMODE dm = {};
-    if (FAILED(g_d3d->GetAdapterDisplayMode(D3DADAPTER_DEFAULT, &dm))) return pp;
+    D3DDISPLAYMODEEX dm = exclusive_mode();
+    if (!dm.Width) return pp;
     pp.Windowed = FALSE;
     pp.BackBufferWidth = dm.Width;
     pp.BackBufferHeight = dm.Height;
@@ -538,13 +568,6 @@ D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp)
     return pp;
 }
 
-// The display mode of an exclusive device (9Ex takes it besides the parameters): the desktop's, as exclusive_params
-D3DDISPLAYMODEEX desktop_mode()
-{
-    D3DDISPLAYMODEEX m = {sizeof m};
-    g_d3d->GetAdapterDisplayModeEx(D3DADAPTER_DEFAULT, &m, nullptr);
-    return m;
-}
 
 namespace {
 
@@ -584,7 +607,7 @@ bool create_device_here()
     // Not NOWINDOWCHANGES: with it the runtime does not minimise the window and bring it back around Alt+Tab in
     // exclusive fullscreen (r279). The window is restyled only while the device is windowed instead.
     DWORD flags = D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE | D3DCREATE_MULTITHREADED;
-    D3DDISPLAYMODEEX mode = desktop_mode();
+    D3DDISPLAYMODEEX mode = exclusive_mode();
     HRESULT hr = g_d3d->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd, flags, &pp, pp.Windowed ? nullptr : &mode, &g_devex);
     if (FAILED(hr)) {
         logf("host: CreateDeviceEx failed 0x%08lx, retrying with software vertex processing", hr);
@@ -663,7 +686,7 @@ bool recreate_device_here()
 bool reset_device_here()
 {
     D3DPRESENT_PARAMETERS pp = g_exclusive_now ? exclusive_params(g_pp) : g_pp;
-    D3DDISPLAYMODEEX mode = desktop_mode();
+    D3DDISPLAYMODEEX mode = exclusive_mode();
     HRESULT hr = g_devex->ResetEx(&pp, pp.Windowed ? nullptr : &mode);
     if (FAILED(hr)) {
         static unsigned failures; // retried every 50 ms until it succeeds (d3d/device.cpp recover_device)

@@ -1202,6 +1202,54 @@ DwmFlushFn display_sync()
     return m ? (DwmFlushFn)GetProcAddress(m, "DwmFlush") : nullptr;
 }
 
+// An exclusive device at about 60 Hz: the display's own vertical blank (D3DKMTWaitForVerticalBlankEvent on the primary
+// display's adapter, gdi32). DwmFlush is no clock there: exclusive at 60 Hz with vsync (exclusive_mode picks it on a
+// 165 Hz panel) the tick ran at 53.9 Hz in the attract's movie (its frames 50-65 ms, 18 over 50 ms against 1 at 165 Hz on
+// the timer; Iris Xe, 2026-11-17), DwmFlush returning late while the movie uploaded 1.3 MB a frame.
+struct KernelVblank {
+    struct Open {
+        HDC hdc;
+        UINT adapter;
+        LUID luid;
+        UINT source;
+    };
+    struct Wait {
+        UINT adapter, device, source;
+    };
+    using OpenFn = LONG(APIENTRY *)(Open *);
+    using WaitFn = LONG(APIENTRY *)(const Wait *);
+    WaitFn wait = nullptr;
+    Wait w = {};
+    bool init()
+    {
+        HMODULE g = LoadLibraryW(L"gdi32.dll");
+        auto open = g ? (OpenFn)GetProcAddress(g, "D3DKMTOpenAdapterFromHdc") : nullptr;
+        auto wf = g ? (WaitFn)GetProcAddress(g, "D3DKMTWaitForVerticalBlankEvent") : nullptr;
+        if (!open || !wf) return false;
+        DISPLAY_DEVICEW dd = {sizeof dd};
+        for (DWORD i = 0; EnumDisplayDevicesW(nullptr, i, &dd, 0); i++, dd.cb = sizeof dd) {
+            if (!(dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)) continue;
+            HDC dc = CreateDCW(nullptr, dd.DeviceName, nullptr, nullptr);
+            if (!dc) return false;
+            Open o = {dc};
+            LONG st = open(&o);
+            DeleteDC(dc);
+            if (st != 0) return false;
+            w = {o.adapter, 0, o.source};
+            wait = wf;
+            return true;
+        }
+        return false;
+    }
+};
+
+bool display_near_60()
+{
+    DEVMODEW dm = {};
+    dm.dmSize = sizeof dm;
+    return EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency >= 59 && dm.dmDisplayFrequency <= 61;
+}
+
 void __stdcall vblank_thread(void *)
 {
     xthread_current()->base_priority = 15;
@@ -1212,12 +1260,23 @@ void __stdcall vblank_thread(void *)
     QueryPerformanceCounter(&last);
     const int64_t period = f.QuadPart * 1001 / 60000; // 59.94 Hz
     DwmFlushFn flush = display_sync();
-    logf("[d3d] vblank: %s", flush ? "follows the display (DwmFlush at ~60 Hz)" : "59.94 Hz timer");
-    uint32_t from_display = 0;
+    KernelVblank kv;
+    const bool kernel = !g_cfg.timer_vblank && (!g_cfg.background || g_cfg.display_vblank) && kv.init();
+    logf("[d3d] vblank: %s%s", flush ? "follows the display (DwmFlush at ~60 Hz)" : "59.94 Hz timer",
+         kernel ? "; in exclusive fullscreen at ~60 Hz the display's own vblank (D3DKMTWaitForVerticalBlankEvent)" : "");
+    uint32_t from_display = 0, from_kernel = 0;
+    bool near_60 = display_near_60();
     LARGE_INTEGER minute = last;
     for (;;) {
         bool synced = false;
-        if (flush && SUCCEEDED(flush())) {
+        if (g_vblank_count % 300 == 0) near_60 = display_near_60(); // the mode changes with exclusive fullscreen
+        if (kernel && near_60 && host3d::exclusive()) {
+            if (kv.wait(&kv.w) == 0) {
+                QueryPerformanceCounter(&now);
+                synced = now.QuadPart - last.QuadPart > period / 2;
+                from_kernel += synced;
+            }
+        } else if (flush && SUCCEEDED(flush())) {
             QueryPerformanceCounter(&now);
             synced = now.QuadPart - last.QuadPart > period / 2;
         }
@@ -1239,10 +1298,10 @@ void __stdcall vblank_thread(void *)
         g_vblank_qpc.store(now.QuadPart);
         SetEvent(g_vblank_wake);
         from_display += synced;
-        if (flush && vb % 3600 == 0) {
-            logf("[d3d] vblank: %u of the last 3600 from the display, %.3f Hz", from_display,
+        if ((flush || from_kernel) && vb % 3600 == 0) {
+            logf("[d3d] vblank: %u of the last 3600 from the display (%u its vblank, exclusive), %.3f Hz", from_display, from_kernel,
                  3600.0 * f.QuadPart / (double)(now.QuadPart - minute.QuadPart));
-            from_display = 0;
+            from_display = from_kernel = 0;
             minute = now;
         }
         ksync_signal_object(g_dev + DEV_VBLANKEVENT);
