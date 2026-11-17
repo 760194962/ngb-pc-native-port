@@ -3456,7 +3456,7 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
 // every build: pre-transformed over the whole back buffer, its texture coordinates following the screen, sampling a
 // render target, added at ONE/ONE, after 3D this frame (the menus draw the same glow with no 3D: kept). NG2004 flashes
 // the same moments with a plain white quad instead (colour 0xA0FFFFFF added at SRCALPHA/ONE over the whole screen after
-// 230 3D draws, FUN_00300990 of its title update; the user, 2026-11-17: "和黑一样的白色屏幕闪烁"): a light-coloured
+// 230 3D draws, FUN_00300990 of the disc program 1.02.04; the user, 2026-11-17: "和黑一样的白色屏幕闪烁"): a light-coloured
 // untextured full-screen quad added on (destination ONE) over the 3D is left out too. Fades (black, or blended over the
 // picture with INVSRCALPHA) are not added on and stay. Each call chain so left out is logged once, with the HUD's state,
 // so other users of such a draw would show.

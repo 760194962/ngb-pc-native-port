@@ -243,6 +243,22 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.36: a "Screen flashes" switch, the flash and the NG2004 cutscene at 21:9
+
+- **New switch "Screen flashes"** (launcher Graphics page, `black.ini move_flash`, on by default = the original): off, the white the whole
+  screen flashes for the wall-run slash, techniques, item pickups and chests is left out; the moves keep their blur, light and rays, and
+  menus, fades and normal play are not affected. In Black the flash is the glow added over the whole screen, one of three pictures laid
+  over the scene (left out one by one, it alone dazzled); NG2004 adds a white layer over the whole screen. Told by how it is drawn (the
+  whole screen, added on, after the frame's 3D); tested in Black and the NG2004 disc. On, nothing is changed.
+- **At 21:9 the flash of the wall-run slash and other moves covered only the 16:9 middle**: fixed, it fills the picture. The
+  shop's backdrop is still kept to 16:9 (black sides), told by the game's HUD routine's own reason word (0xFFFF = a menu) together
+  with "no 3D drawn yet this frame", both measured.
+- **NG2004 title update: the prologue cutscene was stretched at 21:9**: fixed, kept 16:9 like the other movies. Older return
+  addresses left on the stack came before the movie player's; it now counts among the first three. The underwater ripples' check
+  had the same weakness and is changed too.
+- Diagnostics (`--hud-trace`): F8 traces the next frame with its render targets; the log gives full-screen plain quads, full-screen
+  pictures not taken for a movie and the HUD routine's three tests.
+
 ### 2.2.35: an even picture on 120 Hz screens, the occasional few seconds of stutter fixed, the low-latency present redone (still off by default)
 
 With the low-latency present off (the default), input lag and the way frames go out are as in 2.2.34; this release changes how
