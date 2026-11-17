@@ -12,6 +12,7 @@
 namespace xd3d { void texture_note_write(const void *p, uint32_t len); void flash_note_read(uint32_t bytes); } // d3d/texture.cpp, d3d/device.cpp
 
 #include <algorithm>
+#include <intrin.h>
 #include <cctype>
 #include <map>
 #include <mutex>
@@ -201,6 +202,34 @@ void complete(XIO_STATUS_BLOCK *iosb, NTSTATUS s, uint32_t info, HANDLE ev)
     if (ev) SetEvent(ev);
 }
 
+// A name the game keeps failing to open (open_common): its string's lengths, its buffer's first 64 bytes and the
+// game code's return addresses on the stack (values in the XBE's code just after a call), read under SEH.
+void log_failing_name(const XANSI_STRING *n, const uint32_t *sp)
+{
+    char hex[3 * 64 + 1] = "", txt[65] = "", from[16 * 10 + 1] = "";
+    __try {
+        for (int i = 0; i < 64; i++) {
+            uint8_t c = (uint8_t)n->Buffer[i];
+            snprintf(hex + 3 * i, 4, "%02x ", c);
+            txt[i] = c >= 32 && c < 127 ? (char)c : '.';
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    __try {
+        int found = 0;
+        for (const uint32_t *p = sp; p < sp + 0x400 && found < 10; p++) {
+            uint32_t v = *p;
+            if (v < 0x00011005 || v >= 0x00800000) continue;
+            const uint8_t *c = (const uint8_t *)(uintptr_t)v;
+            if (c[-5] == 0xE8 || (c[-2] == 0xFF && (c[-1] & 0x38) == 0x10) || (c[-6] == 0xFF && (c[-5] & 0x38) == 0x10))
+                snprintf(from + strlen(from), 11, " %08x", v), found++;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    logf("[k]     that name failed 100 times in a row: length %u, maximum %u, buffer %p: %s| %s; return addresses%s", n->Length,
+         n->MaximumLength, n->Buffer, hex, txt, from);
+}
+
 NTSTATUS open_common(const char *what, HANDLE *FileHandle, ACCESS_MASK access, XOBJECT_ATTRIBUTES *oa, XIO_STATUS_BLOCK *iosb,
                      LARGE_INTEGER *alloc, uint32_t attrs, uint32_t share, uint32_t disp, uint32_t opts)
 {
@@ -266,10 +295,22 @@ NTSTATUS open_common(const char *what, HANDLE *FileHandle, ACCESS_MASK access, X
         *FileHandle = h;
         remember(h, r);
     }
-    logf("[k] %s('%s' -> %s, access 0x%x, share %u, disp %u, opts 0x%x) -> 0x%08x handle %p", what, req.c_str(),
-         r.xbox_path.c_str(), access, share, disp, opts, s, NT_OK(s) ? h : nullptr);
-    if (!NT_OK(s))
+    // The same name failing over and over is logged at its 1st..20th failure and then every 10000th: NG2004's Master
+    // Ninja Tournament shop asked for 'd:\NG' 932,579 times and the log grew to 191 MB (the user, 2026-11-18). At the
+    // 100th failure in a row the game's callers and the name's whole buffer are logged once, to see what it meant.
+    static std::string fail_name;
+    static uint32_t fail_run;
+    if (!NT_OK(s)) fail_run = req == fail_name ? fail_run + 1 : (fail_name = req, 1u);
+    else if (req == fail_name) fail_run = 0;
+    const bool quiet = !NT_OK(s) && fail_run > 20 && fail_run % 10000 != 0;
+    if (!quiet)
+        logf("[k] %s('%s' -> %s, access 0x%x, share %u, disp %u, opts 0x%x) -> 0x%08x handle %p%s", what, req.c_str(),
+             r.xbox_path.c_str(), access, share, disp, opts, s, NT_OK(s) ? h : nullptr,
+             !NT_OK(s) && fail_run > 20 ? " (the same failure again; only every 10000th logged)" : "");
+    if (!NT_OK(s) && !quiet && fail_run <= 20)
         logf("[k]     attrs 0x%x, alloc %lld, host access 0x%x opts 0x%x disp %u", attrs, alloc ? alloc->QuadPart : -1LL, a, o, d);
+    if (!NT_OK(s) && fail_run == 100 && oa->ObjectName && oa->ObjectName->Buffer)
+        log_failing_name(oa->ObjectName, (const uint32_t *)_AddressOfReturnAddress());
     return s;
 }
 
