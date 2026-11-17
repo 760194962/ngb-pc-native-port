@@ -1202,6 +1202,54 @@ DwmFlushFn display_sync()
     return m ? (DwmFlushFn)GetProcAddress(m, "DwmFlush") : nullptr;
 }
 
+// An exclusive device at about 60 Hz: the display's own vertical blank (D3DKMTWaitForVerticalBlankEvent on the primary
+// display's adapter, gdi32). DwmFlush is no clock there: exclusive at 60 Hz with vsync (exclusive_mode picks it on a
+// 165 Hz panel) the tick ran at 53.9 Hz in the attract's movie (its frames 50-65 ms, 18 over 50 ms against 1 at 165 Hz on
+// the timer; Iris Xe, 2026-11-17), DwmFlush returning late while the movie uploaded 1.3 MB a frame.
+struct KernelVblank {
+    struct Open {
+        HDC hdc;
+        UINT adapter;
+        LUID luid;
+        UINT source;
+    };
+    struct Wait {
+        UINT adapter, device, source;
+    };
+    using OpenFn = LONG(APIENTRY *)(Open *);
+    using WaitFn = LONG(APIENTRY *)(const Wait *);
+    WaitFn wait = nullptr;
+    Wait w = {};
+    bool init()
+    {
+        HMODULE g = LoadLibraryW(L"gdi32.dll");
+        auto open = g ? (OpenFn)GetProcAddress(g, "D3DKMTOpenAdapterFromHdc") : nullptr;
+        auto wf = g ? (WaitFn)GetProcAddress(g, "D3DKMTWaitForVerticalBlankEvent") : nullptr;
+        if (!open || !wf) return false;
+        DISPLAY_DEVICEW dd = {sizeof dd};
+        for (DWORD i = 0; EnumDisplayDevicesW(nullptr, i, &dd, 0); i++, dd.cb = sizeof dd) {
+            if (!(dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)) continue;
+            HDC dc = CreateDCW(nullptr, dd.DeviceName, nullptr, nullptr);
+            if (!dc) return false;
+            Open o = {dc};
+            LONG st = open(&o);
+            DeleteDC(dc);
+            if (st != 0) return false;
+            w = {o.adapter, 0, o.source};
+            wait = wf;
+            return true;
+        }
+        return false;
+    }
+};
+
+bool display_near_60()
+{
+    DEVMODEW dm = {};
+    dm.dmSize = sizeof dm;
+    return EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency >= 59 && dm.dmDisplayFrequency <= 61;
+}
+
 void __stdcall vblank_thread(void *)
 {
     xthread_current()->base_priority = 15;
@@ -1212,12 +1260,23 @@ void __stdcall vblank_thread(void *)
     QueryPerformanceCounter(&last);
     const int64_t period = f.QuadPart * 1001 / 60000; // 59.94 Hz
     DwmFlushFn flush = display_sync();
-    logf("[d3d] vblank: %s", flush ? "follows the display (DwmFlush at ~60 Hz)" : "59.94 Hz timer");
-    uint32_t from_display = 0;
+    KernelVblank kv;
+    const bool kernel = !g_cfg.timer_vblank && (!g_cfg.background || g_cfg.display_vblank) && kv.init();
+    logf("[d3d] vblank: %s%s", flush ? "follows the display (DwmFlush at ~60 Hz)" : "59.94 Hz timer",
+         kernel ? "; in exclusive fullscreen at ~60 Hz the display's own vblank (D3DKMTWaitForVerticalBlankEvent)" : "");
+    uint32_t from_display = 0, from_kernel = 0;
+    bool near_60 = display_near_60();
     LARGE_INTEGER minute = last;
     for (;;) {
         bool synced = false;
-        if (flush && SUCCEEDED(flush())) {
+        if (g_vblank_count % 300 == 0) near_60 = display_near_60(); // the mode changes with exclusive fullscreen
+        if (kernel && near_60 && host3d::exclusive()) {
+            if (kv.wait(&kv.w) == 0) {
+                QueryPerformanceCounter(&now);
+                synced = now.QuadPart - last.QuadPart > period / 2;
+                from_kernel += synced;
+            }
+        } else if (flush && SUCCEEDED(flush())) {
             QueryPerformanceCounter(&now);
             synced = now.QuadPart - last.QuadPart > period / 2;
         }
@@ -1239,10 +1298,10 @@ void __stdcall vblank_thread(void *)
         g_vblank_qpc.store(now.QuadPart);
         SetEvent(g_vblank_wake);
         from_display += synced;
-        if (flush && vb % 3600 == 0) {
-            logf("[d3d] vblank: %u of the last 3600 from the display, %.3f Hz", from_display,
+        if ((flush || from_kernel) && vb % 3600 == 0) {
+            logf("[d3d] vblank: %u of the last 3600 from the display (%u its vblank, exclusive), %.3f Hz", from_display, from_kernel,
                  3600.0 * f.QuadPart / (double)(now.QuadPart - minute.QuadPart));
-            from_display = 0;
+            from_display = from_kernel = 0;
             minute = now;
         }
         ksync_signal_object(g_dev + DEV_VBLANKEVENT);
@@ -2534,7 +2593,7 @@ void swap_callback_after_swap()
     cb(data);
 }
 
-// present_early (black.ini, --present-early 0|1; after ngbrecomp 0.9.70 docs/TECHNICAL.md "Presentation": a picture
+// present_early (black.ini low_latency_present, --present-early 0|1; off by default: see below; after ngbrecomp 0.9.70 docs/TECHNICAL.md "Presentation": a picture
 // presented at the vblank tick waited a whole refresh, theirs is presented at the game's Swap): the Present at the Swap,
 // then the wait for the vblank the frame is paced to. The game sees no difference (its next frame still starts after that
 // wait); the picture reaches the screen sooner. Measured 2026-11-17 (attract demo, empty caches, 3 runs a variant
@@ -2544,6 +2603,14 @@ void swap_callback_after_swap()
 // the same, the frame time's average the same or lower. Presenting at a steady time after the frame start instead (as
 // ngbrecomp's pace_target; tried as mode 2) gave less (4-12 ms) and on an exclusive device 60-160 more late frames.
 // With --hitch-detail, [lat] every 600 frames: that age and the Presents' spacing.
+// Off by default again (the user, 2026-11-17): on another PC (a 60 Hz display, integrated graphics) it looked less smooth
+// windowed. Those measurements were of the game's pacing and of the Present calls, not of what the desktop showed: a frame
+// presented as soon as it is drawn has until the compositor's deadline before the next vblank, not a whole frame, so a
+// heavy frame can miss it (the last picture shown twice) and the next one land with it (one never shown). Not measured yet.
+// Not in the first kEarlyAfter frames: at the boot, around frame 30 (the title loading its files, a black screen), a frame
+// with it now and then took 50-56 ms, its render thread waiting in the driver (12 ms of CPU): 6 of 31 starts against 0
+// of 30 without it (Iris Xe, no recorder; with the recorder from frame 1 neither showed it, 0 of 24). Nobody plays there.
+constexpr uint32_t kEarlyAfter = 300;
 namespace {
 int64_t qpc_now()
 {
@@ -2594,7 +2661,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     compile_later_report(); // the shaders compiled on the thread and the draws left out meanwhile (shader_cache.cpp)
     pb_flush();
     perf::swap_begin();
-    const bool early = g_cfg.present_early;
+    const bool early = g_cfg.present_early && g_frame_count.load() >= kEarlyAfter;
     auto pace = [early] {
         perf::DetScope ds(perf::kDetPace);
         if (perf::g_detail && !early) gpu_frame_marks(g_frame_count.load(), 2);

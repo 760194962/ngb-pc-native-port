@@ -86,6 +86,7 @@ struct Config {
     bool mouse_invert = false;
     bool timer_vblank = false; // --timer-vblank: free-running 59.94 Hz vblank instead of following the display
     bool display_vblank = false; // --display-vblank (tests): follow the display even with --background
+    bool exclusive_60hz = true; // black.ini exclusive_60hz / --keep-refresh: exclusive fullscreen with vsync at 60 Hz on a faster desktop (d3d/host.cpp exclusive_mode)
     bool effects_native = false; // the small effect buffers at their Xbox size (PC SETTINGS); default: render scale, smoothed
     int shadow_scale = 4;        // shadow maps at this many times their Xbox size (black.ini shadow: 1, 2, 4, 8, 16)
     bool vsync = false;          // present on the display's refresh (black.ini vsync); off: frames paced by the Xbox vblank only
@@ -230,7 +231,7 @@ struct Config {
     bool cpu_tex = true;       // --no-cpu-tex: the game's CPU-made ripple textures computed every time (ngb_cpu_textures.cpp)
     bool saved_volumes = true; // --no-saved-volumes: a cold start keeps the default sound volumes, as the console (ngb_sound_boot.cpp)
     double compile_budget_ms = -1; // --compile-budget MS: compiling on the render thread a frame before the rest go to threads and their draws are left out (-1, the default: all now)
-    bool present_early = true;  // black.ini present_early / --present-early 0|1: the Present before the vblank wait (d3d/device.cpp; on since 2.2.33)
+    bool present_early = false; // black.ini low_latency_present / --present-early 0|1: the Present before the vblank wait (d3d/device.cpp; off by default again since 2.2.34)
     unsigned ffp_debug = 0;    // press-file "cfg:ffpdebug:N": the stage shader shows stage 1's texture colour (1) or alpha (2)
     std::wstring press_script; // --press: "frame:button,frame:button" scripted controller input
     std::wstring perf_at;      // --perf-at S:D: record performance for D seconds from S seconds after the first frame

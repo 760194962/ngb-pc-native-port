@@ -725,23 +725,46 @@ const Pair kText[(int)Str::Count] = {
      L"On, a frame spends at most 4 ms compiling; the shaders past that compile on background threads, and what uses them is not drawn until they are ready. "
      L"Shorter stutters (with no seed, the worst frame 237 -> 98 ms measured), but entering a new area may show a few frames with pieces missing (about 4 measured), then all is back.\n\n"
      L"A shader compiled once is kept in the cache and never affects later play. Keep it off if missing pieces bother you more than a brief stutter."},
-    {L"低延迟呈现",
+    {L"低延迟呈现（实验性）",
      L"Low-latency present"},
-    {L"每帧画完立刻送去显示，操作到画面约快 14 ms",
-     L"Each frame goes to the screen as soon as it is drawn: about 14 ms less input lag"},
-    {L"默认开启。\n\n"
+    {L"画完立刻送去显示，延迟更低；窗口模式下可能不够顺",
+     L"Experimental: frames go out as soon as drawn; lower lag, may look less smooth windowed"},
+    {L"实验性，默认关闭。\n\n"
      L"游戏按主机的节奏每秒 60 帧：每帧开头读手柄，算好、画好，再等到下一个节拍才换下一帧。"
      L"以前画好的帧也要跟着等到节拍那一刻才送去显示，白等十几毫秒。开启后画完立刻送去显示，再等节拍，游戏本身的节奏完全不变，只是画面出来得更早。\n\n"
      L"实测（核显和独显，默认与高画质）：从游戏读到手柄输入到画面送出，窗口模式约 16 ms → 2.5 ms，独占全屏约 18 ms → 8.5 ms；"
      L"帧率、迟到帧和过场影片的节奏都没有变化。\n\n"
-     L"关闭则回到以前的方式（画面在节拍时送出，间隔稍微更均匀一点）。",
-     L"On by default.\n\n"
+     L"已知问题：有玩家在 60 Hz 显示器、集成显卡的电脑上反馈窗口模式下画面不如关闭时顺。原因推测是：画完立刻送出时，较重的一帧可能赶不上"
+     L"桌面合成的截止时刻，上一帧会多显示一次，接着两帧挤进同一次合成、其中一帧没显示出来。上面的实测只量了游戏节奏和送出时刻，"
+     L"没有量到屏幕上实际显示的帧，所以改回默认关闭，查清之前请按自己的感受决定开不开。",
+     L"Experimental, off by default.\n\n"
      L"The game runs on the console's beat, 60 frames a second: each frame reads the pad at its start, is worked out and drawn, then waits for the next beat. "
      L"Before, a finished frame also waited for that beat before it went to the screen, a dozen milliseconds for nothing. On, it goes to the screen as soon as it is drawn "
      L"and the wait comes after: the game's own timing is exactly as before, only the picture comes out sooner.\n\n"
      L"Measured (integrated and dedicated GPU, default and high quality): from the game reading the pad to the picture going out, about 16 ms -> 2.5 ms windowed, "
      L"18 ms -> 8.5 ms in exclusive fullscreen; frame rate, late frames and the movies' pacing unchanged.\n\n"
-     L"Off goes back to the old way (pictures sent on the beat, spaced a little more evenly)."},
+     L"Known issue: a player on a 60 Hz display with integrated graphics found it less smooth than off, windowed. The likely cause: sent as soon as "
+     L"it is drawn, a heavy frame can miss the desktop compositor's deadline, so the last picture is shown twice and then two frames land in one "
+     L"composition, one of them never shown. The measurements above covered the game's pacing and when pictures were sent, not what the screen "
+     L"showed, so it is off by default again; until this is sorted out, turn it on only if it feels right to you."},
+    {L"垂直同步时用 60 Hz",
+     L"60 Hz with V-Sync"},
+    {L"高刷新率屏幕上独占全屏开垂直同步时切到 60 Hz，画面不抖",
+     L"Exclusive fullscreen with V-Sync on a high-refresh screen switches to 60 Hz: no judder"},
+    {L"默认开启。只在“独占全屏”并且打开了“垂直同步”时起作用；窗口、无边框全屏和关掉垂直同步时都不受影响。\n\n"
+     L"游戏每秒 60 帧。屏幕是 120、144、165 Hz 这类刷新率时，垂直同步只能对齐屏幕的刷新：在 165 Hz 上每帧停 3、3、3、2 次刷新交替，"
+     L"也就是 18 ms 和 12 ms 来回变，画面一顿一顿的。开启后进入独占全屏时把屏幕换成同分辨率的 60 Hz（屏幕要支持），每帧正好显示一次，"
+     L"游戏的节拍也直接跟着屏幕的刷新走。\n\n"
+     L"代价：进出独占全屏（包括 Alt+Tab）要切换显示模式，会多黑约 1.5 秒；画面要等 60 Hz 的刷新才显示，比 165 Hz 时稍晚几毫秒。\n\n"
+     L"关闭则沿用桌面的刷新率（以前的方式）。",
+     L"On by default. It only applies to exclusive fullscreen with V-Sync on; windows, borderless fullscreen and V-Sync off are not affected.\n\n"
+     L"The game makes 60 frames a second. On a 120, 144 or 165 Hz screen V-Sync can only line them up with the screen's refreshes: at 165 Hz "
+     L"each frame stays for 3, 3, 3, 2 refreshes in turn, 18 ms and 12 ms back and forth, and the picture judders. On, entering exclusive "
+     L"fullscreen switches the screen to 60 Hz at the same size (if the screen has it): each frame is shown exactly once, and the game's "
+     L"beat follows the screen's refresh.\n\n"
+     L"Costs: entering or leaving exclusive fullscreen (Alt+Tab too) changes the display mode, about 1.5 s more of black screen; "
+     L"a picture waits for a 60 Hz refresh, a few ms later than at 165 Hz.\n\n"
+     L"Off keeps the desktop's refresh rate (the old way)."},
 };
 
 } // namespace
