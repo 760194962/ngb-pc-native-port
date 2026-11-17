@@ -248,8 +248,11 @@ updating to a new version**: a new version drops the draw states learned locally
 - **New switch "Screen flashes"** (launcher Graphics page, `black.ini move_flash`, on by default = the original): off, the white the whole
   screen flashes for the wall-run slash, techniques, item pickups and chests is left out; the moves keep their blur, light and rays, and
   menus, fades and normal play are not affected. In Black the flash is the glow added over the whole screen, one of three pictures laid
-  over the scene (left out one by one, it alone dazzled); NG2004 adds a white layer over the whole screen. Told by how it is drawn (the
-  whole screen, added on, after the frame's 3D); tested in Black and the NG2004 disc. On, nothing is changed.
+  over the scene (left out one by one, it alone dazzled); NG2004 adds a white layer over the whole screen. The white a move or an
+  event lays over the whole screen (Black's event 0x63 on entering the next area, NG2004's event 0x40) goes too (added when the
+  release was replaced on its day); the fades of ordinary scene changes stay. Told by how it is drawn (the whole screen after the
+  frame's 3D, added on, or white laid over during a move or event); tested in Black, the NG2004 disc and title update 1.06.04. On,
+  nothing is changed.
 - **At 21:9 the flash of the wall-run slash and other moves covered only the 16:9 middle**: fixed, it fills the picture. The
   shop's backdrop is still kept to 16:9 (black sides), told by the game's HUD routine's own reason word (0xFFFF = a menu) together
   with "no 3D drawn yet this frame", both measured.
