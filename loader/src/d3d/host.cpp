@@ -900,7 +900,8 @@ bool present_stretch()
 // shown again (repeated). The lag: vblanks from a Present to its display. [flip] every 600 Presents.
 // present_early's deadline from the screen: an early frame (its tick the vblank V it started at) makes the composition
 // before V+1 and is shown at V+2; one that missed it is shown at V+3, or never when the next frame lands with it. A miss
-// lowers the deadline to that frame's time after its tick less 1 ms (not under 4) and tells the gate to fall back. It
+// lowers the deadline to that frame's time after its tick less 1 ms (not under 4) and tells the gate to fall back (one
+// presented more than 3 ms inside the deadline only counts: the third within a minute lowers it 1 ms; see miss). It
 // starts at 10 ms; until the first miss, every 60 early frames shown on time raise it 0.5 ms, after one 300 of them a
 // minute after the last miss raise it 0.25 ms; 14 ms at most. A miss lowers it only when the 120 displays before it were
 // each one new picture for its refreshes: while the game loads or plays a 30 fps movie pictures are skipped or shown
@@ -923,7 +924,8 @@ struct FlipStats {
     double ms_per_ref() const { return period > 0 ? period * 1000.0 / qpc_freq() : 16.683; }
     int k() const { return std::max(1, (int)lround(16.683 / ms_per_ref())); }
     double scale60() const { return ms_per_ref() / 16.683; } // the scale of the 60 Hz milliseconds
-    uint64_t total = 0, last_miss = 0;
+    uint64_t total = 0, last_miss = 0, last_stray = 0, last_probe = 0;
+    uint32_t strays = 0, stray_run = 0; // misses presented well inside the deadline (miss)
     uint32_t on_time = 0, misses = 0, early_shown = 0, early_skipped = 0, raises = 0, from_tick[6] = {};
     bool missed_ever = false;
     uint32_t steady = 0; // displays in a row of one new picture a refresh
@@ -938,7 +940,21 @@ struct FlipStats {
             return;
         }
         double off = ms_of(sent[id & 511] - tick[id & 511]);
-        deadline = std::max(4.0 * scale60(), std::min(deadline, off - 1.0 * scale60()));
+        const double s = scale60();
+        if (off < deadline - 3.0 * s) {
+            // presented well inside the deadline and still late: its time was not the cause (the GPU's work or the
+            // compositor's), and the deadline drops only on the third such miss within a minute, by 1 ms. On the Iris
+            // Xe single misses at 3-5 ms after the tick had sent the deadline from 14 to 4 ms, where no frame was
+            // early any more and none could raise it again (2 of 3 runs, 2026-11-17).
+            if (total - last_stray > 3600) stray_run = 0;
+            last_stray = total;
+            strays++;
+            if (++stray_run < 3) return;
+            stray_run = 0;
+            deadline = std::max(4.0 * s, deadline - 1.0 * s);
+        } else {
+            deadline = std::max(4.0 * s, std::min(deadline, off - 1.0 * s));
+        }
         misses++;
         missed_ever = true;
         miss_flag = true;
@@ -967,6 +983,14 @@ struct FlipStats {
         if (g_cfg.flip_nostats) st = {}; // tests: as a GPU whose frames are copied to another's screen
         presents++;
         total++;
+        // A deadline lowered below the 10 ms start climbs back 0.25 ms every 600 frames once a minute passed without a
+        // miss: below it few frames go early, and only early frames shown on time raise it otherwise
+        if (missed_ever && period > 0 && deadline > 0 && deadline < 10.0 * scale60() && total - last_miss >= 3600 &&
+            total - last_probe >= 600) {
+            deadline = std::min(10.0 * scale60(), deadline + 0.25 * scale60());
+            last_probe = total;
+            raises++;
+        }
         if (!started && !q0 && total == 300) // never a statistic: the flip model stays (see flip_wanted), the deadline fixed
             logf("host: the flip model gives no present statistics here (%u failed, last 0x%08lx): present_early keeps its fixed deadline",
                  fails, (unsigned long)hr);
@@ -1037,11 +1061,11 @@ struct FlipStats {
                  disjoint, fails);
             if (early_shown || early_skipped)
                 logf("[flip] early frames: %u shown (vblanks from their tick 1:%u 2:%u 3:%u 4+:%u), %u never shown; %u misses (%u more while "
-                     "the display was unsteady, not counted), %u raises; deadline %.2f ms (latest on time %.2f)",
+                     "the display was unsteady, not counted; %u presented well inside the deadline), %u raises; deadline %.2f ms (latest on time %.2f)",
                      early_shown, from_tick[1], from_tick[2], from_tick[3], from_tick[4] + from_tick[5], early_skipped, misses, unsteady_misses,
-                     raises, deadline, max_dl);
+                     strays, raises, deadline, max_dl);
             presents = shown = skips = repeats = disjoint = fails = 0;
-            early_shown = early_skipped = misses = raises = unsteady_misses = 0;
+            early_shown = early_skipped = misses = raises = unsteady_misses = strays = 0;
             max_dl = 0;
             memset(lag, 0, sizeof lag);
             memset(from_tick, 0, sizeof from_tick);

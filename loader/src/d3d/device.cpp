@@ -2718,9 +2718,21 @@ void lat_note(int64_t presented)
 // about a third of the frames then go early (the light ones, pad read to Present 1.4-5 ms). Elsewhere (windowed at other
 // refresh rates, the tick from the timer) nothing goes early.
 int64_t g_frame_tick; // the vblank the frame being made started at
+// Each switch shows one frame twice and hides one (going early: an early frame and the held one before it share a
+// composition; falling back: a frame later than the beat). Where the frames' times hover at the deadline the gate went
+// back and forth: Iris Xe, scale 4, 2% of the frames early, 2-5 returns a 10 s, 67.5 repeat-and-skip pairs a run against
+// 41.5 with present_early off (flip model, 2+2 runs, 2026-11-17). So a fall within 600 frames of a return doubles the
+// run of ready frames the next return needs (120, 240, ... 7680, about 2 minutes); 1800 frames early in a row bring
+// it back to 120.
 struct EarlyGate {
     bool aligned = true;
     uint32_t fast = 0, early = 0, held = 0, falls = 0, rises = 0, learned = 0;
+    uint32_t need = 120, since_rise = 1u << 30;
+    void fall()
+    {
+        aligned = false, fast = 0, falls++;
+        if (since_rise < 600) need = std::min(need * 2, 7680u);
+    }
     bool decide()
     {
         bool display = host3d::exclusive() || g_vblank_synced.load(std::memory_order_relaxed);
@@ -2732,16 +2744,20 @@ struct EarlyGate {
         // the flip model: the deadline learned from what reached the screen (host.cpp FlipStats), and its misses
         double fd = d > 0 ? host3d::flip_deadline_ms() : -1.0;
         if (fd > 0) d = fd, learned++;
-        if (host3d::flip_take_miss() && aligned) aligned = false, fast = 0, falls++;
+        if (host3d::flip_take_miss() && aligned) fall();
         bool go = false;
         if (d <= 0 || !display) {
             aligned = d <= 0 && display; // no deadline (--early-deadline 0): always early, as in 2.2.33
             go = d <= 0;
         } else if (aligned) {
-            if (ms < d) go = true;
-            else aligned = false, fast = 0, falls++;
+            if (ms < d) {
+                go = true;
+                if (++since_rise >= 1800) need = 120;
+            } else {
+                fall();
+            }
         } else if (ms < d - 2.0 * s) {
-            if (++fast >= 120) aligned = true, rises++;
+            if (++fast >= need) aligned = true, rises++, since_rise = 0;
         } else {
             fast = 0;
         }
@@ -2751,7 +2767,7 @@ struct EarlyGate {
     void report()
     {
         logf("[lat] present_early gate (deadline %.1f ms, %u frames on the learned one %.2f): %u frames early, %u on the beat, %u falls back, "
-             "%u returns", g_cfg.early_deadline_ms, learned, host3d::flip_deadline_ms(), early, held, falls, rises);
+             "%u returns (a return needs %u ready frames)", g_cfg.early_deadline_ms, learned, host3d::flip_deadline_ms(), early, held, falls, rises, need);
         early = held = falls = rises = learned = 0;
     }
 };
