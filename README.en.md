@@ -243,6 +243,31 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.35: an even picture on 120 Hz screens, the occasional few seconds of stutter fixed, the low-latency present redone (still off by default)
+
+With the low-latency present off (the default), input lag and the way frames go out are as in 2.2.34; this release changes how
+the game's beat lines up with the screen.
+
+- **Windowed on 120 / 180 / 240 Hz screens**: the beat follows every n-th refresh of the screen (it was a 59.94 Hz timer). RTX
+  3060 driving the screen, 120 Hz windowed, 150 s: frames staying the wrong time about 3,490 -> 15-100. 144 and 165 Hz are
+  unchanged (60 frames a second cannot be even there).
+- **The occasional 5-10 s of repeated and skipped frames**: after a beat woke late the next refresh looked "too soon", the beat
+  fell back to the timer and stayed off the screen for seconds; now that refresh is waited past. 60 Hz windowed at 8x: beats off
+  the screen 0-273 a minute -> 0, repeat+skip pairs 0-69 -> 0. Older versions had it too.
+- **Exclusive fullscreen with a variable refresh (G-SYNC / FreeSync)**: the screen's refresh follows the pictures and the beat
+  drifted slow (51-52 frames a second at 120 Hz). When 60 of 600 beats are not a whole number of refreshes apart the timer takes
+  over (found within 11-13 s); judged in exclusive fullscreen only.
+- **The low-latency present redone**: windowed frames go out by flip (FLIPEX), the program reads which refresh showed each one
+  and learns how long after the beat a frame may still go out; without such statistics a fixed 10 ms. A frame sent early that was
+  still late no longer drops the deadline to the bottom, and switching back and forth backs off. 60 Hz windowed, 150 s, repeat +
+  skip counted from a screen capture: RTX 3060 driving the screen off 0-7 / on 0 (about 40-84% of the frames early); the
+  dedicated GPU under hybrid graphics on 0, 7; Iris Xe off about 4 / on about 6 (2.2.33 about 136; about 21% early).
+  Recommended with a dedicated GPU driving the screen; about the same as off at 120 Hz, nothing windowed at 144 / 165 Hz; AMD
+  and Steam Deck untested.
+- On, while the window is dragged to a new size the picture is stretched and rebuilt about 20 frames after it stops.
+
+Full notes, tables and things to know: [2.2.35 release notes](https://github.com/akirahayabusa/ngb-pc-native-port-release/releases/tag/v2.2.35).
+
 ### 2.2.34: exclusive fullscreen on a high-refresh screen without judder, its clock from the display
 
 **The low-latency present is off by default again (experimental)**: a player on a 60 Hz display with integrated graphics
