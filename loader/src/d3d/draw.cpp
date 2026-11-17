@@ -2649,6 +2649,7 @@ constexpr uint32_t kPlay3D = 1;
 volatile LONG g_hud_shown;   // bumped by the game each time it draws its HUD
 LONG g_hud_shown_end;        // its value at the last frame's end
 bool g_hud_probe;            // the routine was found and its end redirected
+uint32_t g_hud_vars[3];      // its tests' data: [0] dword == 1, [1] byte >= 0x28, [2] word == 0xFFFF (0: not found)
 bool g_hud_seen_2d;          // this frame drew its first HUD-side 2D piece...
 bool g_hud_before_2d;        // ...after the game's HUD routine had run
 uint32_t g_hud_order[2];     // frames whose HUD routine ran after / before their first 2D piece (evidence)
@@ -2697,6 +2698,10 @@ void install_hud_probe(uint8_t *text, uint32_t size)
     VirtualProtect(end, 5, old, &old);
     FlushInstructionCache(GetCurrentProcess(), end, 5);
     g_hud_probe = true;
+    memcpy(&g_hud_vars[0], hit + 2, 4);
+    memcpy(&g_hud_vars[1], hit + 11, 4);
+    memcpy(&g_hud_vars[2], hit + 26, 4);
+    logf("[hud] its tests read 0x%08x, 0x%08x, 0x%08x", g_hud_vars[0], g_hud_vars[1], g_hud_vars[2]);
     logf("[hud] the game's in-play HUD routine (its tests at 0x%08x, its end at 0x%08x): in play as it says",
          (uint32_t)(uintptr_t)hit, (uint32_t)(uintptr_t)end);
 }
@@ -2772,6 +2777,16 @@ void wide_hud_frame_end()
     WideHud &s = g_wh;
     s.frame++;
     float w = (float)backbuffer_width(), h = (float)backbuffer_height();
+    if (g_cfg.hud_trace && g_hud_vars[0]) { // the HUD routine's three tests, at each change (which state is which)
+        static uint32_t last = ~0u;
+        uint32_t a = *(volatile uint32_t *)(uintptr_t)g_hud_vars[0], b8 = *(volatile uint8_t *)(uintptr_t)g_hud_vars[1],
+                 c = *(volatile uint16_t *)(uintptr_t)g_hud_vars[2];
+        uint32_t now = (a & 0xFF) << 24 | b8 << 16 | c;
+        if (now != last)
+            logf("[hudtrace] frame %u vars %u %u 0x%04x, 3d %u, in play %d", g_frame_count.load(), a, b8, c, s.threed,
+                 (int)(g_hud_shown != g_hud_shown_end));
+        last = now;
+    }
     std::vector<WideHud::Box> &b = s.boxes;
     if (s.last3d) b.erase(std::remove_if(b.begin(), b.end(), [&](const WideHud::Box &x) { return x.at < s.last3d; }), b.end());
     size_t n = b.size();
@@ -2946,22 +2961,32 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
             const float *p = (const float *)&verts[(size_t)v * stride], *t = (const float *)&verts[(size_t)v * stride + uv];
             in_place = fabsf(t[0] - (p[0] + 0.5f) / w) < 0.01f && fabsf(t[1] - (p[1] + 0.5f) / h) < 0.01f;
         }
-        // Only where no 3D was drawn yet this frame (menus draw none, 2.2.26): a wall run's slash and some techniques hide
-        // the HUD and add a glow of the scene this way (FUN_00315420, a 128x128 blur at ONE/ONE over -0.5..719.5) after
-        // 446 3D draws, and it was cut to the 16:9 middle (the user, 2026-11-17, 21:9; trace frame 4546).
+        // Only when the HUD is off for a menu, as the game's HUD routine tells it: its third test, the word at
+        // [0xDB9C6E] (Black; read from the routine in each build), is 0xFFFF unless a move or an event hides the HUD. A
+        // wall run's slash and some techniques do (0x007C, 0x007E, 0x0086 measured) and add a glow of the scene this way
+        // (FUN_00315420, a 128x128 blur at ONE/ONE over -0.5..719.5); it was cut to the 16:9 middle (the user,
+        // 2026-11-17, 21:9; trace frame 4546). The shop and the menus: 0xFFFF (the first test, [0xD6AF00], is 0 in both,
+        // so it cannot tell them apart; nor can the call chains, the same from the sprite routine down). Without the
+        // routine: only where no 3D was drawn yet this frame (menus draw none, 2.2.26; the slash's frames 139-455).
         bool still = in_place && full_h && mnx <= 0.5f && mxx >= w - 2.0f && !hud_in_play();
+        const bool menu = g_hud_vars[2] ? *(volatile uint16_t *)(uintptr_t)g_hud_vars[2] == 0xFFFF : g_wh.threed == 0;
         if (still && g_cfg.hud_trace) {
             static std::set<std::string> seen_ip;
             uint32_t by[8] = {};
             int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 8);
-            std::string key = g_wh.threed ? "3d" : "no3d";
+            std::string key = menu ? "menu" : "not a menu";
             char t[16];
             for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
+            char vars[64] = "";
+            if (g_hud_vars[0])
+                snprintf(vars, sizeof vars, " vars %u %u 0x%04x", *(volatile uint32_t *)(uintptr_t)g_hud_vars[0],
+                         *(volatile uint8_t *)(uintptr_t)g_hud_vars[1], *(volatile uint16_t *)(uintptr_t)g_hud_vars[2]);
+            key += vars;
             if (seen_ip.size() < 3000 && seen_ip.insert(key).second)
                 logf("[hudtrace] frame %u 3d %u in-place full screen out of play, %s: %s", g_frame_count.load(), g_wh.threed,
-                     g_wh.threed ? "drawn whole" : "kept to 16:9", key.c_str());
+                     menu ? "kept to 16:9" : "drawn whole", key.c_str());
         }
-        if (still && g_wh.threed == 0) {
+        if (still && menu) {
             // Out of play, the whole screen so is a picture of the game kept for a menu to be drawn over: the shop
             // (Muramasa's) draws its still of the last frame of play (a 512x512 target filled as the shop opened,
             // FUN_00325810 from the task list) and a glow of it, its own art over that. On a 16:9 screen the art
