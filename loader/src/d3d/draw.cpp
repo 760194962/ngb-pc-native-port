@@ -2946,7 +2946,22 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
             const float *p = (const float *)&verts[(size_t)v * stride], *t = (const float *)&verts[(size_t)v * stride + uv];
             in_place = fabsf(t[0] - (p[0] + 0.5f) / w) < 0.01f && fabsf(t[1] - (p[1] + 0.5f) / h) < 0.01f;
         }
-        if (in_place && full_h && mnx <= 0.5f && mxx >= w - 2.0f && !hud_in_play()) {
+        // Only where no 3D was drawn yet this frame (menus draw none, 2.2.26): a wall run's slash and some techniques hide
+        // the HUD and add a glow of the scene this way (FUN_00315420, a 128x128 blur at ONE/ONE over -0.5..719.5) after
+        // 446 3D draws, and it was cut to the 16:9 middle (the user, 2026-11-17, 21:9; trace frame 4546).
+        bool still = in_place && full_h && mnx <= 0.5f && mxx >= w - 2.0f && !hud_in_play();
+        if (still && g_cfg.hud_trace) {
+            static std::set<std::string> seen_ip;
+            uint32_t by[8] = {};
+            int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 8);
+            std::string key = g_wh.threed ? "3d" : "no3d";
+            char t[16];
+            for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
+            if (seen_ip.size() < 3000 && seen_ip.insert(key).second)
+                logf("[hudtrace] frame %u 3d %u in-place full screen out of play, %s: %s", g_frame_count.load(), g_wh.threed,
+                     g_wh.threed ? "drawn whole" : "kept to 16:9", key.c_str());
+        }
+        if (still && g_wh.threed == 0) {
             // Out of play, the whole screen so is a picture of the game kept for a menu to be drawn over: the shop
             // (Muramasa's) draws its still of the last frame of play (a 512x512 target filled as the shop opened,
             // FUN_00325810 from the task list) and a glow of it, its own art over that. On a 16:9 screen the art
@@ -2963,6 +2978,22 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
             }
         }
         if (in_place) return;
+        if (g_cfg.hud_trace) { // a screen copy sampled elsewhere than in place: its chain, box and texture coordinates
+            static std::set<std::string> seen_sc;
+            uint32_t by[8] = {};
+            int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 8);
+            std::string key;
+            char t[16];
+            for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
+            float u0 = 1e30f, u1 = -1e30f, v0 = 1e30f, v1 = -1e30f;
+            for (uint32_t v = 0; v < count && uv + 8 <= stride; v++) {
+                const float *q = (const float *)&verts[(size_t)v * stride + uv];
+                u0 = std::min(u0, q[0]), u1 = std::max(u1, q[0]), v0 = std::min(v0, q[1]), v1 = std::max(v1, q[1]);
+            }
+            if (seen_sc.size() < 3000 && seen_sc.insert(key).second)
+                logf("[hudtrace] frame %u 3d %u screen copy, %u verts, box %.1f-%.1f,%.1f-%.1f uv %.3f-%.3f,%.3f-%.3f in play %d:%s",
+                     g_frame_count.load(), g_wh.threed, count, mnx, mxx, mny, mxy, u0, u1, v0, v1, (int)hud_in_play(), key.c_str());
+        }
     }
     if (art && full_h && mnx <= 0.5f && mxx >= w - 2.0f) {
         // A picture over the whole 3D view is no 2D: the underwater ripples (FUN_0013A050, its draw returning to
