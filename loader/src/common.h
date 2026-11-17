@@ -88,6 +88,8 @@ struct Config {
     bool display_vblank = false; // --display-vblank (tests): follow the display even with --background
     bool exclusive_60hz = true; // black.ini exclusive_60hz / --keep-refresh: exclusive fullscreen with vsync at 60 Hz on a faster desktop (d3d/host.cpp exclusive_mode)
     bool frame_marker = false; // --frame-marker (tests): each Present's number drawn in the top-left corner (d3d/host.cpp present)
+    bool flipex = false;       // --flipex (tests): the windowed device presents by flip with present statistics (d3d/host.cpp windowed_params)
+    bool flip_nostats = false; // --flip-nostats (tests): the flip model's statistics read as zeros (its fallback to COPY)
     double early_deadline_ms = 10.0; // --early-deadline MS (tests): present_early only for frames ready this soon after their tick (d3d/device.cpp EarlyGate; 0: always)
     bool effects_native = false; // the small effect buffers at their Xbox size (PC SETTINGS); default: render scale, smoothed
     int shadow_scale = 4;        // shadow maps at this many times their Xbox size (black.ini shadow: 1, 2, 4, 8, 16)

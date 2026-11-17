@@ -297,6 +297,8 @@ bool parse_args()
         else if (a == L"--compile-port-shaders") g_cfg.compile_port_shaders = true;
         else if (a == L"--keep-refresh") { g_cfg.exclusive_60hz = false; settings_mark_cli("exclusive_60hz"); }
         else if (a == L"--frame-marker") g_cfg.frame_marker = true;
+        else if (a == L"--flipex") g_cfg.flipex = true;
+        else if (a == L"--flip-nostats") g_cfg.flip_nostats = true;
         else if (a == L"--early-deadline" && i + 1 < argc) g_cfg.early_deadline_ms = _wtof(argv[++i]);
         else if (a == L"--present-early" && i + 1 < argc) { g_cfg.present_early = _wtoi(argv[++i]) != 0; settings_mark_cli("low_latency_present"); }
         else if (a == L"--vsh-record") {

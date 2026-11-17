@@ -2658,7 +2658,7 @@ void lat_note(int64_t presented)
 // shown twice and 121 never shown against 19 and 12 on the beat. A frame goes early only when it is ready within MS of its
 // tick and the tick came from the display (DwmFlush at 60 Hz, or the vblank under an exclusive device): such a Present
 // makes the next composition. A frame later than that waits for the beat as before, and so do the frames after it (an
-// early one would land in the same composition as the held one and hide it) until 120 in a row are ready within 3/4 MS;
+// early one would land in the same composition as the held one and hide it) until 120 in a row are ready 2 ms before MS;
 // the switch back costs the one frame that then shares a composition.
 // The deadline, measured the same way (2-4 runs each; repeat-and-skip pairs a run, 'off' = present_early off):
 // Iris Xe off 2.5, no deadline 136, 10 ms 4, 11 ms 1.0, 14 ms 1.5, 16 ms 22 (one run); RTX 3060 (its frames copied to the
@@ -2668,12 +2668,16 @@ void lat_note(int64_t presented)
 int64_t g_frame_tick; // the vblank the frame being made started at
 struct EarlyGate {
     bool aligned = true;
-    uint32_t fast = 0, early = 0, held = 0, falls = 0, rises = 0;
+    uint32_t fast = 0, early = 0, held = 0, falls = 0, rises = 0, learned = 0;
     bool decide()
     {
         bool display = host3d::exclusive() || g_vblank_synced.load(std::memory_order_relaxed);
         double ms = g_frame_tick ? (qpc_now() - g_frame_tick) / (double)qpc_per_ms() : 1e9;
         double d = g_cfg.early_deadline_ms;
+        // --flipex: the deadline learned from what reached the screen (host.cpp FlipStats), and its misses
+        double fd = d > 0 ? host3d::flip_deadline_ms() : -1.0;
+        if (fd > 0) d = fd, learned++;
+        if (host3d::flip_take_miss() && aligned) aligned = false, fast = 0, falls++;
         bool go = false;
         if (d <= 0 || !display) {
             aligned = d <= 0 && display; // no deadline (--early-deadline 0): always early, as in 2.2.33
@@ -2681,7 +2685,7 @@ struct EarlyGate {
         } else if (aligned) {
             if (ms < d) go = true;
             else aligned = false, fast = 0, falls++;
-        } else if (ms < d * 0.75) {
+        } else if (ms < d - 2.0) {
             if (++fast >= 120) aligned = true, rises++;
         } else {
             fast = 0;
@@ -2691,9 +2695,9 @@ struct EarlyGate {
     }
     void report()
     {
-        logf("[lat] present_early gate (deadline %.1f ms): %u frames early, %u on the beat, %u falls back, %u returns", g_cfg.early_deadline_ms,
-             early, held, falls, rises);
-        early = held = falls = rises = 0;
+        logf("[lat] present_early gate (deadline %.1f ms, %u frames on the learned one %.2f): %u frames early, %u on the beat, %u falls back, "
+             "%u returns", g_cfg.early_deadline_ms, learned, host3d::flip_deadline_ms(), early, held, falls, rises);
+        early = held = falls = rises = learned = 0;
     }
 };
 EarlyGate g_early_gate;
@@ -2708,6 +2712,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     compile_later_report(); // the shaders compiled on the thread and the draws left out meanwhile (shader_cache.cpp)
     pb_flush();
     perf::swap_begin();
+    const int64_t frame_tick = g_frame_tick; // the vblank this frame started at
     const bool early = g_cfg.present_early && g_frame_count.load() >= kEarlyAfter && g_early_gate.decide();
     auto pace = [early] {
         perf::DetScope ds(perf::kDetPace);
@@ -2764,6 +2769,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     if (perf::g_detail) gpu_frame_marks(frames, 1);
     {
         perf::DetScope ds(perf::kDetPresent);
+        host3d::flip_frame_info(frame_tick, early);
         presented = host3d::present();
     }
     perfhud::input_presented();
