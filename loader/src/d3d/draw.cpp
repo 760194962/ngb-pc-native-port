@@ -2948,6 +2948,19 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
         uint32_t c;
         memcpy(&c, verts + 16, 4); // XYZRHW, then the colour
         if (c >> 24 == 0xFF || !render_state()[XRS_ALPHABLENDENABLE]) g_wh.covered = true; // an item's screen: art about the middle
+        if (g_cfg.hud_trace && g_wh.threed) { // a plain full-screen quad over the 3D (a fade or a flash): colour, blend, chain
+            static std::set<std::string> seen_fq;
+            uint32_t by[6] = {};
+            int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 6);
+            const uint32_t *rs = render_state();
+            char t[64];
+            snprintf(t, sizeof t, "%s blend %u 0x%x/0x%x", (c & 0xFFFFFF) >= 0xC0C0C0 ? "light" : "dark", rs[XRS_ALPHABLENDENABLE],
+                     rs[XRS_SRCBLEND], rs[XRS_DESTBLEND]);
+            std::string key = t;
+            for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
+            if (seen_fq.size() < 200 && seen_fq.insert(key).second)
+                logf("[hudtrace] frame %u 3d %u plain full-screen quad, colour 0x%08x, %s", g_frame_count.load(), g_wh.threed, c, key.c_str());
+        }
     }
     bool centre_only = false; // a menu's piece or a movie: always about the middle
     if (g_stage0_rendered && (fvf >> 8 & 0xF) && !(fvf & 0x30000)) {
@@ -2966,10 +2979,11 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
         // wall run's slash and some techniques do (0x007C, 0x007E, 0x0086 measured) and add a glow of the scene this way
         // (FUN_00315420, a 128x128 blur at ONE/ONE over -0.5..719.5); it was cut to the 16:9 middle (the user,
         // 2026-11-17, 21:9; trace frame 4546). The shop and the menus: 0xFFFF (the first test, [0xD6AF00], is 0 in both,
-        // so it cannot tell them apart; nor can the call chains, the same from the sprite routine down). Without the
-        // routine: only where no 3D was drawn yet this frame (menus draw none, 2.2.26; the slash's frames 139-455).
+        // so it cannot tell them apart; nor can the call chains, the same from the sprite routine down). Other techniques
+        // hide the HUD with the word at 0xFFFF and draw the same glow after 118-380 3D draws, so a menu also has drawn no
+        // 3D yet this frame (menus draw none, 2.2.26; the shop's still at 0); without the routine that alone.
         bool still = in_place && full_h && mnx <= 0.5f && mxx >= w - 2.0f && !hud_in_play();
-        const bool menu = g_hud_vars[2] ? *(volatile uint16_t *)(uintptr_t)g_hud_vars[2] == 0xFFFF : g_wh.threed == 0;
+        const bool menu = g_wh.threed == 0 && (!g_hud_vars[2] || *(volatile uint16_t *)(uintptr_t)g_hud_vars[2] == 0xFFFF);
         if (still && g_cfg.hud_trace) {
             static std::set<std::string> seen_ip;
             uint32_t by[8] = {};
@@ -3024,9 +3038,11 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
         // A picture over the whole 3D view is no 2D: the underwater ripples (FUN_0013A050, its draw returning to
         // 0x13A8E6: a 128x128 DXT5 picture, -0.5..719.5 at full height) were squeezed and cut to the 16:9 middle,
         // the picture beside them left without (the user, 2026-10-24, r503 at 64:27)
-        uint32_t by[1] = {};
-        first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 1);
-        if (g_cfg.profile && g_cfg.profile->wide2d && by[0] == g_cfg.profile->wide2d->ripples_ret) return;
+        // (among the first three return addresses: older ones left on the stack can come first, as with the movies)
+        uint32_t by[3] = {};
+        first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 3);
+        const uint32_t r = g_cfg.profile && g_cfg.profile->wide2d ? g_cfg.profile->wide2d->ripples_ret : 0;
+        if (r && (by[0] == r || by[1] == r || by[2] == r)) return;
     }
     if (!squeeze) {
         uint32_t by[3] = {};
@@ -3035,8 +3051,24 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
         // sprites through FUN_00325810, and their lines through 0x3273B8 (r375)
         const Wide2D *w2 = g_cfg.profile ? g_cfg.profile->wide2d : nullptr;
         auto menu = [w2](uint32_t a) { return w2 && a >= w2->menu_lo && a < w2->menu_hi; };
-        if (full_h && w2 && by[0] == w2->movie_ret) squeeze = centre_only = true; // a movie frame
+        // a movie frame: the player's blit among the first return addresses found on the stack -- older ones left there
+        // can come first (NG2004 TU's prologue: 18C241 18C2E5 30F0EC, frames 369-370, drawn stretched at 21:9; the
+        // user, 2026-11-17)
+        if (full_h && w2 && (by[0] == w2->movie_ret || by[1] == w2->movie_ret || by[2] == w2->movie_ret)) squeeze = centre_only = true;
         else if (!full_h && (menu(by[1]) || menu(by[2]))) squeeze = clip = centre_only = true;
+        if (g_cfg.hud_trace && full_h && !squeeze) { // a full-height picture left as drawn: its chain (a movie not known?)
+            static std::set<uint64_t> seen_fh;
+            uint32_t more[6] = {};
+            int nm = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), more, 6);
+            uint64_t k = (uint64_t)more[0] << 32 | more[1];
+            if (seen_fh.size() < 200 && seen_fh.insert(k).second) {
+                std::string key;
+                char t[16];
+                for (int i = 0; i < nm; i++) snprintf(t, sizeof t, " %06X", more[i]), key += t;
+                logf("[hudtrace] frame %u 3d %u full height as drawn, box %.1f-%.1f,%.1f-%.1f, fvf 0x%x, rendered %d:%s", g_frame_count.load(),
+                     g_wh.threed, mnx, mxx, mny, mxy, fvf, (int)g_stage0_rendered, key.c_str());
+            }
+        }
     }
     if (!squeeze) return;
     // In play (3D drawn into the back buffer this frame before this 2D) the HUD's elements keep to their sides
@@ -3416,6 +3448,60 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
     return true;
 }
 
+// black.ini move_flash = 0: without the glow some moves flash over the screen. The wall run's slash and several
+// techniques lay three pictures of the scene over it (the user's play, 21:9, 2026-11-17): a bright sprite of it
+// (FUN_00325810), a 128x128 blur of it added at ONE/ONE over the whole screen (FUN_00315420) and a zoomed copy of the
+// last frame (FUN_00324CD0). Left out one by one at run time, the glow alone is what dazzles; without it the move keeps
+// its blur and bright sprite and the user found it right ("现在很好"). The glow is told by how it is drawn, the same in
+// every build: pre-transformed over the whole back buffer, its texture coordinates following the screen, sampling a
+// render target, added at ONE/ONE, after 3D this frame (the menus draw the same glow with no 3D: kept). NG2004 flashes
+// the same moments with a plain white quad instead (colour 0xA0FFFFFF added at SRCALPHA/ONE over the whole screen after
+// 230 3D draws, FUN_00300990 of its title update; the user, 2026-11-17: "和黑一样的白色屏幕闪烁"): a light-coloured
+// untextured full-screen quad added on (destination ONE) over the 3D is left out too. Fades (black, or blended over the
+// picture with INVSRCALPHA) are not added on and stay. Each call chain so left out is logged once, with the HUD's state,
+// so other users of such a draw would show.
+uint32_t g_flash_skipped;
+bool skip_move_flash(const DrawCtx &ctx, const void *data, uint32_t count, uint32_t stride)
+{
+    if (g_cfg.move_flash || !data || count < 3 || g_wh.threed == 0) return false;
+    if (ctx.path != Path::Fvf || (ctx.fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW) return false;
+    if (!g_st.render_target || !is_backbuffer(g_st.render_target)) return false;
+    const uint32_t *rs = render_state();
+    if (!rs[XRS_ALPHABLENDENABLE] || rs[XRS_DESTBLEND] != 1) return false; // added on
+    float w = (float)backbuffer_width(), h = (float)backbuffer_height();
+    const bool textured = (ctx.fvf & D3DFVF_TEXCOUNT_MASK) != 0 && g_st.textures[0];
+    if (textured) { // Black's glow: a render target in place, ONE / ONE
+        if (!g_stage0_rendered || rs[XRS_SRCBLEND] != 1) return false;
+    } else { // NG2004's flash: plain and light
+        if (!(ctx.fvf & D3DFVF_DIFFUSE) || stride < 20) return false;
+        for (uint32_t v = 0; v < count; v++) {
+            uint32_t c;
+            memcpy(&c, (const uint8_t *)data + (size_t)v * stride + 16, 4);
+            if ((c >> 16 & 0xFF) < 0xC0 || (c >> 8 & 0xFF) < 0xC0 || (c & 0xFF) < 0xC0) return false;
+        }
+    }
+    uint32_t uv = 16 + (ctx.fvf & D3DFVF_DIFFUSE ? 4 : 0) + (ctx.fvf & D3DFVF_SPECULAR ? 4 : 0);
+    if (textured && uv + 8 > stride) return false;
+    float mnx = 1e30f, mxx = -1e30f, mny = 1e30f, mxy = -1e30f;
+    for (uint32_t v = 0; v < count; v++) {
+        const float *p = (const float *)((const uint8_t *)data + (size_t)v * stride), *t = (const float *)((const uint8_t *)data + (size_t)v * stride + uv);
+        if (textured && (fabsf(t[0] - (p[0] + 0.5f) / w) > 0.01f || fabsf(t[1] - (p[1] + 0.5f) / h) > 0.01f)) return false; // in place
+        mnx = std::min(mnx, p[0]), mxx = std::max(mxx, p[0]), mny = std::min(mny, p[1]), mxy = std::max(mxy, p[1]);
+    }
+    if (mnx > 1.0f || mxx < w - 2.0f || mny > 1.0f || mxy < h - 2.0f) return false;
+    static std::set<std::string> seen;
+    uint32_t by[6] = {};
+    int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 6);
+    std::string key;
+    char t[16];
+    for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
+    key += hud_in_play() ? " (HUD shown)" : " (HUD hidden)";
+    if (seen.size() < 64 && seen.insert(key).second)
+        logf("[draw] frame %u: a move's glow left out (move_flash = 0, %u so far):%s", g_frame_count.load(), g_flash_skipped + 1, key.c_str());
+    g_flash_skipped++;
+    return true;
+}
+
 // ---- HLE draw functions ----
 
 void __stdcall D3DDevice_DrawVerticesUP(uint32_t PrimitiveType, uint32_t VertexCount, const void *pVertexStreamZeroData,
@@ -3441,6 +3527,7 @@ void __stdcall D3DDevice_DrawVerticesUP(uint32_t PrimitiveType, uint32_t VertexC
         return;
     }
     debug_draw("DrawVerticesUP", ctx, PrimitiveType, VertexCount, (const float *)pVertexStreamZeroData, VertexStreamZeroStride / 4);
+    if (skip_move_flash(ctx, pVertexStreamZeroData, VertexCount, VertexStreamZeroStride)) return;
     if (draw_wide_lines(ctx, PrimitiveType, VertexCount, pVertexStreamZeroData, VertexStreamZeroStride)) return;
     draw_up(PrimitiveType, VertexCount,
             scale_rhw(ctx, pVertexStreamZeroData, 0, VertexCount, VertexStreamZeroStride, quad_prim(PrimitiveType)), VertexStreamZeroStride);

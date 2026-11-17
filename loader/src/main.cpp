@@ -719,11 +719,11 @@ int run(void *reserve, unsigned reserve_size)
     logf("address-space stub: reserve %p + 0x%x", reserve, reserve_size);
     // What black.ini (the launcher's pages) and the command line set, as read: the launcher's choices can be checked here
     logf("settings: render %s, scale %.2f, aa %d, seamfill %d, effectsnative %d, shadow %d, vsync %d, perfhud %d, aniso %d, widescreen %d, fullscreen %d, "
-         "window %dx%d, fullscreen_res %s, gain %.2f, gamma %.2f, shadowsoft %d, msaa %d, low_latency_present %d, exclusive_60hz %d",
+         "window %dx%d, fullscreen_res %s, gain %.2f, gamma %.2f, shadowsoft %d, msaa %d, low_latency_present %d, exclusive_60hz %d, move_flash %d",
          g_cfg.render_native ? "native" : g_cfg.render_h ? std::to_string(g_cfg.render_h).c_str() : "scale", g_cfg.scale,
          g_cfg.aa, g_cfg.seam_fill, g_cfg.effects_native, g_cfg.shadow_scale, g_cfg.vsync, g_cfg.perfhud, g_cfg.aniso, g_cfg.widescreen, g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0,
          g_cfg.window_w, g_cfg.window_h, g_cfg.fs_window_res ? "window" : "screen", g_cfg.gain, g_cfg.gamma, g_cfg.shadow_pcf, g_cfg.msaa,
-         g_cfg.present_early ? 1 : 0, g_cfg.exclusive_60hz ? 1 : 0);
+         g_cfg.present_early ? 1 : 0, g_cfg.exclusive_60hz ? 1 : 0, g_cfg.move_flash ? 1 : 0);
 
     std::string err;
     if (!g_xbe.load(g_cfg.xbe_path, err)) {

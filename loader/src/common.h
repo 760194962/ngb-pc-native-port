@@ -86,6 +86,7 @@ struct Config {
     bool mouse_invert = false;
     bool timer_vblank = false; // --timer-vblank: free-running 59.94 Hz vblank instead of following the display
     bool display_vblank = false; // --display-vblank (tests): follow the display even with --background
+    bool move_flash = true;     // black.ini move_flash: the full-screen glow and blur some moves add (d3d/draw.cpp skip_move_flash)
     bool exclusive_60hz = true; // black.ini exclusive_60hz / --keep-refresh: exclusive fullscreen with vsync at 60 Hz on a faster desktop (d3d/host.cpp exclusive_mode)
     bool frame_marker = false; // --frame-marker (tests): each Present's number drawn in the top-left corner (d3d/host.cpp present)
     bool flipex = false;       // --flipex (tests): the windowed device presents by flip with present statistics (d3d/host.cpp windowed_params)
