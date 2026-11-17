@@ -839,6 +839,20 @@ HRESULT present()
     // 1-10 s, a black window with the game stopped (the user, 2026-10-24, borderless; r514-r518). Under plain Direct3D 9
     // an exclusive device was lost there and its Reset dropped the pile; a 9Ex device is not lost.
     bool whole = g_dev_exclusive && g_frame_w > 0 && g_frame_h > 0 && (g_frame_w < g_bb_w || g_frame_h < g_bb_h) && present_stretch();
+    if (g_cfg.frame_marker) { // tests: the Present's number in the top-left corner, read back from the screen by a capture tool
+        static uint32_t presents;
+        uint32_t n = ++presents;
+        IDirect3DSurface9 *bb = nullptr;
+        if (SUCCEEDED(g_dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {
+            // 14 squares of 8x8 at the top left: white, black (references), then bits 0-11 of n, white = 1
+            for (int i = 0; i < 14; i++) {
+                bool on = i == 0 ? true : i == 1 ? false : ((n >> (i - 2)) & 1) != 0;
+                RECT r = {i * 8, 0, i * 8 + 8, 8};
+                g_dev->ColorFill(bb, &r, on ? D3DCOLOR_XRGB(255, 255, 255) : D3DCOLOR_XRGB(0, 0, 0));
+            }
+            bb->Release();
+        }
+    }
     if (g_exclusive_now && g_cfg.vsync) return g_dev->Present(nullptr, nullptr, nullptr, nullptr); // flipped (exclusive_params)
     RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w, g_frame_h && !whole ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)

@@ -1182,6 +1182,7 @@ void apply_viewport()
 // with SetVerticalBlankCallback (+0x1DB8) with a D3DVBLANKDATA {VBlank, Swap, Flags}.
 std::atomic<uint32_t> g_vblank_count, g_swap_count;
 std::atomic<int64_t> g_vblank_qpc; // QueryPerformanceCounter at the last vblank (pace_swap: the time left before its target)
+std::atomic<bool> g_vblank_synced; // the last tick followed the display (DwmFlush or its vblank), not the timer
 HANDLE g_vblank_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr); // wakes pace_swap at each vblank
 
 // The emulated vblank follows the display's when the display refreshes at about 60 Hz: DwmFlush returns after
@@ -1292,6 +1293,7 @@ void __stdcall vblank_thread(void *)
             now.QuadPart = now.QuadPart - due < period ? due : now.QuadPart;
         }
         last = now;
+        g_vblank_synced.store(synced, std::memory_order_relaxed); // this tick came from the display (present_early's deadline)
         // the count first, then its time: a reader that races sees the new count with the old time and finds less time
         // left than there is (pace_swap's pool refill then does less), never more
         uint32_t vb = ++g_vblank_count;
@@ -2650,6 +2652,51 @@ void lat_note(int64_t presented)
     ages.clear();
     gaps.clear();
 }
+
+// present_early with the compositor's deadline (tests: --early-deadline MS). Measured on the screen (Desktop Duplication,
+// the frame number drawn in a corner; Iris Xe, 60 Hz desktop, windowed, 150 s): presented as soon as drawn, 118 frames
+// shown twice and 121 never shown against 19 and 12 on the beat. A frame goes early only when it is ready within MS of its
+// tick and the tick came from the display (DwmFlush at 60 Hz, or the vblank under an exclusive device): such a Present
+// makes the next composition. A frame later than that waits for the beat as before, and so do the frames after it (an
+// early one would land in the same composition as the held one and hide it) until 120 in a row are ready within 3/4 MS;
+// the switch back costs the one frame that then shares a composition.
+// The deadline, measured the same way (2-4 runs each; repeat-and-skip pairs a run, 'off' = present_early off):
+// Iris Xe off 2.5, no deadline 136, 10 ms 4, 11 ms 1.0, 14 ms 1.5, 16 ms 22 (one run); RTX 3060 (its frames copied to the
+// Iris Xe's panel) off 14.8 (1-31), no deadline 64, 10 ms 14.5, 11 ms 67, 14 ms 24. 10 ms keeps both as smooth as off;
+// about a third of the frames then go early (the light ones, pad read to Present 1.4-5 ms). Elsewhere (windowed at other
+// refresh rates, the tick from the timer) nothing goes early.
+int64_t g_frame_tick; // the vblank the frame being made started at
+struct EarlyGate {
+    bool aligned = true;
+    uint32_t fast = 0, early = 0, held = 0, falls = 0, rises = 0;
+    bool decide()
+    {
+        bool display = host3d::exclusive() || g_vblank_synced.load(std::memory_order_relaxed);
+        double ms = g_frame_tick ? (qpc_now() - g_frame_tick) / (double)qpc_per_ms() : 1e9;
+        double d = g_cfg.early_deadline_ms;
+        bool go = false;
+        if (d <= 0 || !display) {
+            aligned = d <= 0 && display; // no deadline (--early-deadline 0): always early, as in 2.2.33
+            go = d <= 0;
+        } else if (aligned) {
+            if (ms < d) go = true;
+            else aligned = false, fast = 0, falls++;
+        } else if (ms < d * 0.75) {
+            if (++fast >= 120) aligned = true, rises++;
+        } else {
+            fast = 0;
+        }
+        (go ? early : held)++;
+        return go;
+    }
+    void report()
+    {
+        logf("[lat] present_early gate (deadline %.1f ms): %u frames early, %u on the beat, %u falls back, %u returns", g_cfg.early_deadline_ms,
+             early, held, falls, rises);
+        early = held = falls = rises = 0;
+    }
+};
+EarlyGate g_early_gate;
 } // namespace
 
 uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
@@ -2661,12 +2708,13 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     compile_later_report(); // the shaders compiled on the thread and the draws left out meanwhile (shader_cache.cpp)
     pb_flush();
     perf::swap_begin();
-    const bool early = g_cfg.present_early && g_frame_count.load() >= kEarlyAfter;
+    const bool early = g_cfg.present_early && g_frame_count.load() >= kEarlyAfter && g_early_gate.decide();
     auto pace = [early] {
         perf::DetScope ds(perf::kDetPace);
         if (perf::g_detail && !early) gpu_frame_marks(g_frame_count.load(), 2);
         pace_swap();
         if (perf::g_detail && !early) gpu_frame_marks(g_frame_count.load(), 3);
+        g_frame_tick = g_vblank_qpc.load(); // the next frame starts at this vblank
     };
     if (early) perf::early_present(true);
     else pace();
@@ -2720,6 +2768,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     }
     perfhud::input_presented();
     if (perf::g_detail) lat_note(qpc_now());
+    if (perf::g_detail && g_cfg.present_early && frames % 600 == 0) g_early_gate.report();
     if (early) {
         perf::early_present(false);
         pace();
