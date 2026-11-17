@@ -718,6 +718,23 @@ const Pair kText[(int)Str::Count] = {
      L"On, a frame spends at most 4 ms compiling; the shaders past that compile on background threads, and what uses them is not drawn until they are ready. "
      L"Shorter stutters (with no seed, the worst frame 237 -> 98 ms measured), but entering a new area may show a few frames with pieces missing (about 4 measured), then all is back.\n\n"
      L"A shader compiled once is kept in the cache and never affects later play. Keep it off if missing pieces bother you more than a brief stutter."},
+    {L"低延迟呈现",
+     L"Low-latency present"},
+    {L"每帧画完立刻送去显示，操作到画面约快 14 ms",
+     L"Each frame goes to the screen as soon as it is drawn: about 14 ms less input lag"},
+    {L"默认开启。\n\n"
+     L"游戏按主机的节奏每秒 60 帧：每帧开头读手柄，算好、画好，再等到下一个节拍才换下一帧。"
+     L"以前画好的帧也要跟着等到节拍那一刻才送去显示，白等十几毫秒。开启后画完立刻送去显示，再等节拍，游戏本身的节奏完全不变，只是画面出来得更早。\n\n"
+     L"实测（核显和独显，默认与高画质）：从游戏读到手柄输入到画面送出，窗口模式约 16 ms → 2.5 ms，独占全屏约 18 ms → 8.5 ms；"
+     L"帧率、迟到帧和过场影片的节奏都没有变化。\n\n"
+     L"关闭则回到以前的方式（画面在节拍时送出，间隔稍微更均匀一点）。",
+     L"On by default.\n\n"
+     L"The game runs on the console's beat, 60 frames a second: each frame reads the pad at its start, is worked out and drawn, then waits for the next beat. "
+     L"Before, a finished frame also waited for that beat before it went to the screen, a dozen milliseconds for nothing. On, it goes to the screen as soon as it is drawn "
+     L"and the wait comes after: the game's own timing is exactly as before, only the picture comes out sooner.\n\n"
+     L"Measured (integrated and dedicated GPU, default and high quality): from the game reading the pad to the picture going out, about 16 ms -> 2.5 ms windowed, "
+     L"18 ms -> 8.5 ms in exclusive fullscreen; frame rate, late frames and the movies' pacing unchanged.\n\n"
+     L"Off goes back to the old way (pictures sent on the beat, spaced a little more evenly)."},
 };
 
 } // namespace

@@ -428,6 +428,9 @@ enum class Str {
     CompileBudget, // Graphics: the compile budget (black.ini compile_budget), experimental
     CompileBudgetNote,
     HelpCompileBudget,
+    PresentEarly, // Graphics: low-latency present (black.ini present_early), on by default
+    PresentEarlyNote,
+    HelpPresentEarly,
     Count
 };
 

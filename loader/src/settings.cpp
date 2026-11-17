@@ -237,6 +237,7 @@ void write_all(FILE *f)
     fprintf(f, "effectsnative = %d\n", g_cfg.effects_native ? 1 : 0);
     fprintf(f, "shadowsoft = %d\n", g_cfg.shadow_pcf ? 1 : 0);
     fprintf(f, "compile_budget = %g\n", g_cfg.compile_budget_ms < 0 ? -1.0 : g_cfg.compile_budget_ms);
+    fprintf(f, "present_early = %d\n", g_cfg.present_early ? 1 : 0);
     fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\naniso = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0,
             g_cfg.perfhud ? 1 : 0, g_cfg.aniso);
     fprintf(f, "multicore = %d\nmsaa = %d\n", g_cfg.multicore ? 1 : 0, g_cfg.msaa);
