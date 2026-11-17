@@ -295,6 +295,7 @@ bool parse_args()
         }
         else if (a == L"--cpu-tex-verify") g_cfg.cpu_tex_verify = true;
         else if (a == L"--compile-port-shaders") g_cfg.compile_port_shaders = true;
+        else if (a == L"--present-early" && i + 1 < argc) g_cfg.present_early = _wtoi(argv[++i]) != 0;
         else if (a == L"--vsh-record") {
             if (!next(g_cfg.vsh_record)) return false;
         }

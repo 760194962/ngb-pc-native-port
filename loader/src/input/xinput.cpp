@@ -26,6 +26,8 @@
 #include <string>
 #include <vector>
 
+extern std::atomic<int64_t> g_input_poll_qpc; // below
+
 uint32_t g_pad_watch;
 
 namespace xinput {
@@ -665,6 +667,9 @@ uint32_t __stdcall XInputGetState(Device *h, XState *pState)
     }
     static std::atomic<uint32_t> polls{0};
     if ((++polls % 600) == 1) logf("[input] XInputGetState poll #%u (frame %u)", polls.load(), g_frame_count.load());
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    g_input_poll_qpc.store(now.QuadPart, std::memory_order_relaxed); // the frame's input age at its Present (device.cpp)
     XGamepad g;
     read_pad(h->port, g);
     if (memcmp(&g, &h->last, sizeof g)) {
@@ -746,6 +751,8 @@ void pad_report(uint8_t out[18])
 }
 
 } // namespace xinput
+
+std::atomic<int64_t> g_input_poll_qpc; // QueryPerformanceCounter at the game's last pad read (XInputGetState)
 
 namespace xd3d {
 const Hle *hle_input_table_aux(const char *xbe, size_t *count) { return xinput::hle_input_table_aux(xbe, count); }

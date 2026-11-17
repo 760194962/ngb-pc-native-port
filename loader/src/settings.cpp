@@ -92,6 +92,7 @@ bool apply_line(const char *line, bool from_cli)
         else if (k == "effectsnative") g_cfg.effects_native = v != 0;
         else if (k == "shadow") g_cfg.shadow_scale = std::clamp(atoi(val), 1, 16);
         else if (k == "compile_budget") g_cfg.compile_budget_ms = v < 0 ? -1.0 : std::min(v, 100.0f); // ms a frame; -1 off (d3d/shader_cache.cpp)
+        else if (k == "present_early") g_cfg.present_early = v != 0; // d3d/device.cpp D3DDevice_Swap
         else if (k == "shadowsoft") g_cfg.shadow_pcf = v != 0 ? 1 : 0; // soft shadow edges (d3d/nv2a_psh.cpp; 1: over the host map, 2.2.18)
         else if (k == "vsync") g_cfg.vsync = v != 0;
         else if (k == "perfhud") g_cfg.perfhud = v != 0;

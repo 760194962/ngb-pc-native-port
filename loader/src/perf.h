@@ -28,6 +28,7 @@ bool recording();
 // Render thread, from D3DDevice_Swap.
 void swap_begin();                              // the frame's work is done
 void pace_end(uint32_t vblanks, uint32_t interval); // after waiting for the vblank: vblanks since the last flip
+void early_present(bool begin); // present_early: the Present before the vblank wait (begin: after swap_begin; end: done)
 void frame_end(uint32_t render_w, uint32_t render_h); // after Present: the next frame's work starts
 
 // Counters (any thread).

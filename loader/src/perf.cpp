@@ -917,6 +917,20 @@ void pace_end(uint32_t vblanks, uint32_t interval)
     g_phase = kPresent;
 }
 
+// present_early: the Present comes before the vblank wait. Its time is counted as present, the wait after it as pace.
+int64_t g_t_early_begin, g_t_early; // when that Present began and was done, 0 otherwise
+void early_present(bool begin)
+{
+    if (!g_on) return;
+    if (begin) {
+        g_t_early_begin = qpc();
+        g_phase = kPresent;
+    } else {
+        g_t_early = qpc();
+        g_phase = kPace;
+    }
+}
+
 void frame_end(uint32_t render_w, uint32_t render_h)
 {
     {
@@ -977,6 +991,10 @@ void frame_end(uint32_t render_w, uint32_t render_h)
         f.work = ms(g_t_swap - g_t_work);
         f.pace = ms(g_t_pace - g_t_swap);
         f.present = ms(now - g_t_pace);
+        if (g_t_early) { // present_early: Swap, the Present, the wait, the rest
+            f.present = ms(g_t_early - g_t_early_begin) + ms(now - g_t_pace);
+            f.pace = ms(g_t_early_begin - g_t_swap) + ms(g_t_pace - g_t_early);
+        }
         for (int c = 0; c < kCatCount; c++) f.cat[c] = ms(g_cat_ticks[c].exchange(0));
         f.others_kcyc = others_delta() / 1000.0f;
         f.draws = g_draws.exchange(0);
@@ -996,6 +1014,7 @@ void frame_end(uint32_t render_w, uint32_t render_h)
         g_frame_index = (uint32_t)g_rec->frames.size();
         g_phase = kWork;
     }
+    g_t_early = 0;
     if (g_toggle_req.exchange(false)) {
         if (g_state == 0) start();
         else if (g_state == 1) stop();
