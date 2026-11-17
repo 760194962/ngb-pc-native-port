@@ -2208,8 +2208,8 @@ struct Painter {
         segmented(kHitExcl60, cx, y, {S(Str::On), S(Str::Off)}, black_ini("exclusive_60hz") == "0" ? 1 : 0, 72);
         text(S(Str::Exclusive60Note), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
         y += 40;
-        label(Str::PresentEarly); // black.ini present_early: the Present before the vblank wait (on unless 0, 2.2.33)
-        segmented(kHitPresent, cx, y, {S(Str::On), S(Str::Off)}, black_ini("present_early") == "0" ? 1 : 0, 72);
+        label(Str::PresentEarly); // black.ini low_latency_present: the Present before the vblank wait (off unless 1, since 2.2.34)
+        segmented(kHitPresent, cx, y, {S(Str::On), S(Str::Off)}, black_ini("low_latency_present") == "1" ? 0 : 1, 72);
         text(S(Str::PresentEarlyNote), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
         y += 40;
         label(Str::SeamFill);
@@ -3129,7 +3129,7 @@ void reset_page(Page p)
         black_ini_set("vsync", "0");
         black_ini_set("seamfill", "0");
         black_ini_set("compile_budget", "-1");
-        black_ini_set("present_early", "1");
+        black_ini_set("low_latency_present", "0");
         black_ini_set("exclusive_60hz", "1");
         black_ini_set("effectsnative", "0");
         black_ini_set("perfhud", "0");
@@ -3431,7 +3431,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id == kHitResetPage) g.ask = kAskReset;
         else if (id >= kHitSeam && id < kHitSeam + 2) black_ini_set("seamfill", id == kHitSeam ? "1" : "0");
         else if (id >= kHitBudget && id < kHitBudget + 2) black_ini_set("compile_budget", id == kHitBudget ? "4" : "-1");
-        else if (id >= kHitPresent && id < kHitPresent + 2) black_ini_set("present_early", id == kHitPresent ? "1" : "0");
+        else if (id >= kHitPresent && id < kHitPresent + 2) black_ini_set("low_latency_present", id == kHitPresent ? "1" : "0");
         else if (id >= kHitExcl60 && id < kHitExcl60 + 2) black_ini_set("exclusive_60hz", id == kHitExcl60 ? "1" : "0");
         else if (id >= kHitFx && id < kHitFx + 2) black_ini_set("effectsnative", id == kHitFx ? "1" : "0");
         else if (id >= kHitVsync && id < kHitVsync + 2) black_ini_set("vsync", id == kHitVsync ? "1" : "0");

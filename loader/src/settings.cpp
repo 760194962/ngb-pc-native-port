@@ -92,7 +92,9 @@ bool apply_line(const char *line, bool from_cli)
         else if (k == "effectsnative") g_cfg.effects_native = v != 0;
         else if (k == "shadow") g_cfg.shadow_scale = std::clamp(atoi(val), 1, 16);
         else if (k == "compile_budget") g_cfg.compile_budget_ms = v < 0 ? -1.0 : std::min(v, 100.0f); // ms a frame; -1 off (d3d/shader_cache.cpp)
-        else if (k == "present_early") g_cfg.present_early = v != 0; // d3d/device.cpp D3DDevice_Swap
+        // low_latency_present: d3d/device.cpp D3DDevice_Swap. The key 2.2.33 and the first 2.2.34 used, present_early, was written
+        // as 1 into every player's black.ini while it was on by default; it is not read any more.
+        else if (k == "low_latency_present") g_cfg.present_early = v != 0;
         else if (k == "exclusive_60hz") g_cfg.exclusive_60hz = v != 0; // d3d/host.cpp exclusive_mode
         else if (k == "shadowsoft") g_cfg.shadow_pcf = v != 0 ? 1 : 0; // soft shadow edges (d3d/nv2a_psh.cpp; 1: over the host map, 2.2.18)
         else if (k == "vsync") g_cfg.vsync = v != 0;
@@ -238,7 +240,7 @@ void write_all(FILE *f)
     fprintf(f, "effectsnative = %d\n", g_cfg.effects_native ? 1 : 0);
     fprintf(f, "shadowsoft = %d\n", g_cfg.shadow_pcf ? 1 : 0);
     fprintf(f, "compile_budget = %g\n", g_cfg.compile_budget_ms < 0 ? -1.0 : g_cfg.compile_budget_ms);
-    fprintf(f, "present_early = %d\n", g_cfg.present_early ? 1 : 0);
+    fprintf(f, "low_latency_present = %d\n", g_cfg.present_early ? 1 : 0);
     fprintf(f, "exclusive_60hz = %d\n", g_cfg.exclusive_60hz ? 1 : 0);
     fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\naniso = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0,
             g_cfg.perfhud ? 1 : 0, g_cfg.aniso);

@@ -2593,7 +2593,7 @@ void swap_callback_after_swap()
     cb(data);
 }
 
-// present_early (black.ini, --present-early 0|1; after ngbrecomp 0.9.70 docs/TECHNICAL.md "Presentation": a picture
+// present_early (black.ini low_latency_present, --present-early 0|1; off by default: see below; after ngbrecomp 0.9.70 docs/TECHNICAL.md "Presentation": a picture
 // presented at the vblank tick waited a whole refresh, theirs is presented at the game's Swap): the Present at the Swap,
 // then the wait for the vblank the frame is paced to. The game sees no difference (its next frame still starts after that
 // wait); the picture reaches the screen sooner. Measured 2026-11-17 (attract demo, empty caches, 3 runs a variant
@@ -2603,6 +2603,10 @@ void swap_callback_after_swap()
 // the same, the frame time's average the same or lower. Presenting at a steady time after the frame start instead (as
 // ngbrecomp's pace_target; tried as mode 2) gave less (4-12 ms) and on an exclusive device 60-160 more late frames.
 // With --hitch-detail, [lat] every 600 frames: that age and the Presents' spacing.
+// Off by default again (the user, 2026-11-17): on another PC (a 60 Hz display, integrated graphics) it looked less smooth
+// windowed. Those measurements were of the game's pacing and of the Present calls, not of what the desktop showed: a frame
+// presented as soon as it is drawn has until the compositor's deadline before the next vblank, not a whole frame, so a
+// heavy frame can miss it (the last picture shown twice) and the next one land with it (one never shown). Not measured yet.
 // Not in the first kEarlyAfter frames: at the boot, around frame 30 (the title loading its files, a black screen), a frame
 // with it now and then took 50-56 ms, its render thread waiting in the driver (12 ms of CPU): 6 of 31 starts against 0
 // of 30 without it (Iris Xe, no recorder; with the recorder from frame 1 neither showed it, 0 of 24). Nobody plays there.
