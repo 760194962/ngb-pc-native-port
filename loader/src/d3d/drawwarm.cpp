@@ -113,6 +113,22 @@ void canonical_msaa(Rec &r)
         if (kRs[i] == D3DRS_MULTISAMPLEANTIALIAS) r.rs[i] = TRUE;
 }
 
+// The view and world matrices recorded as an affine matrix's pattern whatever they were (last column 0 0 0 1, the rest
+// neither 0 nor 1): the drivers' programs do not depend on them, but their exact zeros followed the camera and the object
+// (an upright camera, an unturned model), so one draw state was recorded once per pattern -- 16,679 records of Black's seed
+// were 6,818 states, and none of an NG2004 play's matched Black's. Replaying only the 6,818 built as many programs as the
+// 16,679 (attract demo, 4 + 4 interleaved runs each: Iris Xe 26 slow draws a run against 33, RTX 3060 20 against 23,
+// the area entry and the worst frames the same; 2026-11-17). The projection and texture matrices stay: they shape the
+// program (8a03e5e).
+void canonical_xf(Rec &r)
+{
+    if (r.vs) return; // fixed-function vertices only
+    for (int m : {0, 2}) { // kXf: D3DTS_VIEW, D3DTS_WORLD
+        r.xf_zero[m] = 0x0888;
+        r.xf_one[m] = 0x8000;
+    }
+}
+
 // The enabled lights' shapes, worked out again only when a light, its enabling or the material changed
 const uint8_t *light_shapes(uint32_t *n, uint32_t *packed_hash)
 {
@@ -258,9 +274,11 @@ void load()
     // the seed of another version is used too (its records whose shaders this one lacks are left out at replay)
     bool seed_ok = read_file(seed_path(), seed, &sv, false);
     bool learned_ok = read_file(learned_path(), g_learned, &lv, true);
-    for (const std::vector<Rec> *v : {&seed, &g_learned})
-        for (const Rec &r : *v)
+    for (std::vector<Rec> *v : {&seed, &g_learned})
+        for (Rec &r : *v) {
+            canonical_xf(r); // a file written before canonical_xf: its records per view and world pattern become one
             if (g_have.insert(fnv(&r, sizeof r)).second) g_recs.push_back(r);
+        }
     char note[96] = "";
     if (!learned_ok && lv.s[0] && memcmp(lv.s, mine.s, sizeof mine.s))
         snprintf(note, sizeof note, " (those of %s dropped: learned again by %s)", lv.s, mine.s);
@@ -403,6 +421,7 @@ bool capture(IDirect3DDevice9 *d, D3DPRIMITIVETYPE prim, Rec &r)
         z->Release();
     }
     canonical_msaa(r);
+    canonical_xf(r);
     return true;
 }
 

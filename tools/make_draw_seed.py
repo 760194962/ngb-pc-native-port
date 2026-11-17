@@ -72,6 +72,21 @@ def canonical_msaa(r):
     return bytes(b)
 
 
+XF_ZERO, XF_ONE = 496, 510  # u16 xf_zero[7], xf_one[7]: view, projection, world, texture 0-3
+
+
+def canonical_xf(r):
+    """A fixed-function record's view and world matrix patterns as an affine matrix's (zeros 0x0888, ones 0x8000), as
+    drawwarm.cpp canonical_xf records them since 2.2.33: they followed the camera and split one state into many"""
+    if len(r) != 528 or struct.unpack_from('<Q', r, 0)[0] != 0:
+        return r
+    b = bytearray(r)
+    for m in (0, 2):
+        struct.pack_into('<H', b, XF_ZERO + 2 * m, 0x0888)
+        struct.pack_into('<H', b, XF_ONE + 2 * m, 0x8000)
+    return bytes(b)
+
+
 def shader_keys(seed_path):
     """The bytecode keys (FNV-1a 64 of the code, shader_cache.cpp code_key) of the shader seed's entries"""
     d = open(seed_path, 'rb').read()
@@ -124,10 +139,10 @@ def main():
             print('note: %s written by %s, the others by %s; merged' % (f, vname(v), vname(version)))
             v = max(v, version, key=vorder)
         size, version = s, v
-        recs.update(canonical_msaa(x) for x in r)
+        recs.update(canonical_xf(canonical_msaa(x)) for x in r)
     if a.check:
         _, _, seed = read(a.seed)
-        seed = set(seed)
+        seed = {canonical_xf(canonical_msaa(x)) for x in seed}
         have = sum(1 for r in recs if r in seed)
         print('%d of the runs\' %d draw states are in the seed (%.0f%%); the seed has %d' % (have, len(recs), 100.0 * have / max(1, len(recs)), len(seed)))
         return
