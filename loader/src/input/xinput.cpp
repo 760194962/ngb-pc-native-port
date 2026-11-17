@@ -232,6 +232,13 @@ void read_press_file(uint32_t now_ms)
     static ULONGLONG next_check;
     static long long pos;
     static uint32_t queue_end;
+    // --hud-trace: F8 traces the next frame with its render targets (as the press-file line "trace"), for a moment the
+    // player sees but a script cannot time (a move's flash)
+    if (g_cfg.hud_trace && (GetAsyncKeyState(VK_F8) & 1) && GetForegroundWindow() == host3d::window()) {
+        g_cfg.debug_frame = g_frame_count + 2;
+        g_cfg.debug_frame_end = 0;
+        logf("[input] F8: trace requested, frame %u", g_cfg.debug_frame);
+    }
     if (g_cfg.press_file.empty() || GetTickCount64() < next_check) return;
     next_check = GetTickCount64() + 50;
     HANDLE h = CreateFileW(g_cfg.press_file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -309,6 +316,7 @@ void read_press_file(uint32_t now_ms)
                     if (k == "aa") g_cfg.aa = v;
                     else if (k == "seamfill") g_cfg.seam_fill = v;
                     else if (k == "perfhud") g_cfg.perfhud = v; // the performance overlay (black.ini perfhud)
+                    else if (k == "moveflash") g_cfg.move_flash = v; // a move's full-screen flash (black.ini move_flash)
                     else if (k == "aniso") { // anisotropic filtering N (black.ini aniso), sent again with every sampler state
                         g_cfg.aniso = std::clamp(atoi(line.c_str() + c + 1), 1, 16);
                         xd3d::forget_sent_state();
