@@ -735,6 +735,24 @@ const Pair kText[(int)Str::Count] = {
      L"Measured (integrated and dedicated GPU, default and high quality): from the game reading the pad to the picture going out, about 16 ms -> 2.5 ms windowed, "
      L"18 ms -> 8.5 ms in exclusive fullscreen; frame rate, late frames and the movies' pacing unchanged.\n\n"
      L"Off goes back to the old way (pictures sent on the beat, spaced a little more evenly)."},
+    {L"垂直同步时用 60 Hz",
+     L"60 Hz with V-Sync"},
+    {L"高刷新率屏幕上独占全屏开垂直同步时切到 60 Hz，画面不抖",
+     L"Exclusive fullscreen with V-Sync on a high-refresh screen switches to 60 Hz: no judder"},
+    {L"默认开启。只在“独占全屏”并且打开了“垂直同步”时起作用；窗口、无边框全屏和关掉垂直同步时都不受影响。\n\n"
+     L"游戏每秒 60 帧。屏幕是 120、144、165 Hz 这类刷新率时，垂直同步只能对齐屏幕的刷新：在 165 Hz 上每帧停 3、3、3、2 次刷新交替，"
+     L"也就是 18 ms 和 12 ms 来回变，画面一顿一顿的。开启后进入独占全屏时把屏幕换成同分辨率的 60 Hz（屏幕要支持），每帧正好显示一次，"
+     L"游戏的节拍也直接跟着屏幕的刷新走。\n\n"
+     L"代价：进出独占全屏（包括 Alt+Tab）要切换显示模式，会多黑约 1.5 秒；画面要等 60 Hz 的刷新才显示，比 165 Hz 时稍晚几毫秒。\n\n"
+     L"关闭则沿用桌面的刷新率（以前的方式）。",
+     L"On by default. It only applies to exclusive fullscreen with V-Sync on; windows, borderless fullscreen and V-Sync off are not affected.\n\n"
+     L"The game makes 60 frames a second. On a 120, 144 or 165 Hz screen V-Sync can only line them up with the screen's refreshes: at 165 Hz "
+     L"each frame stays for 3, 3, 3, 2 refreshes in turn, 18 ms and 12 ms back and forth, and the picture judders. On, entering exclusive "
+     L"fullscreen switches the screen to 60 Hz at the same size (if the screen has it): each frame is shown exactly once, and the game's "
+     L"beat follows the screen's refresh.\n\n"
+     L"Costs: entering or leaving exclusive fullscreen (Alt+Tab too) changes the display mode, about 1.5 s more of black screen; "
+     L"a picture waits for a 60 Hz refresh, a few ms later than at 165 Hz.\n\n"
+     L"Off keeps the desktop's refresh rate (the old way)."},
 };
 
 } // namespace

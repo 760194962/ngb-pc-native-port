@@ -431,6 +431,9 @@ enum class Str {
     PresentEarly, // Graphics: low-latency present (black.ini present_early), on by default
     PresentEarlyNote,
     HelpPresentEarly,
+    Exclusive60, // Graphics: exclusive fullscreen with V-Sync at 60 Hz on a high-refresh screen (black.ini exclusive_60hz)
+    Exclusive60Note,
+    HelpExclusive60,
     Count
 };
 

@@ -520,12 +520,13 @@ D3DPRESENT_PARAMETERS g_pp; // as created; Reset uses the same
 // The display mode of an exclusive device (9Ex takes it besides the parameters): the desktop's. With vsync on and a desktop
 // refreshing outside 59-61 Hz (a 144 or 165 Hz panel), a mode of the same size at 59-61 Hz when the display has one: the
 // game makes 60 frames a second, and at 165 Hz vsync showed them for 3, 3, 3, 2 refreshes (18.2 / 12.1 ms, judder); at
-// 60 Hz each is shown for one. --keep-refresh keeps the desktop's (tests).
+// 60 Hz each is shown for one. black.ini exclusive_60hz = 0 (the launcher's Graphics page) or --keep-refresh keeps the
+// desktop's.
 D3DDISPLAYMODEEX exclusive_mode()
 {
     D3DDISPLAYMODEEX m = {sizeof m};
     if (FAILED(g_d3d->GetAdapterDisplayModeEx(D3DADAPTER_DEFAULT, &m, nullptr))) m.Width = 0;
-    if (!m.Width || !g_cfg.vsync || g_cfg.keep_refresh || (m.RefreshRate >= 59 && m.RefreshRate <= 61)) return m;
+    if (!m.Width || !g_cfg.vsync || !g_cfg.exclusive_60hz || (m.RefreshRate >= 59 && m.RefreshRate <= 61)) return m;
     D3DDISPLAYMODEFILTER f = {sizeof f, m.Format, D3DSCANLINEORDERING_PROGRESSIVE};
     UINT n = g_d3d->GetAdapterModeCountEx(D3DADAPTER_DEFAULT, &f);
     D3DDISPLAYMODEEX best = m;
