@@ -1192,15 +1192,29 @@ HANDLE g_vblank_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr); // wakes pa
 // slow frames in the performance recordings. When DwmFlush returns early (nothing presented yet, window
 // minimised) the tick falls back to the timer. Other refresh rates, --background and --timer-vblank use the
 // timer only.
+// At n x 60 Hz (120, 180, 240 Hz, each within n Hz) the tick follows every n-th composition, so a 60 fps frame stays n
+// refreshes each time. On the 59.94 Hz timer a 120 Hz desktop showed about 45% of the frames for 1 or 3 refreshes instead
+// of 2 (the user's panel driven by the RTX 3060, windowed, Desktop Duplication, 2026-11-17).
 using DwmFlushFn = HRESULT(WINAPI *)();
 DwmFlushFn display_sync()
 {
     if (g_cfg.timer_vblank || (g_cfg.background && !g_cfg.display_vblank)) return nullptr;
-    DEVMODEW dm = {};
-    dm.dmSize = sizeof dm;
-    if (!EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) || dm.dmDisplayFrequency < 59 || dm.dmDisplayFrequency > 61) return nullptr;
     HMODULE m = LoadLibraryW(L"dwmapi.dll");
     return m ? (DwmFlushFn)GetProcAddress(m, "DwmFlush") : nullptr;
+}
+
+std::atomic<int> g_display_hz, g_display_div; // the display's refresh, and its refreshes per tick (0: not n x 60 Hz)
+int display_div()
+{
+    DEVMODEW dm = {};
+    dm.dmSize = sizeof dm;
+    if (!EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm)) return 0;
+    int hz = (int)dm.dmDisplayFrequency, div = 0;
+    for (int n = 1; n <= 4 && !div; n++)
+        if (abs(hz - 60 * n) <= n) div = n;
+    g_display_hz = hz;
+    g_display_div = div;
+    return div;
 }
 
 // An exclusive device at about 60 Hz: the display's own vertical blank (D3DKMTWaitForVerticalBlankEvent on the primary
@@ -1244,13 +1258,6 @@ struct KernelVblank {
     }
 };
 
-bool display_near_60()
-{
-    DEVMODEW dm = {};
-    dm.dmSize = sizeof dm;
-    return EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency >= 59 && dm.dmDisplayFrequency <= 61;
-}
-
 void __stdcall vblank_thread(void *)
 {
     xthread_current()->base_priority = 15;
@@ -1263,23 +1270,68 @@ void __stdcall vblank_thread(void *)
     DwmFlushFn flush = display_sync();
     KernelVblank kv;
     const bool kernel = !g_cfg.timer_vblank && (!g_cfg.background || g_cfg.display_vblank) && kv.init();
-    logf("[d3d] vblank: %s%s", flush ? "follows the display (DwmFlush at ~60 Hz)" : "59.94 Hz timer",
-         kernel ? "; in exclusive fullscreen at ~60 Hz the display's own vblank (D3DKMTWaitForVerticalBlankEvent)" : "");
-    uint32_t from_display = 0, from_kernel = 0;
-    bool near_60 = display_near_60();
+    int div = display_div();
+    logf("[d3d] vblank: the display at %d Hz: %s%s", g_display_hz.load(),
+         flush && div ? (div == 1 ? "follows its compositions (DwmFlush)" : "follows every n-th composition (DwmFlush)") : "59.94 Hz timer",
+         kernel ? "; in exclusive fullscreen at n x 60 Hz its own vblank (D3DKMTWaitForVerticalBlankEvent)" : "");
+    uint32_t from_display = 0, from_kernel = 0, waited_past = 0;
     LARGE_INTEGER minute = last;
+    // A variable refresh (G-SYNC / FreeSync) is no clock: the display's vblanks then follow the Presents, and the tick
+    // following them ran slow -- exclusive with vsync, the RTX 3060 driving the panel through the laptop's MUX: 51-52 Hz at
+    // 120 Hz, 55.5 Hz in the first minute at 60 Hz (2026-11-17). A fixed refresh gives ticks a whole number of its periods
+    // apart (one, or two when a wake-up came late); 60 of 600 ticks off that by more than 12% mean the source varies, and
+    // the timer takes over until the display's mode or the exclusive state changes. Exclusive fullscreen (the kernel's
+    // vblank) only: measured 149-447 of 600 there under a variable refresh, but a window's compositions (DwmFlush) were
+    // off as often on a fixed refresh while the GPU was loaded -- 291 of 600 at 60 Hz, scale 8, booting; 12 at 120 Hz --
+    // and the timer then cost 414 repeat+skip pairs in 150 s where the compositions gave 1.
+    bool distrust = false, was_exclusive = false;
+    int odd = 0, judged = 0, last_hz = 0;
     for (;;) {
         bool synced = false;
-        if (g_vblank_count % 300 == 0) near_60 = display_near_60(); // the mode changes with exclusive fullscreen
-        if (kernel && near_60 && host3d::exclusive()) {
-            if (kv.wait(&kv.w) == 0) {
+        if (g_vblank_count % 300 == 0) div = display_div(); // the mode changes with exclusive fullscreen and the desktop's
+        bool excl = host3d::exclusive();
+        if (excl != was_exclusive || g_display_hz.load() != last_hz) { // a new source: judge it afresh
+            if (distrust) logf("[d3d] vblank: the display (now %d Hz%s) is tried again as the clock", g_display_hz.load(), excl ? ", exclusive" : "");
+            distrust = false, odd = judged = 0;
+            was_exclusive = excl, last_hz = g_display_hz.load();
+        }
+        // A refresh less than half a tick after the last one (that tick woke late) is waited past, up to twice: falling
+        // back to the timer there set the next tick just before a refresh, so the next one came too soon as well, and
+        // the ticks stayed on the timer for seconds until its drift let go -- bursts of 5-10 s with repeat+skip pairs
+        // (60 Hz window, scale 8: 0-273 of 3600 ticks a minute, 2026-11-17).
+        if (!distrust && kernel && div && excl) {
+            bool ok = true;
+            for (int i = 0; i < div && ok; i++) ok = kv.wait(&kv.w) == 0;
+            for (int again = 0; ok; again++) {
                 QueryPerformanceCounter(&now);
                 synced = now.QuadPart - last.QuadPart > period / 2;
-                from_kernel += synced;
+                if (synced || again == 2) break;
+                waited_past++;
+                ok = kv.wait(&kv.w) == 0;
             }
-        } else if (flush && SUCCEEDED(flush())) {
-            QueryPerformanceCounter(&now);
-            synced = now.QuadPart - last.QuadPart > period / 2;
+            from_kernel += synced;
+        } else if (!distrust && flush && div) {
+            bool ok = true;
+            for (int i = 0; i < div && ok; i++) ok = SUCCEEDED(flush());
+            for (int again = 0; ok; again++) {
+                QueryPerformanceCounter(&now);
+                synced = now.QuadPart - last.QuadPart > period / 2;
+                if (synced || again == 2) break;
+                waited_past++;
+                ok = SUCCEEDED(flush());
+            }
+        }
+        if (synced && last_hz > 0 && excl) { // whole refreshes apart?
+            double r = (now.QuadPart - last.QuadPart) * (double)last_hz / (div * (double)f.QuadPart);
+            if (fabs(r - floor(r + 0.5)) > 0.12) odd++;
+            if (++judged >= 600) {
+                if (odd >= 60) {
+                    distrust = true;
+                    logf("[d3d] vblank: %d of the last 600 ticks from the display were not whole refreshes apart (a variable refresh?): the "
+                         "59.94 Hz timer instead", odd);
+                }
+                odd = judged = 0;
+            }
         }
         if (!synced) {
             int64_t due = last.QuadPart + period;
@@ -1300,10 +1352,10 @@ void __stdcall vblank_thread(void *)
         g_vblank_qpc.store(now.QuadPart);
         SetEvent(g_vblank_wake);
         from_display += synced;
-        if ((flush || from_kernel) && vb % 3600 == 0) {
-            logf("[d3d] vblank: %u of the last 3600 from the display (%u its vblank, exclusive), %.3f Hz", from_display, from_kernel,
-                 3600.0 * f.QuadPart / (double)(now.QuadPart - minute.QuadPart));
-            from_display = from_kernel = 0;
+        if (((flush && div) || from_kernel) && vb % 3600 == 0) {
+            logf("[d3d] vblank: %u of the last 3600 from the display (%u its vblank, exclusive; %u refreshes too soon waited past), %.3f Hz",
+                 from_display, from_kernel, waited_past, 3600.0 * f.QuadPart / (double)(now.QuadPart - minute.QuadPart));
+            from_display = from_kernel = waited_past = 0;
             minute = now;
         }
         ksync_signal_object(g_dev + DEV_VBLANKEVENT);
@@ -2673,8 +2725,11 @@ struct EarlyGate {
     {
         bool display = host3d::exclusive() || g_vblank_synced.load(std::memory_order_relaxed);
         double ms = g_frame_tick ? (qpc_now() - g_frame_tick) / (double)qpc_per_ms() : 1e9;
-        double d = g_cfg.early_deadline_ms;
-        // --flipex: the deadline learned from what reached the screen (host.cpp FlipStats), and its misses
+        // the fixed deadline is for 60 Hz: at n x 60 Hz the composition comes n times as often (120 Hz: 5 ms)
+        const int hz = g_display_hz.load();
+        const double s = hz >= 50 ? 60.0 / hz : 1.0;
+        double d = g_cfg.early_deadline_ms * s;
+        // the flip model: the deadline learned from what reached the screen (host.cpp FlipStats), and its misses
         double fd = d > 0 ? host3d::flip_deadline_ms() : -1.0;
         if (fd > 0) d = fd, learned++;
         if (host3d::flip_take_miss() && aligned) aligned = false, fast = 0, falls++;
@@ -2685,7 +2740,7 @@ struct EarlyGate {
         } else if (aligned) {
             if (ms < d) go = true;
             else aligned = false, fast = 0, falls++;
-        } else if (ms < d - 2.0) {
+        } else if (ms < d - 2.0 * s) {
             if (++fast >= 120) aligned = true, rises++;
         } else {
             fast = 0;

@@ -49,6 +49,7 @@ int g_bb_w, g_bb_h;                 // host back buffer: the largest monitor, so
 std::atomic<bool> g_exclusive_now{false};
 std::atomic<bool> g_dev_exclusive{false}; // the device is exclusive now (g_exclusive_now leads it until the next Reset)
 std::atomic<bool> g_flip_now{false};      // the windowed device presents by flip (back buffers the client's size)
+std::atomic<bool> g_flip_remeasure{false}; // a Reset: FlipStats measures the refresh again (exclusive may have had another)
 bool g_flip_broken;                       // the GPU that renders drives no screen: windows keep COPY
 
 // The flip model with present statistics for windows: with the low-latency present (black.ini low_latency_present) or
@@ -765,6 +766,7 @@ bool reset_device_here()
     g_bb_h = (int)pp.BackBufferHeight;
     g_dev_exclusive = !pp.Windowed;
     g_flip_now = pp.Windowed && pp.SwapEffect == D3DSWAPEFFECT_FLIPEX;
+    g_flip_remeasure = true;
     logf("host: device reset, %s%s %ux%u, vsync %s", g_flip_now ? "flip " : "", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth, pp.BackBufferHeight,
          pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
     if (pp.Windowed && g_restyle_pending.exchange(false)) restyle_windowed(); // now the window can change
@@ -901,8 +903,10 @@ bool present_stretch()
 // lowers the deadline to that frame's time after its tick less 1 ms (not under 4) and tells the gate to fall back. It
 // starts at 10 ms; until the first miss, every 60 early frames shown on time raise it 0.5 ms, after one 300 of them a
 // minute after the last miss raise it 0.25 ms; 14 ms at most. A miss lowers it only when the 120 displays before it were
-// each one new picture a refresh: while the game loads or plays a 30 fps movie pictures are skipped or shown twice anyway
-// (a 2.2.34 test lost its deadline to 4.75 ms on a boot-time skip), and then the gate only falls back.
+// each one new picture for its refreshes: while the game loads or plays a 30 fps movie pictures are skipped or shown
+// twice anyway (a 2.2.34 test lost its deadline to 4.75 ms on a boot-time skip), and then the gate only falls back.
+// The milliseconds are for 60 Hz; at another refresh they scale with its period (120 Hz: from 5 ms, 2 to 7 ms), and a
+// frame's refreshes are k = 60 Hz's period over the display's (120 Hz: 2; the tick follows every k-th, device.cpp).
 struct FlipStats {
     int64_t sent[512] = {}, tick[512] = {};
     bool early[512] = {};
@@ -915,7 +919,10 @@ struct FlipStats {
     double period = 0; // QPC ticks a refresh
     uint32_t presents = 0, shown = 0, skips = 0, repeats = 0, disjoint = 0, fails = 0, lag[6] = {};
     // the deadline
-    double deadline = 10.0, max_dl = 0;
+    double deadline = -1.0, max_dl = 0; // set when the period is known
+    double ms_per_ref() const { return period > 0 ? period * 1000.0 / qpc_freq() : 16.683; }
+    int k() const { return std::max(1, (int)lround(16.683 / ms_per_ref())); }
+    double scale60() const { return ms_per_ref() / 16.683; } // the scale of the 60 Hz milliseconds
     uint64_t total = 0, last_miss = 0;
     uint32_t on_time = 0, misses = 0, early_shown = 0, early_skipped = 0, raises = 0, from_tick[6] = {};
     bool missed_ever = false;
@@ -931,7 +938,7 @@ struct FlipStats {
             return;
         }
         double off = ms_of(sent[id & 511] - tick[id & 511]);
-        deadline = std::max(4.0, std::min(deadline, off - 1.0));
+        deadline = std::max(4.0 * scale60(), std::min(deadline, off - 1.0 * scale60()));
         misses++;
         missed_ever = true;
         miss_flag = true;
@@ -963,29 +970,38 @@ struct FlipStats {
         if (!started && !q0 && total == 300) // never a statistic: the flip model stays (see flip_wanted), the deadline fixed
             logf("host: the flip model gives no present statistics here (%u failed, last 0x%08lx): present_early keeps its fixed deadline",
                  fails, (unsigned long)hr);
+        if (g_flip_remeasure.exchange(false)) q0 = 0, started = false;
         if (hr == D3DERR_PRESENT_STATISTICS_DISJOINT) {
             disjoint++;
             started = false;
+            q0 = 0; // the display's mode may have changed: measure its refresh again
         } else if (FAILED(hr)) {
             fails++;
         } else if (st.PresentCount && st.SyncQPCTime.QuadPart) {
             if (!q0) q0 = st.SyncQPCTime.QuadPart, r0 = st.SyncRefreshCount;
-            else if (st.SyncRefreshCount - r0 >= 60) period = (double)(st.SyncQPCTime.QuadPart - q0) / (st.SyncRefreshCount - r0);
+            else if (st.SyncRefreshCount - r0 >= 60) {
+                double p = (double)(st.SyncQPCTime.QuadPart - q0) / (st.SyncRefreshCount - r0);
+                // a new refresh (after a Reset or a mode change, measured afresh): the deadline keeps its share of it.
+                // (2026-11-17: back from 60 Hz exclusive to a 120 Hz window the old average read 10.2-11.5 ms a refresh)
+                if (period > 0 && deadline > 0 && fabs(p / period - 1.0) > 0.05) deadline *= p / period, max_dl = 0;
+                period = p;
+                if (deadline < 0) deadline = 10.0 * scale60();
+            }
             if (!started) {
                 started = true;
             } else if (st.PresentCount != last_pc) {
-                UINT ids = st.PresentCount - last_pc, refs = st.PresentRefreshCount - last_prc;
+                UINT ids = st.PresentCount - last_pc, refs = st.PresentRefreshCount - last_prc, per = (UINT)k();
                 shown++;
-                if (ids > refs) {
-                    skips += ids - refs;
-                    for (UINT k = last_pc + 1; k < st.PresentCount; k++) // never shown: an early one among them missed
-                        if (early[k & 511]) {
+                if (ids > 1 && refs < ids * per) { // fewer refreshes than these pictures' share: one was cut short or never shown
+                    skips += ids - (refs + per - 1) / per;
+                    for (UINT j = last_pc + 1; j < st.PresentCount; j++) // an early one among them missed
+                        if (early[j & 511]) {
                             early_skipped++;
-                            miss(k);
+                            miss(j);
                             break;
                         }
                 }
-                if (refs > ids) repeats += refs - ids;
+                if (refs > ids * per) repeats += (refs - ids * per + per - 1) / per; // a picture shown longer than its share
                 if (period > 0) {
                     double at = st.SyncRefreshCount + (sent[st.PresentCount & 511] - st.SyncQPCTime.QuadPart) / period;
                     lag[std::clamp((int)st.PresentRefreshCount - (int)floor(at), 0, 5)]++;
@@ -1001,15 +1017,15 @@ struct FlipStats {
                         } else {
                             max_dl = std::max(max_dl, off);
                             bool raise = missed_ever ? ++on_time >= 300 && total - last_miss >= 3600 : ++on_time >= 60;
-                            if (raise && deadline < 14.0) {
-                                deadline = std::min(14.0, deadline + (missed_ever ? 0.25 : 0.5));
+                            if (raise && deadline < 14.0 * scale60()) {
+                                deadline = std::min(14.0 * scale60(), deadline + (missed_ever ? 0.25 : 0.5) * scale60());
                                 on_time = 0;
                                 raises++;
                             }
                         }
                     }
                 }
-                steady = ids == 1 && refs == 1 ? steady + 1 : 0; // after the checks above: miss() reads the run before this display
+                steady = ids == 1 && refs == (UINT)k() ? steady + 1 : 0; // after the checks above: miss() reads the run before this
             }
             last_pc = st.PresentCount;
             last_prc = st.PresentRefreshCount;
@@ -1031,7 +1047,7 @@ struct FlipStats {
             memset(from_tick, 0, sizeof from_tick);
         }
     }
-    bool valid() const { return g_flip_now && started && period > 0; }
+    bool valid() const { return g_flip_now && started && period > 0 && deadline > 0; }
     static double qpc_freq()
     {
         LARGE_INTEGER f;
@@ -1054,7 +1070,7 @@ void flip_follow_window()
     same = w == last_w && h == last_h ? same + 1 : 0;
     last_w = w, last_h = h;
     if (same == 20) {
-        char why[96];
+        static char why[96]; // request_device_reset keeps the pointer (logged when the Reset happens)
         snprintf(why, sizeof why, "flip model: the window is %dx%d now, its back buffers %dx%d", w, h, g_bb_w, g_bb_h);
         xd3d::request_device_reset(why);
     }
