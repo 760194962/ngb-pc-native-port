@@ -243,6 +243,37 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.34: exclusive fullscreen on a high-refresh screen without judder, its clock from the display
+
+**60 Hz with V-Sync (on by default)**: the game makes 60 frames a second. On a 120, 144 or 165 Hz screen exclusive
+fullscreen kept the desktop's refresh, and V-Sync could only line frames up with it: at 165 Hz each frame stayed for 3, 3,
+3, 2 refreshes in turn (18 / 12 ms), a judder. Now exclusive fullscreen with V-Sync on a desktop outside 59-61 Hz takes a
+60 Hz mode of the same size (if the screen has one), and each frame is shown exactly once. The launcher's Graphics page "60
+Hz with V-Sync" turns it off, `black.ini exclusive_60hz = 0`; windows, borderless fullscreen and V-Sync off are not affected.
+Costs: entering or leaving exclusive fullscreen (Alt+Tab too) changes the display mode, about 1.4-1.8 s more of black; a
+picture waits for a 60 Hz refresh, a few ms later than at 165 Hz (worked out, not measured).
+
+**At 60 Hz in exclusive fullscreen the game's clock follows the display's vblank**: at 60 Hz the game's beat followed the
+desktop's composition (DwmFlush), which is not reliable under an exclusive device: in a cutscene movie (1.3 MB uploaded a
+frame) the beat fell to 53.9 Hz, movie frames took 50-65 ms, 18 hitches over 50 ms. **Players with a 60 Hz desktop using
+exclusive fullscreen had this in 2.2.33 and before.** Exclusive fullscreen now waits for the display's own vblank
+(`D3DKMTWaitForVerticalBlankEvent`); windows are unchanged.
+
+| Foreground, exclusive with V-Sync, attract demo 160 s | Game speed | Hitches | Beat |
+|---|---|---|---|
+| Iris Xe 60 Hz, the old sync | 93.7% | 18 | 53.9 Hz in the first minute |
+| Iris Xe 60 Hz, this release | 93.7% | 1 | 3600 of 3600 from the display, 60.008 Hz |
+| Iris Xe 165 Hz (this switch off) | 93.7% | 1 | 59.94 Hz timer |
+| RTX 3060 60 Hz, this release (the panel is on the Iris Xe) | 93.7% | 1, worst frame 20.9 ms | 60.008 Hz |
+| RTX 3060 165 Hz | 93.7% | 1, worst frame 28.1 ms | timer |
+
+A device Reset (Alt+Tab's and Alt+Enter's path) took 153 ms and stayed at 60 Hz; a new device drew again after 3.6 s, still
+synced. The log's settings line names `exclusive_60hz`. A testing note: automated runs with `--background` leave the
+window inactive, and an inactive exclusive device at 60 Hz took two refreshes a frame (speed 57-86%), a test artifact
+players do not get; exclusive fullscreen is measured with foreground runs.
+
+**Seeds**: the author's 4-minute Black play of 11-17 morning added 12 draw states and 1 shader (8,493 / 447).
+
 ### 2.2.33: low-latency present, the seed's duplicates gone, NG2004 in the seed
 
 **Low-latency present (on by default)**: the game runs on the console's beat, 60 frames a second: each frame reads the pad
