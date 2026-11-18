@@ -65,6 +65,7 @@ powershell -File ngb-recomp-native\tools\make_release.ps1 -Bin build\ngb2\RelWit
 - 145 个内核导入中 36 个 black-pc 没有；fs:[KPCR] 访问 41 处，位移种类与 black-pc 已处理的相同；XBE 头后到 `.text` 只有 0x13C 字节空隙（PE 头副本要另放）。
 - 黑之章用 94 个 D3D8LTCG 符号（ngbrecomp `tools/d3d_symbols.txt`），black-pc 已实现 37 个；没有游戏代码直接写推送缓冲。
 - 运行时执行到的特权指令：`cli` 0x3DFF03、`sti` 0x3DFF14（XPP 段）、`wbinvd` 0x3CDA95（D3D 段）。
+- **游戏速度跟 Xbox vblank／节拍走，不是跟实际 FPS 显示走**：节拍高于 59.94（例如 VRR 120 Hz 下变成 80 Hz）游戏会跑到 4/3 速，画面和逻辑一起变快；任何高刷／VRR pacing 都必须保持 60 Hz 节拍。
 
 ## 硬性约束（沿用，详见交接文档 §3）
 
