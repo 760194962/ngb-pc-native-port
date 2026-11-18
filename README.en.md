@@ -243,6 +243,17 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.1: fixed the frame rate held low with VRR (G-SYNC / FreeSync) since 2.2.35
+
+- **The problem**: a player with VRR on got 24 fps on a 240 Hz monitor (12 in cutscenes) and 40-43 at 120 Hz, where 2.2.34
+  held a steady 60. Since 2.2.35 the game steps once every n refreshes at n x 60 Hz; under VRR the display refreshes only when
+  a frame comes, so each waited for the other. 2.2.35's VRR check worked in exclusive fullscreen only, after 600 slow frames.
+- **The fix**: the game's tick rate is checked every second; in any display mode, two seconds in a row under 90% of 59.94 Hz
+  and a 59.94 Hz timer takes over (what 2.2.34 did).
+- Tested by the author (120 Hz + G-SYNC): borderless with low-latency present gave about 45 fps in 2.2.37, the fix switches at
+  4 s and holds 60; exclusive fullscreen switches at 4 s instead of 12; a fixed 120 Hz (no VRR) is not mistaken for VRR, so
+  2.2.35's evenness stays.
+
 ### 2.2.37: a program for each game; the launcher renamed
 
 - **New names**: the launcher is `Ninja Gaiden Black&2004 PC Launcher.exe`; the `Ninja Gaiden Black Any.exe` both games shared is
