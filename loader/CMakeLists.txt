@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(POLICY CMP0184)
   cmake_policy(SET CMP0184 NEW) # MSVC_RUNTIME_CHECKS property
 endif()
-project(black_loader VERSION 2.2.36.1 LANGUAGES C CXX) # the release number (About box, first log line); a 4th part for a fix release
+project(black_loader VERSION 2.2.37.1 LANGUAGES C CXX) # the release number (About box, first log line); a 4th part for a fix release
 if(PROJECT_VERSION_TWEAK STREQUAL "")
   set(NGB_VERSION_TWEAK 0)
 else()
@@ -146,10 +146,9 @@ target_link_options(blackrt PRIVATE /SAFESEH:NO /MAP) # blackrt.map: port addres
 # XBE's address range (0x10000-0x587a40) before Windows can place heaps or stacks there.
 # blackrt.dll then maps the XBE over this image (headers included) and never returns.
 # A Windows-subsystem program: no console window; started from a command prompt it attaches to that one (main.cpp).
-add_executable(black stub/stub.c)
-# The program is named after the game it runs (the user's names: 2026-10-22 no "X21"; 2026-10-31 "Any", for every
-# supported build, was "Hurricane").
-set_target_properties(black PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Any")
+# Two game programs from the one stub, each named after its game (the user, 2026-11-18; before: one
+# "Ninja Gaiden Black Any.exe" for both): Ninja Gaiden Black.exe (NGB_GAME=1) and Ninja Gaiden.exe (2004, NGB_GAME=2).
+# Either runs either game given on the command line; started without one, each looks for its own (main.cpp).
 # PORT_ICON: the programs' icon (icon group 1, also the windows'): the Dragon Sword from the game's weapons page,
 # launcher/art/icon.ico, in the repository and the release at the user's decision (2026-10-22; CLAUDE.md, README
 # Legal). Another .ico can be given; empty builds without an icon.
@@ -157,26 +156,35 @@ set(PORT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/../launcher/art/icon.ico" CACHE FILEP
 if(PORT_ICON AND EXISTS "${PORT_ICON}")
   file(TO_CMAKE_PATH "${PORT_ICON}" _port_icon)
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc" "1 ICON \"${_port_icon}\"\n")
-  target_sources(black PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc")
 endif()
-ngb_version_info(black VFT_APP "Ninja Gaiden Black" "Ninja Gaiden Black Any.exe")
-target_link_libraries(black PRIVATE blackrt kernel32)
-set_property(TARGET black PROPERTY MSVC_RUNTIME_CHECKS "")
-target_compile_options(black PRIVATE /GS- /Gs999999)
-# /NXCOMPAT (DEP): the Xbox code only runs from memory blackrt.dll makes executable itself (the image range in
-# image.cpp, contiguous RAM in k_memory.cpp, thunk pages). The embedded manifest is the linker's default (asInvoker
-# only). Both make the exe look less like a packed program to anti-virus models (release repo issue #6).
-target_link_options(black PRIVATE
-  /BASE:0x10000 /FIXED /DYNAMICBASE:NO /NXCOMPAT /SAFESEH:NO /LARGEADDRESSAWARE
-  /NODEFAULTLIB /ENTRY:StubEntry /SUBSYSTEM:WINDOWS /MANIFEST:EMBED /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
-  /INCREMENTAL:NO)
+function(ngb_game_program target game name desc)
+  add_executable(${target} stub/stub.c)
+  set_target_properties(${target} PROPERTIES OUTPUT_NAME "${name}")
+  target_compile_definitions(${target} PRIVATE NGB_GAME=${game})
+  if(PORT_ICON AND EXISTS "${PORT_ICON}")
+    target_sources(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/port_icon.rc")
+  endif()
+  ngb_version_info(${target} VFT_APP "${desc}" "${name}.exe")
+  target_link_libraries(${target} PRIVATE blackrt kernel32)
+  set_property(TARGET ${target} PROPERTY MSVC_RUNTIME_CHECKS "")
+  target_compile_options(${target} PRIVATE /GS- /Gs999999)
+  # /NXCOMPAT (DEP): the Xbox code only runs from memory blackrt.dll makes executable itself (the image range in
+  # image.cpp, contiguous RAM in k_memory.cpp, thunk pages). The embedded manifest is the linker's default (asInvoker
+  # only). Both make the exe look less like a packed program to anti-virus models (release repo issue #6).
+  target_link_options(${target} PRIVATE
+    /BASE:0x10000 /FIXED /DYNAMICBASE:NO /NXCOMPAT /SAFESEH:NO /LARGEADDRESSAWARE
+    /NODEFAULTLIB /ENTRY:StubEntry /SUBSYSTEM:WINDOWS /MANIFEST:EMBED /MANIFESTUAC:"level='asInvoker' uiAccess='false'"
+    /INCREMENTAL:NO)
+endfunction()
+ngb_game_program(black 1 "Ninja Gaiden Black" "Ninja Gaiden Black")
+ngb_game_program(ng04 2 "Ninja Gaiden" "Ninja Gaiden (2004)")
 
 # The launcher (project/docs/08): installs and starts the game, display / graphics card / controls / saves.
 add_executable(launcher WIN32 ../launcher/src/main.cpp ../launcher/src/strings.cpp ../launcher/src/install.cpp
   ../launcher/src/saves.cpp ../launcher/src/keys.cpp
   ../launcher/src/launcher.rc)
-set_target_properties(launcher PROPERTIES OUTPUT_NAME "Ninja Gaiden Black Any Launcher")
-ngb_version_info(launcher VFT_APP "Ninja Gaiden Black Launcher" "Ninja Gaiden Black Any Launcher.exe")
+set_target_properties(launcher PROPERTIES OUTPUT_NAME "Ninja Gaiden Black&2004 PC Launcher") # the user's name, 2026-11-18
+ngb_version_info(launcher VFT_APP "Ninja Gaiden Black & 2004 PC Launcher" "Ninja Gaiden Black&2004 PC Launcher.exe")
 target_compile_definitions(launcher PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS _WIN32_WINNT=0x0A00 WINVER=0x0A00
   GAME_VERSION="${NGB_VERSION_STRING}") # the game program's release number, for the About page
 target_compile_options(launcher PRIVATE /W3 /utf-8 /EHsc)

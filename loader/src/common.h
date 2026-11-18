@@ -268,6 +268,7 @@ void install_saved_volumes(uint32_t text_va, uint32_t text_size); // the saved s
 void install_ng04_livedash();     // the same in Ninja Gaiden (2004)'s Master Ninja Tournament (ngb_livedash.cpp)
 void logv(const char *fmt, va_list ap);
 void logc(const char *fmt, ...); // the log file and the console: startup, setup errors, exit, crashes
+void error_box(const std::string &text); // logc + a message box (not with --background); Chinese lines left out without a Chinese font
 [[noreturn]] void fatal(const char *fmt, ...);
 std::string narrow(const std::wstring &w);
 std::wstring widen(const std::string &s);

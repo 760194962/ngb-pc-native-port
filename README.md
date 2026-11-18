@@ -4,7 +4,7 @@
 
 《忍者龙剑传 黑之章》（初代 Xbox）的非官方 Windows 原生移植。支持美版原版，以及基本版 va-zh-x2、飓风版 vb-zh-x2.1 / vb-jp-x2.1。
 
-`Ninja Gaiden Black Any.exe` 读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
+游戏程序（`Ninja Gaiden Black.exe`，2004 是 `Ninja Gaiden.exe`）读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
 等系统部分由加载器在 PC 上重新实现（HLE）。游戏代码不经模拟器逐条解释，也不在磁盘上修改。
 
 本项目从 [black-pc](https://github.com/Spark198rus/black-pc)（BLACK 的原生移植）分支而来，在它的加载器上加入了
@@ -241,6 +241,44 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 `cache\texture_pool.txt`、`cache\cpu_textures.bin`、`vsh_record.bin` 和 `logs\black.log` 交给作者。**要在更新到新版本之前交**：
 换版本时本地学到的绘制状态会被清掉。
 
+### 2.2.37.1：修复 2.2.35 起开 VRR（G-SYNC / FreeSync）时帧率被锁低
+
+- **问题**：一位玩家反馈，开 VRR 后 240 Hz 屏幕只有 24 帧（过场 12 帧），120 Hz 只有 40～43 帧，2.2.34 时是稳定 60 帧。
+  2.2.35 起，刷新率是 60 的 n 倍时，游戏每 n 次屏幕刷新走一帧；VRR 下屏幕只在有新画面时才刷新，两边互相等，帧率就掉了。
+  2.2.35 已有的 VRR 检查只在独占全屏下工作，而且要先慢跑 600 帧才判断。
+- **修复**：每秒检查一次游戏节拍，任何显示模式下连续 2 秒低于 59.94 Hz 的 90%，就改用 59.94 Hz 计时器（即 2.2.34 的做法）。
+- 作者实测（120 Hz + G-SYNC）：无边框加低延迟呈现，2.2.37 只有约 45 帧，修复后第 4 秒切换、之后稳定 60；独占全屏从第 12 秒
+  提前到第 4 秒；固定 120 Hz（不开 VRR）不会误判，2.2.35 的均匀度不变。
+
+### 2.2.37：两个游戏各有自己的程序，启动器改名
+
+- **程序改名**：启动器是 `Ninja Gaiden Black&2004 PC Launcher.exe`；原来两个游戏共用的 `Ninja Gaiden Black Any.exe` 分成
+  `Ninja Gaiden Black.exe`（黑之章）和 `Ninja Gaiden.exe`（2004），同一份程序编两次，都用旁边的 `blackrt.dll`。
+- **直接双击游戏程序**：各自找启动器装好的那个游戏（2004 以前双击只能进黑之章）。找到的是另一个游戏时不运行，提示该用哪个程序；
+  没装时提示怎么装，路径显示程序所在的文件夹（以前显示的是当前目录）。命令行明确给的游戏照常运行。
+- **启动器**：按左上角选的游戏启动对应的程序（联网设置、仪表盘也一样）；显卡首选项两个程序一起设置；从旧版升级时，旧程序上设过的
+  显卡首选项自动带到新程序上。
+- 旧的 `Ninja Gaiden Black Any.exe` 留在文件夹里也还能用；可以删掉。
+
+### 2.2.36.3：启动失败时说清楚原因；Windows / Linux 运行说明
+
+- **Direct3D 无法启动时不再崩溃**：以前绘图设备建不起来时，游戏照样往下跑，在第一次清屏时崩溃，什么提示都没有（在 Wine 里缺
+  32 位图形库时作者实测到）。现在弹出说明：失败在哪一步（创建 Direct3D 9 本身，还是在显卡上创建设备）、两次尝试的错误码和含义、
+  显卡名称 / 厂商 / 驱动版本、是 Windows 还是 Wine 及其版本，以及针对这种情况该怎么办（Wine 下要装哪些 32 位驱动包、Wine 没有任何
+  3D 渲染时删哪个设置；Windows 下显存不足、驱动问题、远程桌面），然后以代码 3 正常退出。
+- **报错框在没有中文字体的系统上只显示英文**（Wine 里中文会变成方块），日志里仍保留中英两份。“找不到游戏”“不支持的游戏版本”
+  两个已有的提示也一样。
+- README 新增“在 Windows 和 Linux 上运行”一节：日志位置、显卡首选项、Linux 实测情况、32 位驱动、中文字体、缓存损坏的处理。
+
+### 2.2.36.2：Linux / Wine 下的“可用区块不足”和启动器方块字
+
+- **系统查不到剩余空间时，实际写入 1 MB 来判断**：一位 Batocera（Wine）玩家每次开机都提示“没有足够的可用区块”，日志显示系统
+  对一块 461 GB 的盘回答“剩余 0”。0 既可能是盘真满，也可能是文件系统不报剩余空间，函数本身分不出。现在只在系统回答 0 或查询
+  失败时，在存档文件夹旁写 1 MB 临时文件并立即删除：写得进去就按以前的规则回答，写不进去才报 0（游戏自己提示区块不足，这时是对的）。
+  启动器“从镜像安装”的空间检查同理。系统给出数字时，行为与 2.2.36.1 完全相同。
+- **启动器在没有中文字体 / 图标字体的系统上不再显示方块**：Wine 里没有微软雅黑和 Windows 图标字体。现在会找系统里的中文字体
+  （黑体、宋体、Noto、思源、文泉驿……），一个都没有就用英文显示，图标不画。Windows 上界面与 2.2.36.1 逐像素相同。
+
 ### 2.2.36.1：“屏幕白光”开关在 16:9 和 4:3 下也生效；日志不再被反复失败的文件撑爆
 
 - **“屏幕白光”关闭后在 16:9 和 4:3 下没有作用**：开关要求“这一帧已经画过 3D”，读的却是带鱼屏 HUD 的计数，而那个计数只在画面比例
@@ -361,6 +399,7 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
   Elastic、Malwarebytes、VBA32，没有报出具体病毒家族）。这是误报：游戏程序只是占住 Xbox 内存地址的小程序，
   运行时把原版代码放进这段内存并打补丁，又没有数字签名，看起来像加壳程序。现在游戏程序开启了数据执行保护（DEP），
   并带一份只声明普通权限的 manifest，减少这类误报（[issue #6](https://github.com/akirahayabusa/ngb-pc-native-port-release/issues/6)）。
+- 部分 Wine / Linux 环境下 CG 画面不动、只有字幕在动（Batocera 一位玩家）；标准 Wine 10 下开场动画正常，原因仍在排查。
 - 仍在核实中的模拟规则列在 `project/docs/07_证据盘点.md` 的核实进度里。
 
 ## 运行
@@ -374,15 +413,18 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 
    ```
    NGB-Hurricane\
-     Ninja Gaiden Black Any Launcher.exe   启动器：从这里进
-     Ninja Gaiden Black Any.exe            游戏程序，连同 blackrt.dll
-     game\                                 游戏安装位置（启动器装进来）
+     Ninja Gaiden Black&2004 PC Launcher.exe   启动器：从这里进（黑之章和 2004 都从这里开始）
+     Ninja Gaiden Black.exe                    黑之章的游戏程序
+     Ninja Gaiden.exe                          2004 的游戏程序（两个都用旁边的 blackrt.dll）
+     game\                                     黑之章的安装位置（启动器装进来）
+     game_ng04\                                2004 的安装位置
      savedata\                             Xbox 硬盘：存档与游戏设定（第一次运行时自动建立）
    ```
 
 2. 打开启动器，在「安装」页选你的游戏镜像（`.iso`），装到「游戏安装路径」（默认是启动器旁的 `game`）。装完会逐个核对游戏
    程序，也可以选择把镜像移到回收站。已经解包过的游戏，在同一页选那个文件夹即可。
-   装好后直接双击 `Ninja Gaiden Black Any.exe` 也能开始游戏（它会找启动器装好的游戏）。
+   装好后也可以直接双击游戏程序开始：`Ninja Gaiden Black.exe` 是黑之章，`Ninja Gaiden.exe` 是 2004（各自找启动器装好的那个游戏）。
+   从 2.2.36.3 或更早的版本升级：启动器改名为 `Ninja Gaiden Black&2004 PC Launcher.exe`，游戏程序分成 `Ninja Gaiden Black.exe`（黑之章）和 `Ninja Gaiden.exe`（2004）。覆盖解压后可以删掉旧的 `Ninja Gaiden Black Any.exe` 和 `Ninja Gaiden Black Any Launcher.exe`；桌面快捷方式和 Steam 里添加的非 Steam 游戏要改成指向新的启动器。存档、设置不受影响；显卡首选项由启动器从旧程序带到新程序上。联网时 Windows 防火墙可能会为新程序再询问一次。
    从 1.1.12 或更早的版本升级：程序改名了（原来叫 `Ninja Gaiden Black Hurricane.exe` / `…Hurricane Launcher.exe`），覆盖解压后
    可以删掉这两个旧程序，桌面快捷方式要重新建。存档和设置不受影响。
 3. 在「显示」「图形」「控制」页按需要调整（按「保存」才生效，每项旁的「?」有说明），回到「开始游戏」页开始。
@@ -394,7 +436,7 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\Ninja Gaiden Black Any.exe   构建产物，连同 blackrt.dll（见"构建"）
+  build\RelWithDebInfo\Ninja Gaiden Black.exe   构建产物，连同 blackrt.dll（见"构建"）
   game\x21\default.xbe                                       你自己解包的 x2.1 镜像（整个镜像的文件）
   savedata\                                                  Xbox 硬盘
   logs\                                                      日志 black.log、截图 shots\、命令文件 presses.txt
@@ -418,7 +460,7 @@ device ... on '显卡名'` 一行记着实际用的是哪张卡。
 **放在别的位置**：把 `default.xbe` 拖到 `run.bat` 上启动；或者在命令行里先设好路径再运行：
 
 ```bat
-set EXE=D:\ngb\Ninja Gaiden Black Any.exe
+set EXE=D:\ngb\Ninja Gaiden Black.exe
 set GAME=D:\ngb\x21\default.xbe
 set HDD=D:\ngb\savedata
 set LOGDIR=D:\ngb\logs
@@ -457,11 +499,11 @@ O 为左扳机、Q 为右扳机、B 为 Start……），在启动器的「控�
 `run.bat` 实际执行的命令（也可以自己手动输入）：
 
 ```
-"Ninja Gaiden Black Any.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+"Ninja Gaiden Black.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
 ```
 
 - `--shot-every 100000000` 让定时截图实际上不发生，只在你用 `shot:` 要求时才截。默认值 60 是每秒截一张，会造成卡顿。
-- `"Ninja Gaiden Black Any.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
+- `"Ninja Gaiden Black.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
 
 **联网（Insignia 排行榜，可选）**
 
@@ -566,21 +608,64 @@ xemu 主机设定里填的 DNS 不用，也不再显示：移植版会把游戏�
 
 细节与证据见 `project/docs/09_联网_Insignia.md`。
 
-## Steam Deck / Linux
+## 在 Windows 和 Linux 上运行
 
-没有单独的 Linux 版，用 Steam 的 Proton 运行 Windows 版。
+### Windows
+
+- **需要**：Windows 10 或 11（64 位；程序本身是 32 位），支持 Direct3D 9 的显卡（集成显卡也可以），以及你自己的游戏镜像。
+  不需要另外安装任何运行库。
+- **显卡**：第一次运行时，如果你没有为游戏程序设过 Windows 的“图形首选项”，程序会把它设为“高性能”，有独立显卡的笔记本就用独显。
+  你自己设过的不会被改。
+- **日志**：从启动器开始游戏时在 `logs\black.log`；直接双击游戏程序（`Ninja Gaiden Black.exe` / `Ninja Gaiden.exe`）时在它旁边的 `black.log`。
+  反馈问题时请附上。
+- **启动失败时**会弹出说明（2.2.36.3 起）：例如 Direct3D 无法启动时，写明失败在哪一步、错误码的含义、显卡和驱动版本，以及该怎么办，
+  然后正常退出，不再直接崩溃。
+- 少数杀毒软件会误报，见“已知问题”。
+
+### Linux（Wine / Proton）
+
+没有单独的 Linux 版，用 Wine 或 Proton 运行 Windows 版。
+
+**实测情况**：
+
+| 环境 | 情况 |
+|---|---|
+| 标准 Wine 10.0（WineHQ 官方包，Ubuntu 24.04；作者 2026-11-18 实测 2.2.36.2 / 2.2.36.3） | 开机、开场动画、标题、主菜单、从主菜单退出都正常，没有任何报错。用的是 Wine 自带的 Direct3D 转换（wined3d），在 WSL 里以软件渲染测试，所以没测速度 |
+| Batocera（Wine 10，AMD A8-7500 / GT640；一位玩家，2.2.36.x） | 能进游戏玩。2.2.36.2 修了每次开机提示“可用区块不足”和启动器方块字；**部分 CG 画面不动、只有字幕在动，仍在排查**（标准 Wine 10 下开场动画正常） |
+| Steam Deck，Proton 11.0-2（玩家，1.1.x） | 跑通过，期间修了两处 Proton 与 Windows 的差异（1.1.3 开机报光盘脏污、1.1.4 警告画面后崩溃）；之后的版本还没有 Deck 上的报告 |
 
 **Steam Deck**：
 
-1. 切到桌面模式，解压压缩包，按上面的步骤准备好游戏镜像。
-2. Steam →「添加游戏」→「添加非 Steam 游戏」，选 `Ninja Gaiden Black Any Launcher.exe`。
+1. 切到桌面模式，解压压缩包。
+2. Steam →「添加游戏」→「添加非 Steam 游戏」，选 `Ninja Gaiden Black&2004 PC Launcher.exe`。
 3. 右键这个游戏 →「属性」→「兼容性」，勾选「强制使用特定 Steam Play 兼容工具」，选 Proton（试过的是 11.0-2，也可以选 Experimental）。
-4. 启动，在启动器里安装或选好游戏路径，再开始游戏。之后在游戏模式里从库里直接启动。
+4. 启动，在启动器里安装游戏或选好游戏路径，再开始游戏。之后在游戏模式里从库里直接启动。
 5. Deck 的按键在 Proton 里就是一个 Xbox 手柄。屏幕是 16:10，可在启动器「画面比例」里选「宽屏（16:10 显示器）」。
 
-**其他 Linux**：有 Steam 的话做法同上（第 2–4 步）；不用 Steam 时可用 Lutris、Bottles 或 Wine，建议先 `winetricks dxvk`（游戏用 Direct3D 9，经 DXVK 比 Wine 自带的转换快）。
+**其他 Linux（Wine、Lutris、Bottles、Batocera 等）**：
 
-**目前的情况**：1.1.x 时有 Deck 玩家用 Proton 11.0-2 跑通过，期间修了两处 Proton 与 Windows 的差异（1.1.3 开机报光盘脏污、1.1.4 警告画面后崩溃）；之后的版本还没有 Deck 上的报告。游戏运行时用 Wine/Proton 自带的 `d3dcompiler_47` 编译着色器，如果画面缺东西，可以试 `winetricks d3dcompiler_47`。启动器界面和联网在 Wine 下没有验证过。遇到问题请把游戏文件夹里的 `logs\black.log` 发到 issue。
+1. 用 Wine 10 或更新的版本。**本程序是 32 位的，需要显卡的 32 位驱动**，例如：
+   - Debian / Ubuntu：`sudo apt install libgl1-mesa-dri:i386 mesa-vulkan-drivers:i386`（NVIDIA 专有驱动另装它的 32 位库）
+   - Arch：`lib32-mesa` 以及 `lib32-vulkan-radeon` / `lib32-vulkan-intel` / `lib32-nvidia-utils`
+
+   缺少时游戏会弹出说明并退出（2.2.36.3 起），说明里写着失败原因和要装什么。
+2. 运行启动器：`wine "Ninja Gaiden Black&2004 PC Launcher.exe"`，安装游戏、调整设置后开始游戏；也可以直接运行 `wine "Ninja Gaiden Black.exe"`（黑之章）或 `wine "Ninja Gaiden.exe"`（2004）。
+   有 Steam 的话，也可以按上面 Steam Deck 的第 2–4 步用 Proton。
+3. Batocera 等整合系统：可以换用不同的 Wine 运行器，或切换 DXVK 开关试试。DXVK 把 Direct3D 9 转成 Vulkan，通常比 Wine 自带的
+   转换快（作者没有对比测过）；不用 Batocera 时可以 `winetricks dxvk`。
+
+**Linux 下要知道的几件事**：
+
+- **启动器和报错框的中文**：Wine 里通常没有中文字体。2.2.36.2 起启动器找不到中文字体时改用英文显示、不画图标；2.2.36.3 起报错框也只显示英文。
+  想看中文，把任意一个中文字体（如 Windows 的 `msyh.ttc`、`NotoSansCJK-Regular.ttc` 或文泉驿）复制到 Wine 前缀的
+  `drive_c/windows/Fonts` 里即可。游戏里的中文来自游戏自己的字库，不受影响。
+- **剩余空间**：有的文件系统不向 Wine 报告剩余空间（回答 0）。2.2.36.2 起遇到这种情况，程序实际写入 1 MB 来判断盘满没满，
+  不再误报“可用区块不足”。
+- **加载角色时崩溃**：多半是缓存被写坏了（例如旧版卡死时被强制关闭或断电）。删除 `savedata` 下 `Partition4`、`Partition5` 里的内容即可
+  （只是缓存，游戏会重建；**不要动 `Partition1`，那是存档**）。删除后第一次启动会重建缓存，开场动画可能花屏一次，之后正常。
+- **着色器**：游戏运行时用 Wine / Proton 自带的 `d3dcompiler_47` 编译着色器，如果画面缺东西，可以试 `winetricks d3dcompiler_47`。
+- 联网（Insignia）在 Wine 下没有验证过。
+- 遇到问题请把日志（见上面 Windows 一节）发到 issue。
 
 ## 构建
 
@@ -591,7 +676,7 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
 cmake --build build --config RelWithDebInfo
 ```
 
-得到 `build\RelWithDebInfo\Ninja Gaiden Black Any.exe` 与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
+得到 `build\RelWithDebInfo\` 下的 `Ninja Gaiden Black.exe`、`Ninja Gaiden.exe`、启动器与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
 2022 / 2026 预设。
 
 **SDL3**：配置时 CMake 会下载 SDL3 3.4.18 的源码包（校验 SHA256）并与程序一起编译；已有解压好的源码时用
@@ -648,7 +733,7 @@ cmake --build build --config RelWithDebInfo
 
 ## 原理
 
-`Ninja Gaiden Black Any.exe` 是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
+游戏程序（`Ninja Gaiden Black.exe` / `Ninja Gaiden.exe`，同一份源码编两次）是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
 `default.xbe` 映射进这段地址，提供游戏导入的 Xbox 内核函数，并在 Xbox 库（Direct3D 8、DirectSound、XAPI）的入口
 打补丁，转到 PC 上的实现。
 

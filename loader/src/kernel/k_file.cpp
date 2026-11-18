@@ -202,6 +202,31 @@ void complete(XIO_STATUS_BLOCK *iosb, NTSTATUS s, uint32_t info, HANDLE ev)
     if (ev) SetEvent(ev);
 }
 
+// When the host gives no free space (0, or the query failed), whether there is room after all: 1 MB written to a
+// temporary file next to the partition folders (same disk), removed at once. A Batocera / Wine player was told 0 free
+// on a 461 GB disk - a full disk or a mount telling Wine nothing; taking 0 as unknown would let a game save onto a
+// really full disk. Only then is this run (never with a host that gives a figure), at most every 10 s a partition.
+bool host_room_probe(const std::wstring &partition_dir, DWORD *error)
+{
+    std::wstring dir = partition_dir;
+    size_t s = dir.find_last_of(L"\\/");
+    if (s != std::wstring::npos) dir.resize(s);
+    std::wstring path = dir + L"\\ngb_space_probe.tmp";
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_WRITE_THROUGH, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        *error = GetLastError();
+        return false;
+    }
+    static std::vector<uint8_t> block(1u << 20);
+    DWORD wrote = 0;
+    BOOL ok = WriteFile(h, block.data(), (DWORD)block.size(), &wrote, nullptr) && wrote == block.size() && FlushFileBuffers(h);
+    *error = ok ? 0 : GetLastError();
+    CloseHandle(h);
+    DeleteFileW(path.c_str()); // in case delete-on-close is not honoured
+    return ok;
+}
+
 // How many times in a row this name has failed to open (0 after a success): a file the game asks for over and over is
 // logged at its 1st..20th failure and then every 10000th (open_common). NG2004's Master Ninja Tournament shop asked for
 // 'd:\NG' 932,579 times and the log grew to 191 MB (the user, 2026-11-18). One count per name (a loop over two missing
@@ -577,11 +602,52 @@ NTSTATUS __stdcall NtQueryVolumeInformationFile(HANDLE FileHandle, XIO_STATUS_BL
     int part = known ? hi.mount->partition : 0;
     uint8_t *p = (uint8_t *)FsInformation;
     if ((FsInformationClass == 3 || FsInformationClass == 7) && part >= 1 && part <= 5) {
-        // FATX-like numbers: 16 KB clusters, capped at the partition size.
+        // FATX-like numbers: 16 KB clusters, the free ones the host's free space capped at the partition's size. A player
+        // on Batocera / Wine (the save folder on a Linux file system) was told 0 bytes free to the caller and 0 free on a
+        // 461 GB disk, and Ninja Gaiden Black said at every start that the 8 free blocks a save needs were not there
+        // (2.2.36.1-t2 / -t3 logs, 2026-11-18): the space free to us capped at the partition's size; none (0, or the query
+        // failed), and a test write decides (below). The figures are logged at a partition's first query.
         uint64_t total = kPartitions[part].size;
-        ULARGE_INTEGER free_host{};
-        GetDiskFreeSpaceExW(hi.mount->host.c_str(), &free_host, nullptr, nullptr);
-        uint64_t avail = free_host.QuadPart < total ? free_host.QuadPart : total;
+        ULARGE_INTEGER to_caller{}, disk_size{}, disk_free{};
+        const BOOL got = GetDiskFreeSpaceExW(hi.mount->host.c_str(), &to_caller, &disk_size, &disk_free);
+        const DWORD err = got ? 0 : GetLastError();
+        const uint64_t host_free = got ? to_caller.QuadPart : 0; // free to us (a quota / root-reserved space does not count)
+        // No figure from the host: write 1 MB to see (host_room_probe); no room, and 0 is reported (the game's own
+        // "not enough free blocks", which is then true).
+        static std::mutex probe_mutex;
+        static ULONGLONG probe_at[6];
+        static bool probe_room[6], probe_told[6];
+        static DWORD probe_err[6];
+        bool room = true;
+        if (!host_free) {
+            std::lock_guard<std::mutex> lk(probe_mutex);
+            ULONGLONG now = GetTickCount64();
+            if (!probe_at[part] || now - probe_at[part] >= 10000) {
+                probe_at[part] = now ? now : 1;
+                probe_room[part] = host_room_probe(hi.mount->host, &probe_err[part]);
+                if (!probe_told[part] || !probe_room[part]) {
+                    probe_told[part] = true;
+                    logf("[k] free space, Partition%d: the host gives no free space; 1 MB written next to it as a test: %s (error %lu)", part,
+                         probe_room[part] ? "it fitted, so there is room" : "it did not, so the disk counts as full (0 blocks free)",
+                         probe_err[part]);
+                }
+            }
+            room = probe_room[part];
+        }
+        uint64_t avail = !room ? 0 : host_free && host_free < total ? host_free : total;
+        static bool told[6];
+        if (!told[part]) {
+            told[part] = true;
+            char host[160];
+            if (got)
+                snprintf(host, sizeof host, "the host says %llu MB free to us, %llu MB free on a %llu MB disk%s",
+                         (unsigned long long)(to_caller.QuadPart >> 20), (unsigned long long)(disk_free.QuadPart >> 20),
+                         (unsigned long long)(disk_size.QuadPart >> 20), host_free ? "" : " (tested by a write)");
+            else
+                snprintf(host, sizeof host, "the host's query failed (error %lu), tested by a write", err);
+            logf("[k] free space, Partition%d (%llu MB): %s; %llu blocks of 16 KB free reported", part,
+                 (unsigned long long)(total >> 20), host, (unsigned long long)(avail / 0x4000));
+        }
         uint32_t need = FsInformationClass == 3 ? 24 : 32;
         if (Length < need) return XSTATUS_BUFFER_TOO_SMALL;
         *(uint64_t *)(p + 0) = total / 0x4000;

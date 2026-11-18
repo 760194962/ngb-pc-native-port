@@ -5,7 +5,7 @@
 An unofficial native Windows port of *Ninja Gaiden Black* (original Xbox): the original US release, and the basic
 edition va-zh-x2 and the Hurricane editions vb-zh-x2.1 / vb-jp-x2.1 made from it.
 
-`Ninja Gaiden Black Any.exe` loads your own `default.xbe` and runs the original x86 game code directly on the PC; the Xbox kernel,
+The game program (`Ninja Gaiden Black.exe`; for 2004 `Ninja Gaiden.exe`) loads your own `default.xbe` and runs the original x86 game code directly on the PC; the Xbox kernel,
 Direct3D 8, DirectSound and the other system parts are reimplemented on the PC by the loader (HLE). The game code is
 not interpreted instruction by instruction, and it is never modified on disk.
 
@@ -292,6 +292,53 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.1: fixed the frame rate held low with VRR (G-SYNC / FreeSync) since 2.2.35
+
+- **The problem**: a player with VRR on got 24 fps on a 240 Hz monitor (12 in cutscenes) and 40-43 at 120 Hz, where 2.2.34
+  held a steady 60. Since 2.2.35 the game steps once every n refreshes at n x 60 Hz; under VRR the display refreshes only when
+  a frame comes, so each waited for the other. 2.2.35's VRR check worked in exclusive fullscreen only, after 600 slow frames.
+- **The fix**: the game's tick rate is checked every second; in any display mode, two seconds in a row under 90% of 59.94 Hz
+  and a 59.94 Hz timer takes over (what 2.2.34 did).
+- Tested by the author (120 Hz + G-SYNC): borderless with low-latency present gave about 45 fps in 2.2.37, the fix switches at
+  4 s and holds 60; exclusive fullscreen switches at 4 s instead of 12; a fixed 120 Hz (no VRR) is not mistaken for VRR, so
+  2.2.35's evenness stays.
+
+### 2.2.37: a program for each game; the launcher renamed
+
+- **New names**: the launcher is `Ninja Gaiden Black&2004 PC Launcher.exe`; the `Ninja Gaiden Black Any.exe` both games shared is
+  now `Ninja Gaiden Black.exe` (Black) and `Ninja Gaiden.exe` (2004), one program built twice, both on the `blackrt.dll` beside them.
+- **Double-clicking a game program** starts its own game, the one the launcher installed (before, a double-click always meant
+  Black). If it finds the other game it says which program to use instead of running it; with nothing installed it says how to
+  install, with the path in the program's folder (it showed the current folder's). A game given on the command line runs as given.
+- **Launcher**: starts the program of the game chosen at the top left (online setup and the dashboard too); the graphics
+  preference is set for both programs; updating from an older release, a preference set for the old program is carried over.
+- An old `Ninja Gaiden Black Any.exe` left in the folder still works; it can be deleted.
+
+### 2.2.36.3: what went wrong when the game cannot start; Windows / Linux notes
+
+- **No crash when Direct3D cannot start**: when the drawing device could not be made the game ran on and crashed at its first
+  clear, with no message (seen by the author in Wine without the 32-bit graphics libraries). Now a message says which step
+  failed (making Direct3D 9 itself, or the device on the card), both tries' error codes and what they mean, the card's name /
+  vendor / driver version, Windows or Wine and its version, and what to do in that case (under Wine which 32-bit driver
+  packages to install, which setting to remove when Wine has no 3D renderer at all; on Windows out of video memory, the driver,
+  Remote Desktop); then the game exits with code 3.
+- **Error boxes show only their English part on a system without a Chinese font** (in Wine the Chinese came out as boxes); the
+  log keeps both. The same for the existing "game not found" and "unsupported build" messages.
+- The READMEs have a new "Running on Windows and Linux" section: where the log is, the graphics preference, what has been
+  tested on Linux, 32-bit drivers, Chinese fonts, a broken cache.
+
+### 2.2.36.2: "not enough free blocks" and box characters in the launcher under Linux / Wine
+
+- **With no free space from the system, a 1 MB test write decides**: a Batocera (Wine) player was told "not enough free blocks"
+  at every start; the system had said 0 free on a 461 GB disk. 0 may be a full disk or a file system that gives no figure, and
+  the call cannot tell. Now, only when the system says 0 or the query fails, 1 MB is written to a temporary file next to the save
+  folders and removed at once: it fits, and the answer is as before; it does not, and 0 is reported (the game's own "not enough
+  free blocks", then true). The launcher's space check for an install from an image likewise. With a figure from the system,
+  everything is as in 2.2.36.1.
+- **No box characters in the launcher without a Chinese or icon font**: Wine has neither YaHei nor Windows' icon fonts. The launcher
+  now takes a Chinese font the system has (SimHei, SimSun, Noto, Source Han, WenQuanYi...), else shows in English and leaves the
+  icons out. On Windows every page matches 2.2.36.1 pixel for pixel.
+
 ### 2.2.36.1: "Screen flashes" off works at 16:9 and 4:3 too; a file failing over and over no longer fills the log
 
 - **Screen flashes off did nothing at 16:9 and 4:3**: the switch needs 3D drawn this frame and read the ultrawide HUD's count, which is
@@ -447,6 +494,7 @@ ripple textures. NG2004's title update replays all 8,481 at start, none left out
   there and patched at run time, and nothing is code-signed, so it looks like a packed program. The game program now
   has Data Execution Prevention (DEP) on and a manifest asking for normal rights only, to cut these false positives
   ([issue #6](https://github.com/akirahayabusa/ngb-pc-native-port-release/issues/6)).
+- On some Wine / Linux setups the CG movies stand still with only the subtitles moving (one Batocera player); the opening movie plays fine in standard Wine 10, cause still under investigation.
 - Emulation rules still being verified are listed in the progress section of `project/docs/07_证据盘点.md`.
 
 ## Running
@@ -461,17 +509,20 @@ XInput come with Windows, and the C++ runtime is built into the programs.
 
    ```
    NGB-Hurricane\
-     Ninja Gaiden Black Any Launcher.exe   the launcher: start here
-     Ninja Gaiden Black Any.exe            the game program, with blackrt.dll
-     game\                                 where the game is installed (by the launcher)
+     Ninja Gaiden Black&2004 PC Launcher.exe   the launcher: start here (for Black and 2004)
+     Ninja Gaiden Black.exe                    Black's game program
+     Ninja Gaiden.exe                          2004's game program (both use blackrt.dll beside them)
+     game\                                     where Black is installed (by the launcher)
+     game_ng04\                                where 2004 is installed
      savedata\                             the Xbox hard disk: saves and the game's settings (made on the first run)
    ```
 
 2. Open the launcher; on the Install page choose your game image (`.iso`) and install it to the game folder (by default
    `game` beside the launcher). The install checks the game programs and can move the image to the Recycle Bin. A
    game already extracted: choose its folder on the same page.
-   Once installed, double-clicking `Ninja Gaiden Black Any.exe` starts the game too (it finds what the launcher
-   installed).
+   Once installed, double-clicking a game program starts it too: `Ninja Gaiden Black.exe` for Black, `Ninja Gaiden.exe`
+   for 2004 (each finds the game the launcher installed for it).
+   Upgrading from 2.2.36.3 or earlier: the launcher is now `Ninja Gaiden Black&2004 PC Launcher.exe` and the game program is two, `Ninja Gaiden Black.exe` (Black) and `Ninja Gaiden.exe` (2004). After extracting over the old folder you can delete the old `Ninja Gaiden Black Any.exe` and `Ninja Gaiden Black Any Launcher.exe`; point desktop shortcuts and non-Steam games in Steam at the new launcher. Saves and settings are kept; the launcher carries the graphics preference over from the old program. Windows Firewall may ask once more for the new programs when you play online.
    Upgrading from 1.1.12 or earlier: the programs were renamed (they were `Ninja Gaiden Black Hurricane.exe` / `…Hurricane
    Launcher.exe`); after extracting over the old folder you can delete those two, and make desktop shortcuts again. Saves
    and settings are kept.
@@ -486,7 +537,7 @@ from this layout:
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\Ninja Gaiden Black Any.exe   the build, with blackrt.dll (see "Building")
+  build\RelWithDebInfo\Ninja Gaiden Black.exe   the build, with blackrt.dll (see "Building")
   game\x21\default.xbe                                       your own extracted x2.1 image (all of its files)
   savedata\                                                  the Xbox hard disk
   logs\                                                      the log black.log, screenshots shots\, the command file presses.txt
@@ -514,7 +565,7 @@ overrides that choice. The log line
 **Other locations**: drop `default.xbe` onto `run.bat`, or set the paths in a command prompt first:
 
 ```bat
-set EXE=D:\ngb\Ninja Gaiden Black Any.exe
+set EXE=D:\ngb\Ninja Gaiden Black.exe
 set GAME=D:\ngb\x21\default.xbe
 set HDD=D:\ngb\savedata
 set LOGDIR=D:\ngb\logs
@@ -562,12 +613,12 @@ The Graphics page's "Clear shader cache" button removes it after a confirmation;
 The command `run.bat` runs (you can also type it yourself):
 
 ```
-"Ninja Gaiden Black Any.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+"Ninja Gaiden Black.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
 ```
 
 - `--shot-every 100000000` keeps timed screenshots from ever happening; screenshots are taken only on a `shot:`
   request. The default of 60 is one a second, which makes the game stutter.
-- `"Ninja Gaiden Black Any.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
+- `"Ninja Gaiden Black.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
   BLACK-only and have no effect on Ninja Gaiden.
 
 **Online (Insignia leaderboards, optional)**
@@ -691,29 +742,67 @@ swaps the phone book for Insignia's.
 
 Details and evidence: `project/docs/09_联网_Insignia.md`.
 
-## Steam Deck / Linux
+## Running on Windows and Linux
 
-There is no separate Linux build; run the Windows build through Steam's Proton.
+### Windows
+
+- **Needs**: Windows 10 or 11 (64-bit; the program itself is 32-bit), a graphics card with Direct3D 9 (an integrated one will
+  do), and your own game image. Nothing else to install.
+- **Graphics card**: at the first start, if you have not set a Windows "graphics preference" for the game program, it sets
+  "high performance", so a laptop with a dedicated card uses it. A preference you set is left alone.
+- **Log**: started from the launcher, `logs\black.log`; started by double-clicking a game program (`Ninja Gaiden Black.exe` / `Ninja Gaiden.exe`), `black.log`
+  next to it. Please attach it to a report.
+- **When the game cannot start** it says why (from 2.2.36.3): when Direct3D cannot start, for example, which step failed, what the
+  error code means, the card and its driver version, and what to try - then it exits instead of crashing.
+- A few anti-virus programs give false alarms; see "Known issues".
+
+### Linux (Wine / Proton)
+
+There is no separate Linux build: the Windows one runs in Wine or Proton.
+
+**Tested so far**:
+
+| Setup | State |
+|---|---|
+| Standard Wine 10.0 (WineHQ's own packages, Ubuntu 24.04; the author, 2026-11-18, 2.2.36.2 / 2.2.36.3) | Start, the opening movie, the title, the main menu and leaving from the main menu all fine, with no error. Through Wine's own Direct3D translation (wined3d), rendered in software under WSL, so speed was not measured |
+| Batocera (Wine 10, AMD A8-7500 / GT640; one player, 2.2.36.x) | Plays. 2.2.36.2 fixed "not enough free blocks" at every start and the launcher's boxes; **some CG movies stand still with only the subtitles moving - under investigation** (the opening movie plays fine in standard Wine 10) |
+| Steam Deck, Proton 11.0-2 (a player, 1.1.x) | Ran; two differences between Proton and Windows were fixed then (1.1.3 a "dirty disc" message at start, 1.1.4 a crash after the warning screen); no Deck report on later versions yet |
 
 **Steam Deck**:
 
-1. In Desktop Mode, unzip the package and get your game image ready as above.
-2. Steam → Add a Game → Add a Non-Steam Game, and pick `Ninja Gaiden Black Any Launcher.exe`.
-3. Right-click it → Properties → Compatibility, tick "Force the use of a specific Steam Play compatibility tool" and
-   pick Proton (11.0-2 is the one tried; Experimental is fine too).
-4. Start it, install or point the launcher at the game, then play. From then on it starts from the library in Game
-   Mode.
-5. The Deck's controls are an Xbox controller under Proton. The screen is 16:10; pick "Widescreen (16:10
-   screens)" in the launcher's Aspect ratio.
+1. In desktop mode, unpack the archive.
+2. Steam -> "Add a Game" -> "Add a Non-Steam Game", choose `Ninja Gaiden Black&2004 PC Launcher.exe`.
+3. Right-click it -> "Properties" -> "Compatibility", tick "Force the use of a specific Steam Play compatibility tool" and choose Proton (11.0-2 was tried; Experimental works too).
+4. Start it, install the game or choose its folder in the launcher, then play. Later, start it from the library in game mode.
+5. In Proton the Deck's controls are an Xbox pad. The screen is 16:10: choose "Widescreen (16:10 monitor)" under the launcher's aspect setting.
 
-**Other Linux**: with Steam, the same as steps 2–4; without it, Lutris, Bottles or plain Wine, preferably after
-`winetricks dxvk` (the game uses Direct3D 9, faster through DXVK than Wine's own translation).
+**Other Linux (Wine, Lutris, Bottles, Batocera...)**:
 
-**Where it stands**: in 1.1.x a Deck player ran it under Proton 11.0-2, and two differences between Proton and Windows
-were fixed (1.1.3 "dirty disc" at boot, 1.1.4 a crash after the warning screen); later versions have no Deck reports
-yet. The game compiles its shaders with Wine/Proton's own `d3dcompiler_47`; if parts of the picture are missing, try
-`winetricks d3dcompiler_47`. The launcher and online play have not been checked under Wine. If something goes wrong,
-post `logs\black.log` from the game folder in an issue.
+1. Use Wine 10 or newer. **The program is 32-bit, so the card's 32-bit drivers are needed**, for example:
+   - Debian / Ubuntu: `sudo apt install libgl1-mesa-dri:i386 mesa-vulkan-drivers:i386` (NVIDIA's own driver: its 32-bit libraries)
+   - Arch: `lib32-mesa` and `lib32-vulkan-radeon` / `lib32-vulkan-intel` / `lib32-nvidia-utils`
+
+   Without them the game shows what failed and what to install, and exits (from 2.2.36.3).
+2. Run the launcher: `wine "Ninja Gaiden Black&2004 PC Launcher.exe"`, install the game, set things up and play; or run
+   `wine "Ninja Gaiden Black.exe"` (Black) or `wine "Ninja Gaiden.exe"` (2004) directly. With Steam, Proton as in steps 2-4 for the Deck works too.
+3. Batocera and similar systems: try another Wine runner, or switch DXVK on or off. DXVK turns Direct3D 9 into Vulkan and is usually
+   faster than Wine's own translation (not measured by the author); outside Batocera, `winetricks dxvk`.
+
+**Good to know on Linux**:
+
+- **Chinese in the launcher and in error boxes**: Wine usually has no Chinese font. From 2.2.36.2 the launcher then shows in
+  English with no icons; from 2.2.36.3 error boxes show their English part only. For Chinese, copy any Chinese font (Windows'
+  `msyh.ttc`, `NotoSansCJK-Regular.ttc`, WenQuanYi) into the Wine prefix's `drive_c/windows/Fonts`. The game's own Chinese
+  comes from its own font and is not affected.
+- **Free space**: some file systems tell Wine nothing about free space (0). From 2.2.36.2 the program then writes 1 MB to see
+  whether the disk is full, instead of a false "not enough free blocks".
+- **A crash when a character loads**: most likely a cache written wrong (an old build killed, or the machine switched off, while it
+  hung). Delete what is in `savedata`'s `Partition4` and `Partition5` (only the cache, the game rebuilds it; **leave `Partition1`,
+  your saves, alone**). The first start after that rebuilds the cache and the opening movie may be garbled once; then it is fine.
+- **Shaders**: the game compiles shaders with Wine's / Proton's own `d3dcompiler_47`; if things are missing from the picture, try
+  `winetricks d3dcompiler_47`.
+- Online play (Insignia) has not been tried under Wine.
+- Please send the log (see Windows above) with an issue.
 
 ## Building
 
@@ -724,7 +813,7 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
 cmake --build build --config RelWithDebInfo
 ```
 
-This produces `build\RelWithDebInfo\Ninja Gaiden Black Any.exe` and `blackrt.dll`. `loader/CMakePresets.json` also has upstream's
+This produces `Ninja Gaiden Black.exe`, `Ninja Gaiden.exe`, the launcher and `blackrt.dll` in `build\RelWithDebInfo\`. `loader/CMakePresets.json` also has upstream's
 Visual Studio 2022 / 2026 presets.
 
 **SDL3**: at configure time CMake downloads the SDL3 3.4.18 source release (SHA256 checked) and builds it with the
@@ -782,7 +871,7 @@ Decompiler and disassembler output, game files and test-run folders stay local a
 
 ## How it works
 
-`Ninja Gaiden Black Any.exe` is a small stub linked at the XBE's base address, so that it holds that address range before Windows can
+Each game program (`Ninja Gaiden Black.exe` / `Ninja Gaiden.exe`, one source built twice) is a small stub linked at the XBE's base address, so that it holds that address range before Windows can
 put anything there. `blackrt.dll` maps `default.xbe` into the range, provides the Xbox kernel functions the game
 imports, and patches the entry points of the Xbox libraries (Direct3D 8, DirectSound, XAPI) to go to PC
 implementations.

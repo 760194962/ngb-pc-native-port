@@ -440,6 +440,7 @@ enum class Str {
     MoveFlash, // Graphics: the full-screen glow of the wall run's slash and some techniques (black.ini move_flash)
     MoveFlashNote,
     HelpMoveFlash,
+    SpaceUnknown, // %.1f GB needed, free space unknown (the system gave none: Wine on some Linux mounts)
     Count
 };
 
