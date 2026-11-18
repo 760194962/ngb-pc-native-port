@@ -1284,6 +1284,15 @@ void __stdcall vblank_thread(void *)
     // vblank) only: measured 149-447 of 600 there under a variable refresh, but a window's compositions (DwmFlush) were
     // off as often on a fixed refresh while the GPU was loaded -- 291 of 600 at 60 Hz, scale 8, booting; 12 at 120 Hz --
     // and the timer then cost 414 repeat+skip pairs in 150 s where the compositions gave 1.
+    // A variable refresh in a window or borderless too (a player, 2.2.35 / 2.2.36, 2026-11-18): G-SYNC / FreeSync on a
+    // 240 Hz panel held the game at 24 fps (cutscenes 12), at 120 Hz at 40-43 fps, where 2.2.34 (the timer above 60 Hz)
+    // kept 60. Every n-th composition waits for refreshes that a variable refresh only makes when a frame is presented,
+    // and the frame waits for the tick. Whatever the cause, a display that gives the tick under 90% of 59.94 Hz for two
+    // whole seconds in a row is no clock: the timer takes over (any mode; on a fixed refresh the compositions keep their
+    // rate, however irregular single ones are under load -- the odd-interval rule above stays for exclusive only).
+    LARGE_INTEGER rate_from = last;
+    uint32_t rate_ticks = 0;
+    int slow_seconds = 0;
     bool distrust = false, was_exclusive = false;
     int odd = 0, judged = 0, last_hz = 0;
     for (;;) {
@@ -1293,6 +1302,8 @@ void __stdcall vblank_thread(void *)
         if (excl != was_exclusive || g_display_hz.load() != last_hz) { // a new source: judge it afresh
             if (distrust) logf("[d3d] vblank: the display (now %d Hz%s) is tried again as the clock", g_display_hz.load(), excl ? ", exclusive" : "");
             distrust = false, odd = judged = 0;
+            slow_seconds = 0, rate_ticks = 0;
+            QueryPerformanceCounter(&rate_from);
             was_exclusive = excl, last_hz = g_display_hz.load();
         }
         // A refresh less than half a tick after the last one (that tick woke late) is waited past, up to twice: falling
@@ -1345,6 +1356,19 @@ void __stdcall vblank_thread(void *)
             now.QuadPart = now.QuadPart - due < period ? due : now.QuadPart;
         }
         last = now;
+        rate_ticks++;
+        if (now.QuadPart - rate_from.QuadPart >= f.QuadPart) { // a second: the ticks' rate (above)
+            const double rate = rate_ticks * (double)f.QuadPart / (double)(now.QuadPart - rate_from.QuadPart);
+            slow_seconds = !distrust && rate < 0.9 * 60000.0 / 1001.0 ? slow_seconds + 1 : 0;
+            if (slow_seconds >= 2) {
+                distrust = true;
+                logf("[d3d] vblank: the display (%d Hz%s) gave the tick %.1f Hz for 2 s, under 90%% of 59.94 (a variable refresh?): "
+                     "the 59.94 Hz timer instead", last_hz, excl ? ", exclusive" : "", rate);
+                slow_seconds = 0;
+            }
+            rate_ticks = 0;
+            rate_from = now;
+        }
         g_vblank_synced.store(synced, std::memory_order_relaxed); // this tick came from the display (present_early's deadline)
         // the count first, then its time: a reader that races sees the new count with the old time and finds less time
         // left than there is (pace_swap's pool refill then does less), never more
