@@ -579,9 +579,23 @@ NTSTATUS __stdcall NtQueryVolumeInformationFile(HANDLE FileHandle, XIO_STATUS_BL
     if ((FsInformationClass == 3 || FsInformationClass == 7) && part >= 1 && part <= 5) {
         // FATX-like numbers: 16 KB clusters, capped at the partition size.
         uint64_t total = kPartitions[part].size;
+        // The host's free space, at most the partition's size. A failed query counts as room enough: it was taken as 0
+        // and the game said there were not the 8 free blocks a save needs (a player on Batocera / Wine, whose save
+        // folder is on a Linux file system, 2026-11-18). What was found is logged once a partition.
         ULARGE_INTEGER free_host{};
-        GetDiskFreeSpaceExW(hi.mount->host.c_str(), &free_host, nullptr, nullptr);
-        uint64_t avail = free_host.QuadPart < total ? free_host.QuadPart : total;
+        const BOOL got = GetDiskFreeSpaceExW(hi.mount->host.c_str(), &free_host, nullptr, nullptr);
+        const DWORD err = got ? 0 : GetLastError();
+        uint64_t avail = !got ? total : free_host.QuadPart < total ? free_host.QuadPart : total;
+        static bool told[6];
+        if (!told[part]) {
+            told[part] = true;
+            if (got)
+                logf("[k] free space, Partition%d: %llu MB on the host, %llu blocks of 16 KB reported", part,
+                     (unsigned long long)(free_host.QuadPart >> 20), (unsigned long long)(avail / 0x4000));
+            else
+                logf("[k] free space, Partition%d: the host's query failed (error %lu) on %s; %llu blocks of 16 KB reported (the "
+                     "partition's size)", part, err, narrow(hi.mount->host).c_str(), (unsigned long long)(avail / 0x4000));
+        }
         uint32_t need = FsInformationClass == 3 ? 24 : 32;
         if (Length < need) return XSTATUS_BUFFER_TOO_SMALL;
         *(uint64_t *)(p + 0) = total / 0x4000;
