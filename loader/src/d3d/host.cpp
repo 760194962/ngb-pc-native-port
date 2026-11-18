@@ -575,11 +575,24 @@ namespace {
 // Direct3D 9Ex: no lost devices when Windows takes the screen and no D3DPOOL_DEFAULT resources to give up before a
 // Reset (ex9test, ex9fs: Iris Xe and RTX 3060, 2026-10-24). Under plain Direct3D 9 a Reset failed for good while the
 // visibility test's query lived and Alt+Tab crashed (r495); minimised, the frames' work piled up (r528).
+// Why the first device could not be made, for device_failure_text: the step, its results, the card.
+struct DeviceFailure {
+    bool runtime;           // Direct3DCreate9Ex failed (no Direct3D 9 at all), else CreateDeviceEx
+    HRESULT hr_hw, hr_sw;   // CreateDeviceEx with hardware / software vertex processing (runtime: hr_hw only)
+    UINT adapters;          // the Direct3D 9 adapters seen
+    D3DADAPTER_IDENTIFIER9 id;
+    UINT w, h;
+    bool exclusive;
+} g_device_failure;
+
 bool create_device_here()
 {
     HRESULT made = g_d3d ? S_OK : Direct3DCreate9Ex(D3D_SDK_VERSION, &g_d3d);
     if (FAILED(made)) {
         logf("host: Direct3DCreate9Ex failed 0x%08lx", made);
+        g_device_failure = {};
+        g_device_failure.runtime = true;
+        g_device_failure.hr_hw = made;
         return false;
     }
     SIZE mon = {g_win_w, g_win_h};
@@ -612,10 +625,20 @@ bool create_device_here()
     HRESULT hr = g_d3d->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd, flags, &pp, pp.Windowed ? nullptr : &mode, &g_devex);
     if (FAILED(hr)) {
         logf("host: CreateDeviceEx failed 0x%08lx, retrying with software vertex processing", hr);
+        const HRESULT hr_hw = hr;
         flags = D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE | D3DCREATE_MULTITHREADED;
         hr = g_d3d->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd, flags, &pp, pp.Windowed ? nullptr : &mode, &g_devex);
         if (FAILED(hr)) {
             logf("host: CreateDeviceEx failed 0x%08lx", hr);
+            DeviceFailure &f = g_device_failure;
+            f = {};
+            f.hr_hw = hr_hw;
+            f.hr_sw = hr;
+            f.adapters = g_d3d->GetAdapterCount();
+            if (f.adapters) g_d3d->GetAdapterIdentifier(D3DADAPTER_DEFAULT, 0, &f.id);
+            f.w = pp.BackBufferWidth;
+            f.h = pp.BackBufferHeight;
+            f.exclusive = !pp.Windowed;
             return false;
         }
     }
@@ -709,6 +732,103 @@ bool reset_device_here()
 } // namespace
 
 bool create_device() { return SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceCreate, 0) != 0; }
+
+namespace {
+const char *d3d_error_name(HRESULT hr)
+{
+    switch ((unsigned long)hr) {
+    case 0x8876086Aul: return "D3DERR_NOTAVAILABLE: the driver does not offer what was asked";
+    case 0x8876086Cul: return "D3DERR_INVALIDCALL: the request was refused as invalid";
+    case 0x8876017Cul: return "D3DERR_OUTOFVIDEOMEMORY: not enough video memory";
+    case 0x88760868ul: return "D3DERR_DEVICELOST: the device was lost (another program has the screen, or a remote session)";
+    case 0x88760870ul: return "D3DERR_DEVICEREMOVED: the graphics card was removed or its driver restarted";
+    case 0x88760874ul: return "D3DERR_DEVICEHUNG: the graphics card stopped responding";
+    case 0x88760827ul: return "D3DERR_DRIVERINTERNALERROR: an error inside the graphics driver";
+    case 0x88760866ul: return "D3DERR_NOTFOUND: not found";
+    case 0x8007000Eul: return "E_OUTOFMEMORY: out of memory";
+    case 0x80004005ul: return "E_FAIL: an unspecified failure";
+    case 0x80004001ul: return "E_NOTIMPL: not implemented (no Direct3D 9Ex in this system)";
+    }
+    return "an unlisted error";
+}
+} // namespace
+
+// The message for a player when the first device could not be made (Direct3D_CreateDevice then stops the game rather
+// than let it run on without one: a Wine without the 32-bit graphics libraries crashed at the first Clear, 2026-11-18).
+// Which step failed, its result named, the card, and what to try for that case; Chinese first, then English.
+std::string device_failure_text()
+{
+    const DeviceFailure &f = g_device_failure;
+    typedef const char *(__cdecl * WineVersion)();
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    WineVersion wine = ntdll ? (WineVersion)GetProcAddress(ntdll, "wine_get_version") : nullptr;
+    const std::string under = wine ? std::string("Wine ") + wine() : "Windows";
+    char hr1[24], hr2[24];
+    snprintf(hr1, sizeof hr1, "0x%08lX", (unsigned long)f.hr_hw);
+    snprintf(hr2, sizeof hr2, "0x%08lX", (unsigned long)f.hr_sw);
+    std::string zh = "无法启动 Direct3D 9，游戏不能运行。\n\n";
+    std::string en = "Direct3D 9 could not be started, so the game cannot run.\n\n";
+    if (f.runtime) {
+        zh += "失败的步骤：创建 Direct3D 9 本身（Direct3DCreate9Ex），结果 " + std::string(hr1) + "（" + d3d_error_name(f.hr_hw) + "）。\n";
+        en += "Failed step: making Direct3D 9 itself (Direct3DCreate9Ex), result " + std::string(hr1) + " (" + d3d_error_name(f.hr_hw) + ").\n";
+    } else {
+        char what[200];
+        snprintf(what, sizeof what, "%ux%u %s", f.w, f.h, f.exclusive ? "exclusive fullscreen" : "windowed");
+        zh += "失败的步骤：在显卡上创建绘图设备（CreateDeviceEx，" + std::string(what) + "）。\n";
+        zh += "硬件顶点处理：" + std::string(hr1) + "（" + d3d_error_name(f.hr_hw) + "）\n";
+        zh += "软件顶点处理：" + std::string(hr2) + "（" + d3d_error_name(f.hr_sw) + "）\n";
+        en += "Failed step: making the drawing device on the graphics card (CreateDeviceEx, " + std::string(what) + ").\n";
+        en += "Hardware vertex processing: " + std::string(hr1) + " (" + d3d_error_name(f.hr_hw) + ")\n";
+        en += "Software vertex processing: " + std::string(hr2) + " (" + d3d_error_name(f.hr_sw) + ")\n";
+        char card[400];
+        if (f.adapters)
+            snprintf(card, sizeof card, "%s (vendor %04lX, device %04lX, driver %u.%u.%u.%u), %u adapter(s)", f.id.Description,
+                     f.id.VendorId, f.id.DeviceId, HIWORD(f.id.DriverVersion.HighPart), LOWORD(f.id.DriverVersion.HighPart),
+                     HIWORD(f.id.DriverVersion.LowPart), LOWORD(f.id.DriverVersion.LowPart), f.adapters);
+        else
+            snprintf(card, sizeof card, "none: Direct3D 9 sees no graphics adapter");
+        zh += std::string("显卡：") + card + "\n";
+        en += std::string("Graphics card: ") + card + "\n";
+    }
+    zh += "系统：" + under + "\n\n";
+    en += "System: " + under + "\n\n";
+    // Wine with no 3D renderer at all (renderer=no3d/gdi, or no OpenGL / Vulkan driver it can use): the adapter is
+    // wined3d's 2D-only "DirectDraw Emulation" with vendor 0 (WSL test, 2026-11-18).
+    const bool wine_no3d = wine && !f.runtime && f.adapters && !f.id.VendorId && strstr(f.id.Description, "DirectDraw Emulation");
+    if (wine_no3d) {
+        zh += "Wine 没有找到任何可用的 3D 渲染方式：显卡显示为“WineD3D DirectDraw Emulation”（只有 2D）。可能是：\n"
+              "• Wine 的 Direct3D 设置被改成了不用 3D（注册表 HKCU\\Software\\Wine\\Direct3D 的 renderer 为 no3d 或 gdi），请删除这一项；\n"
+              "• 系统没有可用的 32 位 OpenGL / Vulkan 显卡驱动（见下）。\n\n";
+        en += "Wine found no 3D renderer it can use: the card shows as \"WineD3D DirectDraw Emulation\" (2D only). Either:\n"
+              "- Wine's Direct3D was set to no 3D (HKCU\\Software\\Wine\\Direct3D, renderer = no3d or gdi): remove that value;\n"
+              "- or there is no 32-bit OpenGL / Vulkan driver for the card (below).\n\n";
+    }
+    if (wine) {
+        zh += "在 Wine 下，Direct3D 9 要通过显卡的 OpenGL（Wine 自带的 wined3d）或 Vulkan（DXVK）驱动来画。本程序是 32 位的，"
+              "需要显卡的 32 位驱动：\n"
+              "• Debian / Ubuntu：sudo apt install libgl1-mesa-dri:i386 mesa-vulkan-drivers:i386（NVIDIA 专有驱动另装其 32 位库）\n"
+              "• Arch：lib32-mesa、lib32-vulkan-radeon / lib32-vulkan-intel / lib32-nvidia-utils\n"
+              "• Batocera / Steam Deck 等整合系统：换一个 Wine 运行器，或切换 DXVK 开关后再试\n";
+        en += "Under Wine, Direct3D 9 draws through the card's OpenGL (Wine's own wined3d) or Vulkan (DXVK) driver. This program "
+              "is 32-bit, so the card's 32-bit driver is needed:\n"
+              "- Debian / Ubuntu: sudo apt install libgl1-mesa-dri:i386 mesa-vulkan-drivers:i386 (NVIDIA's own driver: its 32-bit libraries)\n"
+              "- Arch: lib32-mesa, lib32-vulkan-radeon / lib32-vulkan-intel / lib32-nvidia-utils\n"
+              "- Batocera, Steam Deck and similar: try another Wine runner, or switch DXVK on or off\n";
+    } else if (f.runtime) {
+        zh += "Windows 的 Direct3D 9 组件不可用。请重新安装或更新显卡驱动；在远程桌面中运行时，请改在本机上运行。\n";
+        en += "Windows' Direct3D 9 is not available. Reinstall or update the graphics driver; if this is a Remote Desktop session, "
+              "run the game on the PC itself.\n";
+    } else if ((unsigned long)f.hr_hw == 0x8876017Cul || (unsigned long)f.hr_sw == 0x8876017Cul) {
+        zh += "显存不足。请关闭其他占用显卡的程序，或在启动器的「图形」页调低渲染倍数和抗锯齿后再试。\n";
+        en += "Out of video memory. Close other programs using the graphics card, or lower the render scale and anti-aliasing "
+              "on the launcher's Graphics page, and try again.\n";
+    } else {
+        zh += "请更新或重新安装显卡驱动（从显卡厂商官网下载）；笔记本请确认独立显卡没有被禁用；在远程桌面中运行时，请改在本机上运行。\n";
+        en += "Update or reinstall the graphics driver (from the card maker's site); on a laptop, check that the graphics card is "
+              "not disabled; if this is a Remote Desktop session, run the game on the PC itself.\n";
+    }
+    return zh + "\n日志：black.log\n\n---\n\n" + en + "\nLog: black.log";
+}
 HRESULT test_cooperative_level() { return (HRESULT)SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceTest, 0); }
 bool recreate_device() { return SendMessageW(g_hwnd, WM_APP_DEVICE, kDeviceRecreate, 0) != 0; }
 
