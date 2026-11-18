@@ -572,21 +572,45 @@ bool pick(bool folder, std::wstring *out, const COMDLG_FILTERSPEC *filter = null
     return ok;
 }
 
-// The free space of the folder's disk: free to us, else free on the disk, else unknown (kSpaceUnknown). Wine on some
-// Linux mounts says 0 for both (a player on Batocera: 0 free on a 461 GB disk, 2026-11-18), and an install from an
-// image was refused for no room; unknown does not block it (a disk really full fails the copy, which says so).
+// The free space of the folder's disk: free to us, else free on the disk. A player on Batocera / Wine was told 0 for
+// both on a 461 GB disk (2026-11-18) - a full disk, or a mount telling Wine nothing. With no figure (0, or no query
+// worked), 1 MB is written to a temporary file in the folder to see: it fits, and the space is unknown (kSpaceUnknown,
+// the install goes ahead; a disk that fills up fails the copy, which says so); it does not, and the disk is full (0).
+// The test is redone at most every 10 s (the page is drawn often); a disk that gives a figure never sees it.
 constexpr uint64_t kSpaceUnknown = ~0ull;
+bool room_by_write(const std::wstring &dir)
+{
+    static std::wstring last_dir;
+    static ULONGLONG last_at;
+    static bool last_room;
+    ULONGLONG now = GetTickCount64();
+    if (dir == last_dir && last_at && now - last_at < 10000) return last_room;
+    last_dir = dir, last_at = now ? now : 1;
+    std::wstring path = dir + L"\\ngb_space_probe.tmp";
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_WRITE_THROUGH, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return last_room = false;
+    std::vector<uint8_t> block(1u << 20);
+    DWORD wrote = 0;
+    last_room = WriteFile(h, block.data(), (DWORD)block.size(), &wrote, nullptr) && wrote == block.size() && FlushFileBuffers(h);
+    CloseHandle(h);
+    DeleteFileW(path.c_str());
+    return last_room;
+}
 uint64_t free_space(std::wstring dir)
 {
     ULARGE_INTEGER avail, size, free_on_disk;
     while (!dir.empty()) {
-        if (GetDiskFreeSpaceExW(dir.c_str(), &avail, &size, &free_on_disk))
-            return avail.QuadPart ? avail.QuadPart : free_on_disk.QuadPart ? free_on_disk.QuadPart : kSpaceUnknown;
+        if (GetDiskFreeSpaceExW(dir.c_str(), &avail, &size, &free_on_disk)) {
+            if (avail.QuadPart) return avail.QuadPart;
+            if (free_on_disk.QuadPart) return free_on_disk.QuadPart;
+            break;
+        }
         size_t s = dir.find_last_of(L"\\/");
         if (s == std::wstring::npos) break;
         dir.resize(s);
     }
-    return kSpaceUnknown;
+    return !dir.empty() && room_by_write(dir) ? kSpaceUnknown : 0;
 }
 
 bool installing() { return g.prog.state == 1; }

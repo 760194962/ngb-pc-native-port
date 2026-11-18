@@ -204,6 +204,31 @@ void complete(XIO_STATUS_BLOCK *iosb, NTSTATUS s, uint32_t info, HANDLE ev)
 
 // What a partition's files and folders take on a FATX volume: each file rounded up to 16 KB clusters, each folder one
 // cluster (NtQueryVolumeInformationFile's free space).
+// When the host gives no free space (0, or the query failed), whether there is room after all: 1 MB written to a
+// temporary file next to the partition folders (same disk), removed at once. A Batocera / Wine player was told 0 free
+// on a 461 GB disk - a full disk or a mount telling Wine nothing; taking 0 as unknown would let a game save onto a
+// really full disk. Only then is this run (never with a host that gives a figure), at most every 10 s a partition.
+bool host_room_probe(const std::wstring &partition_dir, DWORD *error)
+{
+    std::wstring dir = partition_dir;
+    size_t s = dir.find_last_of(L"\\/");
+    if (s != std::wstring::npos) dir.resize(s);
+    std::wstring path = dir + L"\\ngb_space_probe.tmp";
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_WRITE_THROUGH, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        *error = GetLastError();
+        return false;
+    }
+    static std::vector<uint8_t> block(1u << 20);
+    DWORD wrote = 0;
+    BOOL ok = WriteFile(h, block.data(), (DWORD)block.size(), &wrote, nullptr) && wrote == block.size() && FlushFileBuffers(h);
+    *error = ok ? 0 : GetLastError();
+    CloseHandle(h);
+    DeleteFileW(path.c_str()); // in case delete-on-close is not honoured
+    return ok;
+}
+
 uint64_t fatx_used_bytes(const std::wstring &dir)
 {
     constexpr uint64_t kCluster = 0x4000;
@@ -622,7 +647,29 @@ NTSTATUS __stdcall NtQueryVolumeInformationFile(HANDLE FileHandle, XIO_STATUS_BL
         const BOOL got = GetDiskFreeSpaceExW(hi.mount->host.c_str(), &to_caller, &disk_size, &disk_free);
         const DWORD err = got ? 0 : GetLastError();
         const uint64_t host_free = !got ? 0 : to_caller.QuadPart ? to_caller.QuadPart : disk_free.QuadPart;
-        uint64_t avail = host_free && host_free < own_free ? host_free : own_free;
+        // No figure from the host: write 1 MB to see (host_room_probe); no room, and 0 is reported (the game's own
+        // "not enough free blocks", which is then true).
+        static std::mutex probe_mutex;
+        static ULONGLONG probe_at[6];
+        static bool probe_room[6], probe_told[6];
+        static DWORD probe_err[6];
+        bool room = true;
+        if (!host_free) {
+            std::lock_guard<std::mutex> lk(probe_mutex);
+            ULONGLONG now = GetTickCount64();
+            if (!probe_at[part] || now - probe_at[part] >= 10000) {
+                probe_at[part] = now ? now : 1;
+                probe_room[part] = host_room_probe(hi.mount->host, &probe_err[part]);
+                if (!probe_told[part] || !probe_room[part]) {
+                    probe_told[part] = true;
+                    logf("[k] free space, Partition%d: the host gives no free space; 1 MB written next to it as a test: %s (error %lu)", part,
+                         probe_room[part] ? "it fitted, so there is room" : "it did not, so the disk counts as full (0 blocks free)",
+                         probe_err[part]);
+                }
+            }
+            room = probe_room[part];
+        }
+        uint64_t avail = !room ? 0 : host_free && host_free < own_free ? host_free : own_free;
         static bool told[6];
         if (!told[part]) {
             told[part] = true;
@@ -630,9 +677,9 @@ NTSTATUS __stdcall NtQueryVolumeInformationFile(HANDLE FileHandle, XIO_STATUS_BL
             if (got)
                 snprintf(host, sizeof host, "the host says %llu MB free to us, %llu MB free on a %llu MB disk%s",
                          (unsigned long long)(to_caller.QuadPart >> 20), (unsigned long long)(disk_free.QuadPart >> 20),
-                         (unsigned long long)(disk_size.QuadPart >> 20), host_free ? "" : " (not taken)");
+                         (unsigned long long)(disk_size.QuadPart >> 20), host_free ? "" : " (tested by a write)");
             else
-                snprintf(host, sizeof host, "the host's query failed (error %lu)", err);
+                snprintf(host, sizeof host, "the host's query failed (error %lu), tested by a write", err);
             if (part == 1)
                 logf("[k] free space, Partition%d: %llu of %llu MB used by its files and folders; %s; %llu blocks of 16 KB free reported",
                      part, (unsigned long long)(used >> 20), (unsigned long long)(total >> 20), host, (unsigned long long)(avail / 0x4000));
