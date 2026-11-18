@@ -243,6 +243,18 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.36.2: "not enough free blocks" and box characters in the launcher under Linux / Wine
+
+- **With no free space from the system, a 1 MB test write decides**: a Batocera (Wine) player was told "not enough free blocks"
+  at every start; the system had said 0 free on a 461 GB disk. 0 may be a full disk or a file system that gives no figure, and
+  the call cannot tell. Now, only when the system says 0 or the query fails, 1 MB is written to a temporary file next to the save
+  folders and removed at once: it fits, and the answer is as before; it does not, and 0 is reported (the game's own "not enough
+  free blocks", then true). The launcher's space check for an install from an image likewise. With a figure from the system,
+  everything is as in 2.2.36.1.
+- **No box characters in the launcher without a Chinese or icon font**: Wine has neither YaHei nor Windows' icon fonts. The launcher
+  now takes a Chinese font the system has (SimHei, SimSun, Noto, Source Han, WenQuanYi...), else shows in English and leaves the
+  icons out. On Windows every page matches 2.2.36.1 pixel for pixel.
+
 ### 2.2.36.1: "Screen flashes" off works at 16:9 and 4:3 too; a file failing over and over no longer fills the log
 
 - **Screen flashes off did nothing at 16:9 and 4:3**: the switch needs 3D drawn this frame and read the ultrawide HUD's count, which is
