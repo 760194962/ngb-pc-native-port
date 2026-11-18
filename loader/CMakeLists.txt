@@ -2,7 +2,12 @@ cmake_minimum_required(VERSION 3.24)
 if(POLICY CMP0184)
   cmake_policy(SET CMP0184 NEW) # MSVC_RUNTIME_CHECKS property
 endif()
-project(black_loader VERSION 2.2.36 LANGUAGES C CXX) # the release number (About box, first log line)
+project(black_loader VERSION 2.2.36.1 LANGUAGES C CXX) # the release number (About box, first log line); a 4th part for a fix release
+if(PROJECT_VERSION_TWEAK STREQUAL "")
+  set(NGB_VERSION_TWEAK 0)
+else()
+  set(NGB_VERSION_TWEAK ${PROJECT_VERSION_TWEAK})
+endif()
 set(NGB_VERSION_STRING "${PROJECT_VERSION}") # test packages carry -tN (1.1.5-t..1.1.8-t, 2.2.0-t1, -t2); releases none
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
