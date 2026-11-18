@@ -219,6 +219,16 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 `cache\texture_pool.txt`、`cache\cpu_textures.bin`、`vsh_record.bin` 和 `logs\black.log` 交给作者。**要在更新到新版本之前交**：
 换版本时本地学到的绘制状态会被清掉。
 
+### 2.2.36.3：启动失败时说清楚原因；Windows / Linux 运行说明
+
+- **Direct3D 无法启动时不再崩溃**：以前绘图设备建不起来时，游戏照样往下跑，在第一次清屏时崩溃，什么提示都没有（在 Wine 里缺
+  32 位图形库时作者实测到）。现在弹出说明：失败在哪一步（创建 Direct3D 9 本身，还是在显卡上创建设备）、两次尝试的错误码和含义、
+  显卡名称 / 厂商 / 驱动版本、是 Windows 还是 Wine 及其版本，以及针对这种情况该怎么办（Wine 下要装哪些 32 位驱动包、Wine 没有任何
+  3D 渲染时删哪个设置；Windows 下显存不足、驱动问题、远程桌面），然后以代码 3 正常退出。
+- **报错框在没有中文字体的系统上只显示英文**（Wine 里中文会变成方块），日志里仍保留中英两份。“找不到游戏”“不支持的游戏版本”
+  两个已有的提示也一样。
+- README 新增“在 Windows 和 Linux 上运行”一节：日志位置、显卡首选项、Linux 实测情况、32 位驱动、中文字体、缓存损坏的处理。
+
 ### 2.2.36.2：Linux / Wine 下的“可用区块不足”和启动器方块字
 
 - **系统查不到剩余空间时，实际写入 1 MB 来判断**：一位 Batocera（Wine）玩家每次开机都提示“没有足够的可用区块”，日志显示系统
@@ -348,6 +358,7 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
   Elastic、Malwarebytes、VBA32，没有报出具体病毒家族）。这是误报：游戏程序只是占住 Xbox 内存地址的小程序，
   运行时把原版代码放进这段内存并打补丁，又没有数字签名，看起来像加壳程序。现在游戏程序开启了数据执行保护（DEP），
   并带一份只声明普通权限的 manifest，减少这类误报（[issue #6](https://github.com/akirahayabusa/ngb-pc-native-port-release/issues/6)）。
+- 部分 Wine / Linux 环境下 CG 画面不动、只有字幕在动（Batocera 一位玩家）；标准 Wine 10 下开场动画正常，原因仍在排查。
 - 仍在核实中的模拟规则列在 `project/docs/07_证据盘点.md` 的核实进度里。
 
 ## 运行
@@ -553,21 +564,64 @@ xemu 主机设定里填的 DNS 不用，也不再显示：移植版会把游戏�
 
 细节与证据见 `project/docs/09_联网_Insignia.md`。
 
-## Steam Deck / Linux
+## 在 Windows 和 Linux 上运行
 
-没有单独的 Linux 版，用 Steam 的 Proton 运行 Windows 版。
+### Windows
+
+- **需要**：Windows 10 或 11（64 位；程序本身是 32 位），支持 Direct3D 9 的显卡（集成显卡也可以），以及你自己的游戏镜像。
+  不需要另外安装任何运行库。
+- **显卡**：第一次运行时，如果你没有为游戏程序设过 Windows 的“图形首选项”，程序会把它设为“高性能”，有独立显卡的笔记本就用独显。
+  你自己设过的不会被改。
+- **日志**：从启动器开始游戏时在 `logs\black.log`；直接双击 `Ninja Gaiden Black Any.exe` 时在它旁边的 `black.log`。
+  反馈问题时请附上。
+- **启动失败时**会弹出说明（2.2.36.3 起）：例如 Direct3D 无法启动时，写明失败在哪一步、错误码的含义、显卡和驱动版本，以及该怎么办，
+  然后正常退出，不再直接崩溃。
+- 少数杀毒软件会误报，见“已知问题”。
+
+### Linux（Wine / Proton）
+
+没有单独的 Linux 版，用 Wine 或 Proton 运行 Windows 版。
+
+**实测情况**：
+
+| 环境 | 情况 |
+|---|---|
+| 标准 Wine 10.0（WineHQ 官方包，Ubuntu 24.04；作者 2026-11-18 实测 2.2.36.2 / 2.2.36.3） | 开机、开场动画、标题、主菜单、从主菜单退出都正常，没有任何报错。用的是 Wine 自带的 Direct3D 转换（wined3d），在 WSL 里以软件渲染测试，所以没测速度 |
+| Batocera（Wine 10，AMD A8-7500 / GT640；一位玩家，2.2.36.x） | 能进游戏玩。2.2.36.2 修了每次开机提示“可用区块不足”和启动器方块字；**部分 CG 画面不动、只有字幕在动，仍在排查**（标准 Wine 10 下开场动画正常） |
+| Steam Deck，Proton 11.0-2（玩家，1.1.x） | 跑通过，期间修了两处 Proton 与 Windows 的差异（1.1.3 开机报光盘脏污、1.1.4 警告画面后崩溃）；之后的版本还没有 Deck 上的报告 |
 
 **Steam Deck**：
 
-1. 切到桌面模式，解压压缩包，按上面的步骤准备好游戏镜像。
+1. 切到桌面模式，解压压缩包。
 2. Steam →「添加游戏」→「添加非 Steam 游戏」，选 `Ninja Gaiden Black Any Launcher.exe`。
 3. 右键这个游戏 →「属性」→「兼容性」，勾选「强制使用特定 Steam Play 兼容工具」，选 Proton（试过的是 11.0-2，也可以选 Experimental）。
-4. 启动，在启动器里安装或选好游戏路径，再开始游戏。之后在游戏模式里从库里直接启动。
+4. 启动，在启动器里安装游戏或选好游戏路径，再开始游戏。之后在游戏模式里从库里直接启动。
 5. Deck 的按键在 Proton 里就是一个 Xbox 手柄。屏幕是 16:10，可在启动器「画面比例」里选「宽屏（16:10 显示器）」。
 
-**其他 Linux**：有 Steam 的话做法同上（第 2–4 步）；不用 Steam 时可用 Lutris、Bottles 或 Wine，建议先 `winetricks dxvk`（游戏用 Direct3D 9，经 DXVK 比 Wine 自带的转换快）。
+**其他 Linux（Wine、Lutris、Bottles、Batocera 等）**：
 
-**目前的情况**：1.1.x 时有 Deck 玩家用 Proton 11.0-2 跑通过，期间修了两处 Proton 与 Windows 的差异（1.1.3 开机报光盘脏污、1.1.4 警告画面后崩溃）；之后的版本还没有 Deck 上的报告。游戏运行时用 Wine/Proton 自带的 `d3dcompiler_47` 编译着色器，如果画面缺东西，可以试 `winetricks d3dcompiler_47`。启动器界面和联网在 Wine 下没有验证过。遇到问题请把游戏文件夹里的 `logs\black.log` 发到 issue。
+1. 用 Wine 10 或更新的版本。**本程序是 32 位的，需要显卡的 32 位驱动**，例如：
+   - Debian / Ubuntu：`sudo apt install libgl1-mesa-dri:i386 mesa-vulkan-drivers:i386`（NVIDIA 专有驱动另装它的 32 位库）
+   - Arch：`lib32-mesa` 以及 `lib32-vulkan-radeon` / `lib32-vulkan-intel` / `lib32-nvidia-utils`
+
+   缺少时游戏会弹出说明并退出（2.2.36.3 起），说明里写着失败原因和要装什么。
+2. 运行启动器：`wine "Ninja Gaiden Black Any Launcher.exe"`，安装游戏、调整设置后开始游戏；也可以直接运行 `wine "Ninja Gaiden Black Any.exe"`。
+   有 Steam 的话，也可以按上面 Steam Deck 的第 2–4 步用 Proton。
+3. Batocera 等整合系统：可以换用不同的 Wine 运行器，或切换 DXVK 开关试试。DXVK 把 Direct3D 9 转成 Vulkan，通常比 Wine 自带的
+   转换快（作者没有对比测过）；不用 Batocera 时可以 `winetricks dxvk`。
+
+**Linux 下要知道的几件事**：
+
+- **启动器和报错框的中文**：Wine 里通常没有中文字体。2.2.36.2 起启动器找不到中文字体时改用英文显示、不画图标；2.2.36.3 起报错框也只显示英文。
+  想看中文，把任意一个中文字体（如 Windows 的 `msyh.ttc`、`NotoSansCJK-Regular.ttc` 或文泉驿）复制到 Wine 前缀的
+  `drive_c/windows/Fonts` 里即可。游戏里的中文来自游戏自己的字库，不受影响。
+- **剩余空间**：有的文件系统不向 Wine 报告剩余空间（回答 0）。2.2.36.2 起遇到这种情况，程序实际写入 1 MB 来判断盘满没满，
+  不再误报“可用区块不足”。
+- **加载角色时崩溃**：多半是缓存被写坏了（例如旧版卡死时被强制关闭或断电）。删除 `savedata` 下 `Partition4`、`Partition5` 里的内容即可
+  （只是缓存，游戏会重建；**不要动 `Partition1`，那是存档**）。删除后第一次启动会重建缓存，开场动画可能花屏一次，之后正常。
+- **着色器**：游戏运行时用 Wine / Proton 自带的 `d3dcompiler_47` 编译着色器，如果画面缺东西，可以试 `winetricks d3dcompiler_47`。
+- 联网（Insignia）在 Wine 下没有验证过。
+- 遇到问题请把日志（见上面 Windows 一节）发到 issue。
 
 ## 构建
 

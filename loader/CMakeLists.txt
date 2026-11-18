@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(POLICY CMP0184)
   cmake_policy(SET CMP0184 NEW) # MSVC_RUNTIME_CHECKS property
 endif()
-project(black_loader VERSION 2.2.36.2 LANGUAGES C CXX) # the release number (About box, first log line); a 4th part for a fix release
+project(black_loader VERSION 2.2.36.3 LANGUAGES C CXX) # the release number (About box, first log line); a 4th part for a fix release
 if(PROJECT_VERSION_TWEAK STREQUAL "")
   set(NGB_VERSION_TWEAK 0)
 else()
