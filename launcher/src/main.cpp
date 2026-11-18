@@ -1337,21 +1337,77 @@ struct ListShape {
 
 // The icon font: Segoe Fluent Icons comes with Windows 11 only. Windows 10 has the same icons at the same code points in
 // Segoe MDL2 Assets; without it the menu's icons were boxes there (players, 2026-10-24).
+// Under Wine neither may be there (Batocera: every menu icon a box, 2026-11-18): then the icons are left out (nullptr).
 const wchar_t *g_icon_font; // --mdl2 (with --snap): Segoe MDL2 Assets, as on Windows 10
+bool g_fonts_basic;         // --fonts-basic (with --snap): as without a Chinese or an icon font (Wine on Linux)
+
+bool has_family(const wchar_t *name)
+{
+    IDWriteFontCollection *fc = nullptr;
+    UINT32 index = 0;
+    BOOL found = FALSE;
+    bool ok = g.dw && SUCCEEDED(g.dw->GetSystemFontCollection(&fc, FALSE)) && SUCCEEDED(fc->FindFamilyName(name, &index, &found)) && found;
+    if (fc) fc->Release();
+    return ok;
+}
+
 const wchar_t *icon_font()
 {
-    const wchar_t *&font = g_icon_font;
-    if (!font) {
-        font = L"Segoe MDL2 Assets";
+    static bool chosen;
+    if (!chosen) {
+        chosen = true;
+        if (g_fonts_basic) g_icon_font = nullptr;
+        else if (!g_icon_font)
+            g_icon_font = has_family(L"Segoe Fluent Icons") ? L"Segoe Fluent Icons"
+                          : has_family(L"Segoe MDL2 Assets") ? L"Segoe MDL2 Assets" : nullptr;
+    }
+    return g_icon_font;
+}
+
+// The Chinese text's font: Microsoft YaHei UI on Windows. Wine on Linux has none of Windows' fonts and Chinese came out as
+// boxes (Batocera, 2026-11-18): then a Chinese font the system has (Noto / Source Han / WenQuanYi, installed in Linux or
+// copied into the Wine prefix's Fonts), else any family with Chinese characters; none, and the launcher is in English.
+std::wstring g_zh_family;
+const wchar_t *zh_font()
+{
+    static bool chosen;
+    if (!chosen) {
+        chosen = true;
+        static const wchar_t *const kKnown[] = {L"Microsoft YaHei UI", L"Microsoft YaHei", L"SimHei", L"SimSun", L"Noto Sans CJK SC",
+                                               L"Noto Sans SC", L"Source Han Sans SC", L"Source Han Sans CN", L"WenQuanYi Micro Hei",
+                                               L"WenQuanYi Zen Hei", L"Droid Sans Fallback", L"AR PL UMing CN"};
+        if (!g_fonts_basic)
+            for (const wchar_t *f : kKnown)
+                if (has_family(f)) {
+                    g_zh_family = f;
+                    break;
+                }
         IDWriteFontCollection *fc = nullptr;
-        UINT32 index = 0;
-        BOOL found = FALSE;
-        if (g.dw && SUCCEEDED(g.dw->GetSystemFontCollection(&fc, FALSE)) &&
-            SUCCEEDED(fc->FindFamilyName(L"Segoe Fluent Icons", &index, &found)) && found)
-            font = L"Segoe Fluent Icons";
+        if (!g_fonts_basic && g_zh_family.empty() && g.dw && SUCCEEDED(g.dw->GetSystemFontCollection(&fc, FALSE))) {
+            for (UINT32 i = 0, n = fc->GetFontFamilyCount(); i < n && g_zh_family.empty(); i++) {
+                IDWriteFontFamily *fam = nullptr;
+                IDWriteFont *font = nullptr;
+                BOOL a = FALSE, b = FALSE;
+                if (SUCCEEDED(fc->GetFontFamily(i, &fam)) && SUCCEEDED(fam->GetFont(0, &font)) && SUCCEEDED(font->HasCharacter(0x5FCD, &a)) &&
+                    SUCCEEDED(font->HasCharacter(0x6587, &b)) && a && b) {
+                    IDWriteLocalizedStrings *names = nullptr;
+                    wchar_t name[128];
+                    if (SUCCEEDED(fam->GetFamilyNames(&names)) && SUCCEEDED(names->GetString(0, name, 128))) g_zh_family = name;
+                    if (names) names->Release();
+                }
+                if (font) font->Release();
+                if (fam) fam->Release();
+            }
+        }
         if (fc) fc->Release();
     }
-    return font;
+    return g_zh_family.empty() ? nullptr : g_zh_family.c_str();
+}
+// The text font of the language shown
+const wchar_t *ui_font()
+{
+    const wchar_t *zh = g_lang == Lang::Zh ? zh_font() : nullptr;
+    return zh ? zh : L"Segoe UI";
 }
 
 const DWRITE_TRIMMING kNoTrim = {DWRITE_TRIMMING_GRANULARITY_NONE, 0, 0};
@@ -1370,7 +1426,7 @@ struct Painter {
               DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING, float spacing = 0.0f, bool one_line = false)
     {
         IDWriteTextFormat *fmt = nullptr;
-        if (!family) family = g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI";
+        if (!family) family = ui_font();
         if (FAILED(g.dw->CreateTextFormat(family, nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size,
                                           g_lang == Lang::Zh ? L"zh-cn" : L"en-us", &fmt)))
             return;
@@ -1484,7 +1540,10 @@ struct Painter {
         fill({0, 0, kNavW, kH}, 0x16141a, 0.94f);
         fill({kNavW - 1, 0, kNavW, kH}, kInk3);
         // brand
-        text(L"\x5FCD\x8005\x9F99\x5251\x4F20", {28, 30, kNavW - 12, 72}, 30, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, L"Microsoft YaHei UI");
+        if (zh_font())
+            text(L"\x5FCD\x8005\x9F99\x5251\x4F20", {28, 30, kNavW - 12, 72}, 30, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, zh_font());
+        else
+            text(L"NINJA GAIDEN", {28, 30, kNavW - 12, 72}, 26, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, L"Segoe UI");
         text(ng04() ? L"NINJA GAIDEN" : L"NINJA GAIDEN BLACK", {29, 74, kNavW - 12, 94}, 11.5f, kGold, 1.0f,
              DWRITE_FONT_WEIGHT_SEMI_BOLD, L"Segoe UI", DWRITE_TEXT_ALIGNMENT_LEADING, 2.2f);
         // the game: Black | 2004
@@ -1510,8 +1569,9 @@ struct Painter {
                 fill(r, kBone, 0.05f, 4);
             }
             uint32_t c = sel || hov ? kBone : i == kSupport ? kGold : kAsh; // Support stands out in gold, heart and all
-            text(kIcons[i], {r.left + 18, r.top, r.left + 44, r.bottom}, 17, sel ? kBlood : i == kSupport ? kGold : c, 1.0f,
-                 DWRITE_FONT_WEIGHT_NORMAL, icon_font());
+            if (icon_font())
+                text(kIcons[i], {r.left + 18, r.top, r.left + 44, r.bottom}, 17, sel ? kBlood : i == kSupport ? kGold : c, 1.0f,
+                     DWRITE_FONT_WEIGHT_NORMAL, icon_font());
             text(S((Str)((int)Str::NavStart + i)), {r.left + 52, r.top, r.right - 8, r.bottom}, 15, c, 1.0f,
                  sel ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
         }
@@ -1524,8 +1584,8 @@ struct Painter {
             bool on = (g_lang == Lang::En) == (i == 1), hov = g.hover == (i ? kHitLangEn : kHitLangZh);
             if (on) fill(r, kBone, 0.08f, 3);
             stroke(r, on ? kGold : kInk3, on ? 0.9f : 1.0f, 3);
-            text(i ? L"EN" : L"\x4E2D\x6587", r, 12.5f, on || hov ? kBone : kAsh, 1.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                 i ? L"Segoe UI" : L"Microsoft YaHei UI", DWRITE_TEXT_ALIGNMENT_CENTER);
+            text(i ? L"EN" : zh_font() ? L"\x4E2D\x6587" : L"ZH", r, 12.5f, on || hov ? kBone : kAsh, zh_font() || i ? 1.0f : 0.4f,
+                 DWRITE_FONT_WEIGHT_SEMI_BOLD, i || !zh_font() ? L"Segoe UI" : zh_font(), DWRITE_TEXT_ALIGNMENT_CENTER);
         }
     }
 
@@ -1551,8 +1611,8 @@ struct Painter {
         // the title with a soft shadow (the website's h1: text-shadow 0 2px 20px #000)
         for (int i = 0; i < 3; i++)
             text(S(ng04() ? Str::TitleNg04 : Str::Title), {x + 1.0f + i, 132.0f + 2 + i, x + 760, 196.0f + 2 + i}, 46, 0x000000, 0.28f,
-                 DWRITE_FONT_WEIGHT_BLACK, L"Microsoft YaHei UI");
-        text(S(ng04() ? Str::TitleNg04 : Str::Title), {x, 132, x + 760, 196}, 46, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, L"Microsoft YaHei UI");
+                 DWRITE_FONT_WEIGHT_BLACK, ui_font());
+        text(S(ng04() ? Str::TitleNg04 : Str::Title), {x, 132, x + 760, 196}, 46, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, ui_font());
         // the subtitle and the not-ready note cross the 2004 key art's logo: a shadow like the title's, and a dark plate
         for (int i = 0; i < 2; i++)
             text(S(ng04() ? Str::SubtitleNg04 : Str::Subtitle), {x + 1.0f + i, 201.0f + i, x + 761 + i, 229.0f + i}, 17, 0x000000, 0.55f);
@@ -1570,8 +1630,9 @@ struct Painter {
             fill(b, kInk3, 0.9f);
             stroke(b, kAsh, 0.35f);
         }
-        text(L"\xE768", {b.left + 26, b.top, b.left + 56, b.bottom}, 18, ready ? kBone : kAsh, 1.0f, DWRITE_FONT_WEIGHT_NORMAL,
-             icon_font());
+        if (icon_font())
+            text(L"\xE768", {b.left + 26, b.top, b.left + 56, b.bottom}, 18, ready ? kBone : kAsh, 1.0f, DWRITE_FONT_WEIGHT_NORMAL,
+                 icon_font());
         text(S(Str::Play), {b.left + 58, b.top, b.right - 16, b.bottom}, 20, ready ? kBone : kAsh, 1.0f, DWRITE_FONT_WEIGHT_BOLD,
              nullptr, DWRITE_TEXT_ALIGNMENT_LEADING, g_lang == Lang::Zh ? 4.0f : 1.0f);
         if (!ready) {
@@ -1633,7 +1694,7 @@ struct Painter {
         stroke(c, kInk3);
         fill({c.left, c.top, c.left + 3, c.bottom}, kGold, 0.8f);
         IDWriteTextFormat *fmt = nullptr;
-        if (SUCCEEDED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr,
+        if (SUCCEEDED(g.dw->CreateTextFormat(ui_font(), nullptr,
                                              DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14,
                                              g_lang == Lang::Zh ? L"zh-cn" : L"en-us", &fmt))) {
             fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 22, 17);
@@ -1666,7 +1727,7 @@ struct Painter {
         IDWriteTextFormat *fmt = nullptr;
         IDWriteTextLayout *layout = nullptr;
         float w = 0;
-        if (SUCCEEDED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr, weight,
+        if (SUCCEEDED(g.dw->CreateTextFormat(ui_font(), nullptr, weight,
                                              DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, L"", &fmt)) &&
             SUCCEEDED(g.dw->CreateTextLayout(s.c_str(), (UINT32)s.size(), fmt, 4000, 100, &layout))) {
             DWRITE_TEXT_METRICS m;
@@ -1766,7 +1827,7 @@ struct Painter {
         text(S(title), {p.left + 34, p.top + 22, p.right - 30, p.top + 58}, 19, kBone, 1.0f, DWRITE_FONT_WEIGHT_BOLD);
         fill({p.left + 34, p.top + 62, p.left + 64, p.top + 64}, kBlood);
         IDWriteTextFormat *fmt = nullptr;
-        if (SUCCEEDED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr,
+        if (SUCCEEDED(g.dw->CreateTextFormat(ui_font(), nullptr,
                                              DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14,
                                              g_lang == Lang::Zh ? L"zh-cn" : L"en-us", &fmt))) {
             fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 23, 18);
@@ -1807,7 +1868,7 @@ struct Painter {
         fill({p.left + 34, p.top + 62, p.left + 64, p.top + 64}, kBlood);
         D2D1_RECT_F body = {p.left + 34, p.top + 78, p.right - 34, p.bottom - 74};
         IDWriteTextFormat *fmt = nullptr;
-        if (SUCCEEDED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr,
+        if (SUCCEEDED(g.dw->CreateTextFormat(ui_font(), nullptr,
                                              DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14,
                                              g_lang == Lang::Zh ? L"zh-cn" : L"en-us", &fmt))) {
             fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 23, 18);
@@ -2372,8 +2433,12 @@ struct Painter {
         if (!shown.c.empty())
             text(shown.c, {box.left + 12, box.top, box.right - 32, box.bottom}, 12.5f, kAsh, 0.85f, DWRITE_FONT_WEIGHT_NORMAL,
                  nullptr, DWRITE_TEXT_ALIGNMENT_TRAILING, 0.0f, true);
-        text(L"\xE70D", {box.right - 28, box.top, box.right - 8, box.bottom}, 11, hov ? kGold : kAsh, 1.0f,
-             DWRITE_FONT_WEIGHT_NORMAL, icon_font(), DWRITE_TEXT_ALIGNMENT_CENTER);
+        if (icon_font())
+            text(L"\xE70D", {box.right - 28, box.top, box.right - 8, box.bottom}, 11, hov ? kGold : kAsh, 1.0f,
+                 DWRITE_FONT_WEIGHT_NORMAL, icon_font(), DWRITE_TEXT_ALIGNMENT_CENTER);
+        else
+            text(L"v", {box.right - 28, box.top, box.right - 8, box.bottom}, 11, hov ? kGold : kAsh, 1.0f,
+                 DWRITE_FONT_WEIGHT_NORMAL, L"Segoe UI", DWRITE_TEXT_ALIGNMENT_CENTER);
         g_hits.push_back({id, box});
         if (!open) return;
         overlay = [this, id, box, sh, rows, sel, note] {
@@ -2615,7 +2680,7 @@ struct Painter {
         D2D1_RECT_F c2 = {x, c.bottom + 10, x + w, c.bottom + 10 + 46 + 130}; // five lines of English
         y = card(c2, S(Str::LegalTitle));
         IDWriteTextFormat *fmt = nullptr;
-        if (SUCCEEDED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr,
+        if (SUCCEEDED(g.dw->CreateTextFormat(ui_font(), nullptr,
                                              DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13,
                                              g_lang == Lang::Zh ? L"zh-cn" : L"en-us", &fmt))) {
             fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 21, 16);
@@ -2828,7 +2893,7 @@ struct Painter {
         if (g.tip < 0) return;
         const std::wstring &s = g_tips[g.tip].s;
         IDWriteTextFormat *fmt = nullptr;
-        if (FAILED(g.dw->CreateTextFormat(g_lang == Lang::Zh ? L"Microsoft YaHei UI" : L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+        if (FAILED(g.dw->CreateTextFormat(ui_font(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
                                           DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13, g_lang == Lang::Zh ? L"zh-cn" : L"en-us", &fmt)))
             return;
         IDWriteTextLayout *l = nullptr;
@@ -2959,6 +3024,7 @@ void update_title()
 
 void set_lang(Lang l)
 {
+    if (l == Lang::Zh && !zh_font()) return; // no Chinese font (Wine on Linux): the launcher stays in English
     g_lang = l;
     ini_set(L"lang", l == Lang::Zh ? L"zh" : L"en");
     update_title();
@@ -3679,11 +3745,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
         if (!wcscmp(argv[i], L"--help-scroll") && i + 1 < argc) g.help_for = g.help, g.help_scroll = g.help_target = (float)_wtof(argv[i + 1]); // with --snap, after --show-help
         if (!wcscmp(argv[i], L"--mouse") && i + 2 < argc) g.mouse_x = (float)_wtof(argv[i + 1]), g.mouse_y = (float)_wtof(argv[i + 2]); // with --snap: the mouse there (a cut text's tip)
         if (!wcscmp(argv[i], L"--mdl2")) g_icon_font = L"Segoe MDL2 Assets";
+        if (!wcscmp(argv[i], L"--fonts-basic")) g_fonts_basic = true;
         if (!wcscmp(argv[i], L"--monitor") && i + 1 < argc) { // with --snap: as if the monitor were WxH (the shape list)
             int w = 0, h = 0;
             if (swscanf_s(argv[i + 1], L"%dx%d", &w, &h) == 2) init_monitor_aspect(w, h);
         }
     }
+    if (g_lang == Lang::Zh && !zh_font()) g_lang = Lang::En; // no Chinese font (Wine on Linux): English, not boxes
     check_game();
     for (int i = 1; i < argc; i++)
         if (!wcscmp(argv[i], L"--import-now")) online_import(); // with --snap, before it on the line: the Import button pressed
