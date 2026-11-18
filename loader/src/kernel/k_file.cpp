@@ -579,19 +579,25 @@ NTSTATUS __stdcall NtQueryVolumeInformationFile(HANDLE FileHandle, XIO_STATUS_BL
     if ((FsInformationClass == 3 || FsInformationClass == 7) && part >= 1 && part <= 5) {
         // FATX-like numbers: 16 KB clusters, capped at the partition size.
         uint64_t total = kPartitions[part].size;
-        // The host's free space, at most the partition's size. A failed query counts as room enough: it was taken as 0
-        // and the game said there were not the 8 free blocks a save needs (a player on Batocera / Wine, whose save
-        // folder is on a Linux file system, 2026-11-18). What was found is logged once a partition.
-        ULARGE_INTEGER free_host{};
-        const BOOL got = GetDiskFreeSpaceExW(hi.mount->host.c_str(), &free_host, nullptr, nullptr);
+        // The host's free space, at most the partition's size. A player on Batocera / Wine (the save folder on a Linux
+        // file system) got "not the 8 free blocks a save needs" at every start: the query said 0 bytes free to the
+        // caller (2.2.36.1-t2's log, 2026-11-18) - root-reserved blocks on a nearly full ext4 disk, or a mount that tells
+        // Wine nothing. So: free to the caller, else free on the disk, else (both 0, or the query failed) unknown, which
+        // counts as room enough (the partition's size). The three figures are logged once a partition.
+        ULARGE_INTEGER to_caller{}, disk_size{}, disk_free{};
+        const BOOL got = GetDiskFreeSpaceExW(hi.mount->host.c_str(), &to_caller, &disk_size, &disk_free);
         const DWORD err = got ? 0 : GetLastError();
-        uint64_t avail = !got ? total : free_host.QuadPart < total ? free_host.QuadPart : total;
+        const uint64_t host_free = !got ? 0 : to_caller.QuadPart ? to_caller.QuadPart : disk_free.QuadPart;
+        const bool unknown = host_free == 0;
+        uint64_t avail = unknown ? total : host_free < total ? host_free : total;
         static bool told[6];
         if (!told[part]) {
             told[part] = true;
             if (got)
-                logf("[k] free space, Partition%d: %llu MB on the host, %llu blocks of 16 KB reported", part,
-                     (unsigned long long)(free_host.QuadPart >> 20), (unsigned long long)(avail / 0x4000));
+                logf("[k] free space, Partition%d: the host says %llu MB free to us, %llu MB free on a %llu MB disk; %llu blocks of "
+                     "16 KB reported%s", part, (unsigned long long)(to_caller.QuadPart >> 20), (unsigned long long)(disk_free.QuadPart >> 20),
+                     (unsigned long long)(disk_size.QuadPart >> 20), (unsigned long long)(avail / 0x4000),
+                     unknown ? " (none known: the partition's size)" : "");
             else
                 logf("[k] free space, Partition%d: the host's query failed (error %lu) on %s; %llu blocks of 16 KB reported (the "
                      "partition's size)", part, err, narrow(hi.mount->host).c_str(), (unsigned long long)(avail / 0x4000));
