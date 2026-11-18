@@ -202,6 +202,34 @@ void complete(XIO_STATUS_BLOCK *iosb, NTSTATUS s, uint32_t info, HANDLE ev)
     if (ev) SetEvent(ev);
 }
 
+// What a partition's files and folders take on a FATX volume: each file rounded up to 16 KB clusters, each folder one
+// cluster (NtQueryVolumeInformationFile's free space).
+uint64_t fatx_used_bytes(const std::wstring &dir)
+{
+    constexpr uint64_t kCluster = 0x4000;
+    uint64_t used = 0;
+    std::vector<std::wstring> todo{dir};
+    while (!todo.empty()) {
+        std::wstring d = todo.back();
+        todo.pop_back();
+        WIN32_FIND_DATAW f;
+        HANDLE h = FindFirstFileExW((d + L"\\*").c_str(), FindExInfoBasic, &f, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
+        if (h == INVALID_HANDLE_VALUE) continue;
+        do {
+            if (!wcscmp(f.cFileName, L".") || !wcscmp(f.cFileName, L"..")) continue;
+            if (f.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                used += kCluster;
+                todo.push_back(d + L"\\" + f.cFileName);
+            } else {
+                uint64_t size = (uint64_t)f.nFileSizeHigh << 32 | f.nFileSizeLow;
+                used += (size + kCluster - 1) / kCluster * kCluster;
+            }
+        } while (FindNextFileW(h, &f));
+        FindClose(h);
+    }
+    return used;
+}
+
 // How many times in a row this name has failed to open (0 after a success): a file the game asks for over and over is
 // logged at its 1st..20th failure and then every 10000th (open_common). NG2004's Master Ninja Tournament shop asked for
 // 'd:\NG' 932,579 times and the log grew to 191 MB (the user, 2026-11-18). One count per name (a loop over two missing
@@ -577,30 +605,40 @@ NTSTATUS __stdcall NtQueryVolumeInformationFile(HANDLE FileHandle, XIO_STATUS_BL
     int part = known ? hi.mount->partition : 0;
     uint8_t *p = (uint8_t *)FsInformation;
     if ((FsInformationClass == 3 || FsInformationClass == 7) && part >= 1 && part <= 5) {
-        // FATX-like numbers: 16 KB clusters, capped at the partition size.
+        // As the Xbox's FATX: 16 KB clusters, the free ones the partition's size less what its files and folders take
+        // (each file rounded up to whole clusters, each folder one). The host disk only caps that when it gives a believable
+        // free space: a player on Batocera / Wine (the save folder on a Linux file system) was told 0 bytes free to the
+        // caller and 0 free on a 461 GB disk, and Ninja Gaiden Black said at every start that the 8 free blocks a save
+        // needs were not there (2.2.36.1-t2 / -t3 logs, 2026-11-18). Queries are rare (at the start, around saving), so
+        // the partition folder is counted each time; the figures are logged at a partition's first query.
+        // The save partition (1, E:) only: the cache partitions (3-5, X: Y: Z:) and the dashboard's (2, C:) keep the
+        // partition's size as their room (the host's free space caps it when believable), as before - the games had
+        // filled them past the console's 750 MB under that (NG2004's Y: 818 MB in the user's install), and counting
+        // what is there would make them clear their caches (the user chose to keep the caches as they are).
         uint64_t total = kPartitions[part].size;
-        // The host's free space, at most the partition's size. A player on Batocera / Wine (the save folder on a Linux
-        // file system) got "not the 8 free blocks a save needs" at every start: the query said 0 bytes free to the
-        // caller (2.2.36.1-t2's log, 2026-11-18) - root-reserved blocks on a nearly full ext4 disk, or a mount that tells
-        // Wine nothing. So: free to the caller, else free on the disk, else (both 0, or the query failed) unknown, which
-        // counts as room enough (the partition's size). The three figures are logged once a partition.
+        const uint64_t used = part == 1 ? fatx_used_bytes(hi.mount->host) : 0;
+        const uint64_t own_free = used < total ? total - used : 0;
         ULARGE_INTEGER to_caller{}, disk_size{}, disk_free{};
         const BOOL got = GetDiskFreeSpaceExW(hi.mount->host.c_str(), &to_caller, &disk_size, &disk_free);
         const DWORD err = got ? 0 : GetLastError();
         const uint64_t host_free = !got ? 0 : to_caller.QuadPart ? to_caller.QuadPart : disk_free.QuadPart;
-        const bool unknown = host_free == 0;
-        uint64_t avail = unknown ? total : host_free < total ? host_free : total;
+        uint64_t avail = host_free && host_free < own_free ? host_free : own_free;
         static bool told[6];
         if (!told[part]) {
             told[part] = true;
+            char host[160];
             if (got)
-                logf("[k] free space, Partition%d: the host says %llu MB free to us, %llu MB free on a %llu MB disk; %llu blocks of "
-                     "16 KB reported%s", part, (unsigned long long)(to_caller.QuadPart >> 20), (unsigned long long)(disk_free.QuadPart >> 20),
-                     (unsigned long long)(disk_size.QuadPart >> 20), (unsigned long long)(avail / 0x4000),
-                     unknown ? " (none known: the partition's size)" : "");
+                snprintf(host, sizeof host, "the host says %llu MB free to us, %llu MB free on a %llu MB disk%s",
+                         (unsigned long long)(to_caller.QuadPart >> 20), (unsigned long long)(disk_free.QuadPart >> 20),
+                         (unsigned long long)(disk_size.QuadPart >> 20), host_free ? "" : " (not taken)");
             else
-                logf("[k] free space, Partition%d: the host's query failed (error %lu) on %s; %llu blocks of 16 KB reported (the "
-                     "partition's size)", part, err, narrow(hi.mount->host).c_str(), (unsigned long long)(avail / 0x4000));
+                snprintf(host, sizeof host, "the host's query failed (error %lu)", err);
+            if (part == 1)
+                logf("[k] free space, Partition%d: %llu of %llu MB used by its files and folders; %s; %llu blocks of 16 KB free reported",
+                     part, (unsigned long long)(used >> 20), (unsigned long long)(total >> 20), host, (unsigned long long)(avail / 0x4000));
+            else
+                logf("[k] free space, Partition%d (a cache / the dashboard's: its size, %llu MB, as room); %s; %llu blocks of 16 KB free "
+                     "reported", part, (unsigned long long)(total >> 20), host, (unsigned long long)(avail / 0x4000));
         }
         uint32_t need = FsInformationClass == 3 ? 24 : 32;
         if (Length < need) return XSTATUS_BUFFER_TOO_SMALL;
