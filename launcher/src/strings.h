@@ -437,6 +437,9 @@ enum class Str {
     Exclusive60, // Graphics: exclusive fullscreen with V-Sync at 60 Hz on a high-refresh screen (black.ini exclusive_60hz)
     Exclusive60Note,
     HelpExclusive60,
+    MoveFlash, // Graphics: the full-screen glow of the wall run's slash and some techniques (black.ini move_flash)
+    MoveFlashNote,
+    HelpMoveFlash,
     Count
 };
 

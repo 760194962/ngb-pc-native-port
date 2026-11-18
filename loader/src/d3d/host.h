@@ -49,6 +49,13 @@ bool intz();
 void begin_scene();                         // BeginScene once per frame, lazily
 void end_scene();                           // close the scene (before StretchRect); the next draw reopens one
 HRESULT present();                          // EndScene + Present (a lost device: see xd3d recover_device)
+// --flipex present statistics for present_early (d3d/device.cpp EarlyGate). Before each present(): the vblank the frame
+// started at (QPC) and whether it goes early. flip_deadline_ms: the deadline learned from what reached the screen, or a
+// negative value when there are no statistics (no flip model, or a GPU whose frames are copied to another's screen).
+// flip_take_miss: an early frame was shown a refresh late since the last call (the gate falls back to the beat).
+void flip_frame_info(int64_t tick_qpc, bool early);
+double flip_deadline_ms();
+bool flip_take_miss();
 // ResetEx with the creation parameters (window or exclusive fullscreen); references to the back buffer and depth
 // surface must be released first; afterwards Direct3D is back at its default states.
 bool reset_device();

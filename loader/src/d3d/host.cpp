@@ -11,6 +11,7 @@
 #include "hooks.h"
 #include "perf.h"
 
+#include <dxgi.h>
 #include <shellapi.h>
 
 #include <algorithm>
@@ -47,6 +48,46 @@ int g_bb_w, g_bb_h;                 // host back buffer: the largest monitor, so
 // while the window is fullscreen. Alt+Enter switches by a Reset at the next Swap (d3d/device.cpp recover_device).
 std::atomic<bool> g_exclusive_now{false};
 std::atomic<bool> g_dev_exclusive{false}; // the device is exclusive now (g_exclusive_now leads it until the next Reset)
+std::atomic<bool> g_flip_now{false};      // the windowed device presents by flip (back buffers the client's size)
+std::atomic<bool> g_flip_remeasure{false}; // a Reset: FlipStats measures the refresh again (exclusive may have had another)
+bool g_flip_broken;                       // the GPU that renders drives no screen: windows keep COPY
+
+// The flip model with present statistics for windows: with the low-latency present (black.ini low_latency_present) or
+// --flipex, unless the GPU that renders drives no screen (its frames are copied to another's: GetPresentStats gave zeros,
+// RTX 3060 under Optimus, 2026-11-17), which is checked before the device is made: a window that has shown a flip swap
+// chain shows nothing presented to it by COPY afterwards (a Reset back to COPY left the screen on its last flip). Where
+// the statistics still never come (Wine / Proton?) the flip model stays and present_early keeps its fixed deadline.
+bool flip_wanted() { return (g_cfg.flipex || g_cfg.present_early) && !g_flip_broken; }
+
+// Whether the adapter Direct3D 9 renders on has outputs of its own (DXGI, matched by LUID); true when it cannot be told.
+bool renders_on_a_screen()
+{
+    LUID luid = {};
+    if (FAILED(g_d3d->GetAdapterLUID(D3DADAPTER_DEFAULT, &luid))) return true;
+    HMODULE m = LoadLibraryW(L"dxgi.dll");
+    using CreateFn = HRESULT(WINAPI *)(REFIID, void **);
+    auto create = m ? (CreateFn)GetProcAddress(m, "CreateDXGIFactory1") : nullptr;
+    IDXGIFactory1 *f = nullptr;
+    if (!create || FAILED(create(__uuidof(IDXGIFactory1), (void **)&f)) || !f) return true;
+    bool screen = true;
+    IDXGIAdapter1 *a = nullptr;
+    for (UINT i = 0; f->EnumAdapters1(i, &a) != DXGI_ERROR_NOT_FOUND; i++) {
+        DXGI_ADAPTER_DESC1 d = {};
+        a->GetDesc1(&d);
+        if (d.AdapterLuid.LowPart == luid.LowPart && d.AdapterLuid.HighPart == luid.HighPart) {
+            IDXGIOutput *o = nullptr;
+            screen = a->EnumOutputs(0, &o) != DXGI_ERROR_NOT_FOUND;
+            if (o) o->Release();
+            logf("host: Direct3D 9 renders on '%ls', %s", d.Description, screen ? "which drives a screen" : "which drives no screen (its frames are "
+                                                                                                        "copied to another GPU's)");
+            a->Release();
+            break;
+        }
+        a->Release();
+    }
+    f->Release();
+    return screen;
+}
 int g_frame_w, g_frame_h;           // the part of the back buffer the current frame uses
 int g_out_w, g_out_h;               // the window size as set (open_window): fullscreen's with black.ini fullscreen_res = window
 WINDOWPLACEMENT g_windowed_place = {sizeof(WINDOWPLACEMENT)};
@@ -548,11 +589,26 @@ D3DDISPLAYMODEEX exclusive_mode()
     return best;
 }
 
+// The windowed device's parameters: g_pp (COPY into a back buffer the largest monitor's size, a frame presented by its
+// rectangle), or with --flipex the flip model: two back buffers the client area's size (a flip shows the whole buffer;
+// a window of another size has the device Reset to it, present()), with present statistics.
+D3DPRESENT_PARAMETERS windowed_params()
+{
+    D3DPRESENT_PARAMETERS pp = g_pp;
+    if (flip_wanted()) {
+        pp.SwapEffect = D3DSWAPEFFECT_FLIPEX;
+        pp.BackBufferCount = 2;
+        if (g_win_w > 0 && g_win_h > 0) pp.BackBufferWidth = g_win_w, pp.BackBufferHeight = g_win_h;
+    }
+    return pp;
+}
+
 // Exclusive fullscreen: exclusive_mode() on the default adapter (if it cannot be read: stays windowed)
 D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp)
 {
     D3DDISPLAYMODEEX dm = exclusive_mode();
     if (!dm.Width) return pp;
+    if (pp.SwapEffect == D3DSWAPEFFECT_FLIPEX) pp.SwapEffect = D3DSWAPEFFECT_COPY, pp.BackBufferCount = 1; // flip: windows only
     pp.Windowed = FALSE;
     pp.BackBufferWidth = dm.Width;
     pp.BackBufferHeight = dm.Height;
@@ -582,6 +638,10 @@ bool create_device_here()
         logf("host: Direct3DCreate9Ex failed 0x%08lx", made);
         return false;
     }
+    if ((g_cfg.flipex || g_cfg.present_early) && !g_flip_broken && !renders_on_a_screen()) {
+        g_flip_broken = true;
+        logf("host: windows present by COPY (the flip model's statistics need the GPU that drives the screen)");
+    }
     SIZE mon = {g_win_w, g_win_h};
     EnumDisplayMonitors(nullptr, nullptr, grow_to_monitor, (LPARAM)&mon);
     g_bb_w = mon.cx;
@@ -603,16 +663,18 @@ bool create_device_here()
     // (exclusive_params).
     pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
     g_pp = pp; // the windowed parameters: Reset goes back to them (reset_device)
-    if (g_exclusive_now) pp = exclusive_params(pp);
+    pp = g_exclusive_now ? exclusive_params(pp) : windowed_params();
     // FPU_PRESERVE: the game's x87 math must keep its precision; MULTITHREADED: loader threads may call in.
     // Not NOWINDOWCHANGES: with it the runtime does not minimise the window and bring it back around Alt+Tab in
     // exclusive fullscreen (r279). The window is restyled only while the device is windowed instead.
-    DWORD flags = D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE | D3DCREATE_MULTITHREADED;
+    // ENABLE_PRESENTSTATS (--flipex): GetPresentStats returns real data only on a device created with it.
+    const DWORD stats = flip_wanted() ? D3DCREATE_ENABLE_PRESENTSTATS : 0;
+    DWORD flags = D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE | D3DCREATE_MULTITHREADED | stats;
     D3DDISPLAYMODEEX mode = exclusive_mode();
     HRESULT hr = g_d3d->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd, flags, &pp, pp.Windowed ? nullptr : &mode, &g_devex);
     if (FAILED(hr)) {
         logf("host: CreateDeviceEx failed 0x%08lx, retrying with software vertex processing", hr);
-        flags = D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE | D3DCREATE_MULTITHREADED;
+        flags = D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE | D3DCREATE_MULTITHREADED | stats;
         hr = g_d3d->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd, flags, &pp, pp.Windowed ? nullptr : &mode, &g_devex);
         if (FAILED(hr)) {
             logf("host: CreateDeviceEx failed 0x%08lx", hr);
@@ -623,6 +685,9 @@ bool create_device_here()
     g_bb_w = (int)pp.BackBufferWidth; // exclusive: the display mode's size
     g_bb_h = (int)pp.BackBufferHeight;
     g_dev_exclusive = !pp.Windowed;
+    g_flip_now = pp.Windowed && pp.SwapEffect == D3DSWAPEFFECT_FLIPEX;
+    if (g_flip_now) logf("host: the window presents by flip (D3DSWAPEFFECT_FLIPEX, 2 back buffers %ux%u, present statistics on)",
+                         pp.BackBufferWidth, pp.BackBufferHeight);
     if (!pp.Windowed)
         logf("host: exclusive fullscreen %ux%u at %u Hz, vsync %s", pp.BackBufferWidth, pp.BackBufferHeight, pp.FullScreen_RefreshRateInHz,
              pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
@@ -686,7 +751,7 @@ bool recreate_device_here()
 
 bool reset_device_here()
 {
-    D3DPRESENT_PARAMETERS pp = g_exclusive_now ? exclusive_params(g_pp) : g_pp;
+    D3DPRESENT_PARAMETERS pp = g_exclusive_now ? exclusive_params(g_pp) : windowed_params();
     D3DDISPLAYMODEEX mode = exclusive_mode();
     HRESULT hr = g_devex->ResetEx(&pp, pp.Windowed ? nullptr : &mode);
     if (FAILED(hr)) {
@@ -700,7 +765,9 @@ bool reset_device_here()
     g_bb_w = (int)pp.BackBufferWidth; // the exclusive mode's size can differ from the largest monitor's
     g_bb_h = (int)pp.BackBufferHeight;
     g_dev_exclusive = !pp.Windowed;
-    logf("host: device reset, %s %ux%u, vsync %s", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth, pp.BackBufferHeight,
+    g_flip_now = pp.Windowed && pp.SwapEffect == D3DSWAPEFFECT_FLIPEX;
+    g_flip_remeasure = true;
+    logf("host: device reset, %s%s %ux%u, vsync %s", g_flip_now ? "flip " : "", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth, pp.BackBufferHeight,
          pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
     if (pp.Windowed && g_restyle_pending.exchange(false)) restyle_windowed(); // now the window can change
     return true;
@@ -817,7 +884,8 @@ bool present_stretch()
         }
         g_stretch_w = g_frame_w;
         g_stretch_h = g_frame_h;
-        logf("host: exclusive fullscreen at the window size: the %dx%d frame scaled over %dx%d", g_frame_w, g_frame_h, g_bb_w, g_bb_h);
+        logf("host: %s: the %dx%d frame scaled over %dx%d", g_dev_exclusive ? "exclusive fullscreen at the window size" : "flip model", g_frame_w,
+             g_frame_h, g_bb_w, g_bb_h);
     }
     RECT fr = {0, 0, g_frame_w, g_frame_h};
     bool ok = SUCCEEDED(g_dev->StretchRect(bb, &fr, g_stretch, nullptr, D3DTEXF_NONE)) &&
@@ -825,6 +893,211 @@ bool present_stretch()
                SUCCEEDED(g_dev->StretchRect(g_stretch, nullptr, bb, nullptr, D3DTEXF_NONE))); // a card without linear
     bb->Release();
     return ok;
+}
+// --flipex: what the swap chain says reached the screen (GetPresentStats; flip model, device made with
+// ENABLE_PRESENTSTATS). Polled after every Present: the last displayed Present's id and the vblank it was shown at.
+// Between two polls, more ids than vblanks means a Present never shown (skipped), more vblanks than ids a picture
+// shown again (repeated). The lag: vblanks from a Present to its display. [flip] every 600 Presents.
+// present_early's deadline from the screen: an early frame (its tick the vblank V it started at) makes the composition
+// before V+1 and is shown at V+2; one that missed it is shown at V+3, or never when the next frame lands with it. A miss
+// lowers the deadline to that frame's time after its tick less 1 ms (not under 4) and tells the gate to fall back (one
+// presented more than 3 ms inside the deadline only counts: the third within a minute lowers it 1 ms; see miss). It
+// starts at 10 ms; until the first miss, every 60 early frames shown on time raise it 0.5 ms, after one 300 of them a
+// minute after the last miss raise it 0.25 ms; 14 ms at most. A miss lowers it only when the 120 displays before it were
+// each one new picture for its refreshes: while the game loads or plays a 30 fps movie pictures are skipped or shown
+// twice anyway (a 2.2.34 test lost its deadline to 4.75 ms on a boot-time skip), and then the gate only falls back.
+// The milliseconds are for 60 Hz; at another refresh they scale with its period (120 Hz: from 5 ms, 2 to 7 ms), and a
+// frame's refreshes are k = 60 Hz's period over the display's (120 Hz: 2; the tick follows every k-th, device.cpp).
+struct FlipStats {
+    int64_t sent[512] = {}, tick[512] = {};
+    bool early[512] = {};
+    int64_t next_tick = 0;
+    bool next_early = false;
+    UINT last_pc = 0, last_prc = 0;
+    bool started = false;
+    int64_t q0 = 0;
+    UINT r0 = 0;
+    double period = 0; // QPC ticks a refresh
+    uint32_t presents = 0, shown = 0, skips = 0, repeats = 0, disjoint = 0, fails = 0, lag[6] = {};
+    // the deadline
+    double deadline = -1.0, max_dl = 0; // set when the period is known
+    double ms_per_ref() const { return period > 0 ? period * 1000.0 / qpc_freq() : 16.683; }
+    int k() const { return std::max(1, (int)lround(16.683 / ms_per_ref())); }
+    double scale60() const { return ms_per_ref() / 16.683; } // the scale of the 60 Hz milliseconds
+    uint64_t total = 0, last_miss = 0, last_stray = 0, last_probe = 0;
+    uint32_t strays = 0, stray_run = 0; // misses presented well inside the deadline (miss)
+    uint32_t on_time = 0, misses = 0, early_shown = 0, early_skipped = 0, raises = 0, from_tick[6] = {};
+    bool missed_ever = false;
+    uint32_t steady = 0; // displays in a row of one new picture a refresh
+    uint32_t unsteady_misses = 0;
+    bool miss_flag = false;
+    double ms_of(int64_t qpc_delta) const { return qpc_delta * 1000.0 / qpc_freq(); }
+    void miss(UINT id)
+    {
+        miss_flag = true;
+        if (steady < 120) {
+            unsteady_misses++;
+            return;
+        }
+        double off = ms_of(sent[id & 511] - tick[id & 511]);
+        const double s = scale60();
+        if (off < deadline - 3.0 * s) {
+            // presented well inside the deadline and still late: its time was not the cause (the GPU's work or the
+            // compositor's), and the deadline drops only on the third such miss within a minute, by 1 ms. On the Iris
+            // Xe single misses at 3-5 ms after the tick had sent the deadline from 14 to 4 ms, where no frame was
+            // early any more and none could raise it again (2 of 3 runs, 2026-11-17).
+            if (total - last_stray > 3600) stray_run = 0;
+            last_stray = total;
+            strays++;
+            if (++stray_run < 3) return;
+            stray_run = 0;
+            deadline = std::max(4.0 * s, deadline - 1.0 * s);
+        } else {
+            deadline = std::max(4.0 * s, std::min(deadline, off - 1.0 * s));
+        }
+        misses++;
+        missed_ever = true;
+        miss_flag = true;
+        last_miss = total;
+        on_time = 0;
+    }
+    void after_present()
+    {
+        IDirect3DSwapChain9 *s = nullptr;
+        IDirect3DSwapChain9Ex *sc = nullptr;
+        if (FAILED(g_dev->GetSwapChain(0, &s)) || !s) return;
+        s->QueryInterface(__uuidof(IDirect3DSwapChain9Ex), (void **)&sc);
+        s->Release();
+        if (!sc) return;
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        UINT id = 0;
+        if (SUCCEEDED(sc->GetLastPresentCount(&id))) {
+            sent[id & 511] = now.QuadPart;
+            tick[id & 511] = next_tick;
+            early[id & 511] = next_early;
+        }
+        D3DPRESENTSTATS st = {};
+        HRESULT hr = sc->GetPresentStats(&st);
+        sc->Release();
+        if (g_cfg.flip_nostats) st = {}; // tests: as a GPU whose frames are copied to another's screen
+        presents++;
+        total++;
+        // A deadline lowered below the 10 ms start climbs back 0.25 ms every 600 frames once a minute passed without a
+        // miss: below it few frames go early, and only early frames shown on time raise it otherwise
+        if (missed_ever && period > 0 && deadline > 0 && deadline < 10.0 * scale60() && total - last_miss >= 3600 &&
+            total - last_probe >= 600) {
+            deadline = std::min(10.0 * scale60(), deadline + 0.25 * scale60());
+            last_probe = total;
+            raises++;
+        }
+        if (!started && !q0 && total == 300) // never a statistic: the flip model stays (see flip_wanted), the deadline fixed
+            logf("host: the flip model gives no present statistics here (%u failed, last 0x%08lx): present_early keeps its fixed deadline",
+                 fails, (unsigned long)hr);
+        if (g_flip_remeasure.exchange(false)) q0 = 0, started = false;
+        if (hr == D3DERR_PRESENT_STATISTICS_DISJOINT) {
+            disjoint++;
+            started = false;
+            q0 = 0; // the display's mode may have changed: measure its refresh again
+        } else if (FAILED(hr)) {
+            fails++;
+        } else if (st.PresentCount && st.SyncQPCTime.QuadPart) {
+            if (!q0) q0 = st.SyncQPCTime.QuadPart, r0 = st.SyncRefreshCount;
+            else if (st.SyncRefreshCount - r0 >= 60) {
+                double p = (double)(st.SyncQPCTime.QuadPart - q0) / (st.SyncRefreshCount - r0);
+                // a new refresh (after a Reset or a mode change, measured afresh): the deadline keeps its share of it.
+                // (2026-11-17: back from 60 Hz exclusive to a 120 Hz window the old average read 10.2-11.5 ms a refresh)
+                if (period > 0 && deadline > 0 && fabs(p / period - 1.0) > 0.05) deadline *= p / period, max_dl = 0;
+                period = p;
+                if (deadline < 0) deadline = 10.0 * scale60();
+            }
+            if (!started) {
+                started = true;
+            } else if (st.PresentCount != last_pc) {
+                UINT ids = st.PresentCount - last_pc, refs = st.PresentRefreshCount - last_prc, per = (UINT)k();
+                shown++;
+                if (ids > 1 && refs < ids * per) { // fewer refreshes than these pictures' share: one was cut short or never shown
+                    skips += ids - (refs + per - 1) / per;
+                    for (UINT j = last_pc + 1; j < st.PresentCount; j++) // an early one among them missed
+                        if (early[j & 511]) {
+                            early_skipped++;
+                            miss(j);
+                            break;
+                        }
+                }
+                if (refs > ids * per) repeats += (refs - ids * per + per - 1) / per; // a picture shown longer than its share
+                if (period > 0) {
+                    double at = st.SyncRefreshCount + (sent[st.PresentCount & 511] - st.SyncQPCTime.QuadPart) / period;
+                    lag[std::clamp((int)st.PresentRefreshCount - (int)floor(at), 0, 5)]++;
+                    UINT i = st.PresentCount & 511;
+                    if (early[i] && tick[i]) { // the vblank its frame started at, and when it was shown
+                        int v = (int)floor(st.SyncRefreshCount + (tick[i] - st.SyncQPCTime.QuadPart) / period);
+                        int d = (int)st.PresentRefreshCount - v;
+                        from_tick[std::clamp(d, 0, 5)]++;
+                        early_shown++;
+                        double off = ms_of(sent[i] - tick[i]);
+                        if (d > 2) {
+                            miss(st.PresentCount);
+                        } else {
+                            max_dl = std::max(max_dl, off);
+                            bool raise = missed_ever ? ++on_time >= 300 && total - last_miss >= 3600 : ++on_time >= 60;
+                            if (raise && deadline < 14.0 * scale60()) {
+                                deadline = std::min(14.0 * scale60(), deadline + (missed_ever ? 0.25 : 0.5) * scale60());
+                                on_time = 0;
+                                raises++;
+                            }
+                        }
+                    }
+                }
+                steady = ids == 1 && refs == (UINT)k() ? steady + 1 : 0; // after the checks above: miss() reads the run before this
+            }
+            last_pc = st.PresentCount;
+            last_prc = st.PresentRefreshCount;
+        }
+        if (presents >= 600) {
+            logf("[flip] last %u Presents: %u shown, %u never shown, %u repeats; vblanks from Present to screen 0:%u 1:%u 2:%u 3:%u 4:%u 5+:%u; "
+                 "refresh %.2f ms; %u disjoint, %u failed",
+                 presents, shown, skips, repeats, lag[0], lag[1], lag[2], lag[3], lag[4], lag[5], period > 0 ? period * 1000.0 / qpc_freq() : 0.0,
+                 disjoint, fails);
+            if (early_shown || early_skipped)
+                logf("[flip] early frames: %u shown (vblanks from their tick 1:%u 2:%u 3:%u 4+:%u), %u never shown; %u misses (%u more while "
+                     "the display was unsteady, not counted; %u presented well inside the deadline), %u raises; deadline %.2f ms (latest on time %.2f)",
+                     early_shown, from_tick[1], from_tick[2], from_tick[3], from_tick[4] + from_tick[5], early_skipped, misses, unsteady_misses,
+                     strays, raises, deadline, max_dl);
+            presents = shown = skips = repeats = disjoint = fails = 0;
+            early_shown = early_skipped = misses = raises = unsteady_misses = strays = 0;
+            max_dl = 0;
+            memset(lag, 0, sizeof lag);
+            memset(from_tick, 0, sizeof from_tick);
+        }
+    }
+    bool valid() const { return g_flip_now && started && period > 0 && deadline > 0; }
+    static double qpc_freq()
+    {
+        LARGE_INTEGER f;
+        QueryPerformanceFrequency(&f);
+        return (double)f.QuadPart;
+    }
+};
+FlipStats g_flip_stats;
+
+// --flipex: the back buffers follow the window; a new client size held for 20 frames gets a Reset to it (a drag resizes
+// once at its end). Meanwhile the compositor scales the old buffer to the window.
+void flip_follow_window()
+{
+    static int last_w, last_h, same;
+    int w = g_win_w, h = g_win_h;
+    if (w <= 0 || h <= 0 || (w == g_bb_w && h == g_bb_h)) {
+        same = 0;
+        return;
+    }
+    same = w == last_w && h == last_h ? same + 1 : 0;
+    last_w = w, last_h = h;
+    if (same == 20) {
+        static char why[96]; // request_device_reset keeps the pointer (logged when the Reset happens)
+        snprintf(why, sizeof why, "flip model: the window is %dx%d now, its back buffers %dx%d", w, h, g_bb_w, g_bb_h);
+        xd3d::request_device_reset(why);
+    }
 }
 } // namespace
 
@@ -838,10 +1111,46 @@ HRESULT present()
     // they piled up in the driver (32 frames and more, r528) and the first Present after the window came back took
     // 1-10 s, a black window with the game stopped (the user, 2026-10-24, borderless; r514-r518). Under plain Direct3D 9
     // an exclusive device was lost there and its Reset dropped the pile; a 9Ex device is not lost.
-    bool whole = g_dev_exclusive && g_frame_w > 0 && g_frame_h > 0 && (g_frame_w < g_bb_w || g_frame_h < g_bb_h) && present_stretch();
+    bool whole = (g_dev_exclusive || g_flip_now) && g_frame_w > 0 && g_frame_h > 0 && (g_frame_w < g_bb_w || g_frame_h < g_bb_h) &&
+                 present_stretch();
+    if (g_cfg.frame_marker) { // tests: the Present's number in the top-left corner, read back from the screen by a capture tool
+        static uint32_t presents;
+        uint32_t n = ++presents;
+        IDirect3DSurface9 *bb = nullptr;
+        if (SUCCEEDED(g_dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {
+            // 14 squares of 8x8 at the top left: white, black (references), then bits 0-11 of n, white = 1
+            for (int i = 0; i < 14; i++) {
+                bool on = i == 0 ? true : i == 1 ? false : ((n >> (i - 2)) & 1) != 0;
+                RECT r = {i * 8, 0, i * 8 + 8, 8};
+                g_dev->ColorFill(bb, &r, on ? D3DCOLOR_XRGB(255, 255, 255) : D3DCOLOR_XRGB(0, 0, 0));
+            }
+            bb->Release();
+        }
+    }
     if (g_exclusive_now && g_cfg.vsync) return g_dev->Present(nullptr, nullptr, nullptr, nullptr); // flipped (exclusive_params)
+    if (g_flip_now && !g_exclusive_now) { // --flipex: a flip shows the whole buffer (no rectangles)
+        flip_follow_window();
+        HRESULT hr = g_dev->Present(nullptr, nullptr, nullptr, nullptr);
+        g_flip_stats.after_present();
+        return hr;
+    }
     RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w, g_frame_h && !whole ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)
+}
+
+void flip_frame_info(int64_t tick_qpc, bool early)
+{
+    g_flip_stats.next_tick = tick_qpc;
+    g_flip_stats.next_early = early;
+}
+
+double flip_deadline_ms() { return g_flip_stats.valid() ? g_flip_stats.deadline : -1.0; }
+
+bool flip_take_miss()
+{
+    bool m = g_flip_stats.miss_flag;
+    g_flip_stats.miss_flag = false;
+    return m;
 }
 
 bool reset_device()
