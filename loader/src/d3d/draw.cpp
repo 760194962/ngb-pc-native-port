@@ -3472,7 +3472,13 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
 uint32_t g_flash_skipped;
 // Its own count of the frame's 3D draws into the back buffer (the HUD's, g_wh.threed, is kept only on a screen not 16:9:
 // at 16:9 and 4:3 nothing was left out, the user, 2026-11-18), kept only with move_flash = 0; 0 at each Swap.
-void flash_frame_end() { g_flash_3d = 0; }
+LONG g_flash_hud_end; // g_hud_shown at the last Swap: the log's "HUD shown" at any picture shape (hud_in_play is kept
+                      // only on a screen not 16:9, and said "shown" for everything at 16:9)
+void flash_frame_end()
+{
+    g_flash_3d = 0;
+    g_flash_hud_end = g_hud_shown;
+}
 bool skip_move_flash(const DrawCtx &ctx, const void *data, uint32_t count, uint32_t stride)
 {
     if (g_cfg.move_flash || !data || count < 3 || g_flash_3d == 0) return false;
@@ -3509,7 +3515,7 @@ bool skip_move_flash(const DrawCtx &ctx, const void *data, uint32_t count, uint3
     std::string key = textured ? " glow" : event_cover ? " white laid over" : " white added";
     char t[32];
     for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
-    key += hud_in_play() ? " (HUD shown" : " (HUD hidden";
+    key += !g_hud_probe ? " (HUD ?" : g_hud_shown != g_flash_hud_end ? " (HUD shown" : " (HUD hidden";
     if (g_hud_vars[2]) snprintf(t, sizeof t, ", word 0x%04x)", *(volatile uint16_t *)(uintptr_t)g_hud_vars[2]), key += t;
     else key += ")";
     if (seen.size() < 64 && seen.insert(key).second)
