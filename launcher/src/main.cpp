@@ -572,16 +572,21 @@ bool pick(bool folder, std::wstring *out, const COMDLG_FILTERSPEC *filter = null
     return ok;
 }
 
+// The free space of the folder's disk: free to us, else free on the disk, else unknown (kSpaceUnknown). Wine on some
+// Linux mounts says 0 for both (a player on Batocera: 0 free on a 461 GB disk, 2026-11-18), and an install from an
+// image was refused for no room; unknown does not block it (a disk really full fails the copy, which says so).
+constexpr uint64_t kSpaceUnknown = ~0ull;
 uint64_t free_space(std::wstring dir)
 {
-    ULARGE_INTEGER avail;
+    ULARGE_INTEGER avail, size, free_on_disk;
     while (!dir.empty()) {
-        if (GetDiskFreeSpaceExW(dir.c_str(), &avail, nullptr, nullptr)) return avail.QuadPart;
+        if (GetDiskFreeSpaceExW(dir.c_str(), &avail, &size, &free_on_disk))
+            return avail.QuadPart ? avail.QuadPart : free_on_disk.QuadPart ? free_on_disk.QuadPart : kSpaceUnknown;
         size_t s = dir.find_last_of(L"\\/");
         if (s == std::wstring::npos) break;
         dir.resize(s);
     }
-    return 0;
+    return kSpaceUnknown;
 }
 
 bool installing() { return g.prog.state == 1; }
@@ -1859,7 +1864,8 @@ struct Painter {
         bool room = g.iso_need && avail >= space_needed();
         if (g.iso_need) {
             wchar_t b[128];
-            swprintf(b, 128, S(Str::Space), space_needed() / 1073741824.0, avail / 1073741824.0);
+            if (avail == kSpaceUnknown) swprintf(b, 128, S(Str::SpaceUnknown), space_needed() / 1073741824.0);
+            else swprintf(b, 128, S(Str::Space), space_needed() / 1073741824.0, avail / 1073741824.0);
             text(std::wstring(b) + (room ? L"" : std::wstring(L"  \x00B7  ") + S(Str::NoSpace)), {c.left + 112, y, c.right - 20, y + 26},
                  12.5f, room ? kAsh : kBlood);
         }
