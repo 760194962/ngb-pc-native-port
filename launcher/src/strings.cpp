@@ -779,6 +779,8 @@ const Pair kText[(int)Str::Count] = {
      L"and normal play are not affected.\n\n"
      L"Told by how it is drawn (the whole screen after the frame's 3D, added on, or white laid over during a move or an event); tested in "
      L"Black and NG2004."},
+    {L"将安装到下方的游戏安装路径 · 需要 %.1f GB · 可用空间未知",
+     L"Installs to the game folder below · %.1f GB needed · free space unknown"},
 };
 
 } // namespace
