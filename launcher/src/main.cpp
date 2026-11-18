@@ -1426,6 +1426,8 @@ const wchar_t *zh_font()
     }
     return g_zh_family.empty() ? nullptr : g_zh_family.c_str();
 }
+// The page title: YaHei UI in both languages on Windows (as before); without a Chinese font, Segoe UI
+const wchar_t *title_font() { return zh_font() ? zh_font() : L"Segoe UI"; }
 // The text font of the language shown
 const wchar_t *ui_font()
 {
@@ -1634,8 +1636,8 @@ struct Painter {
         // the title with a soft shadow (the website's h1: text-shadow 0 2px 20px #000)
         for (int i = 0; i < 3; i++)
             text(S(ng04() ? Str::TitleNg04 : Str::Title), {x + 1.0f + i, 132.0f + 2 + i, x + 760, 196.0f + 2 + i}, 46, 0x000000, 0.28f,
-                 DWRITE_FONT_WEIGHT_BLACK, ui_font());
-        text(S(ng04() ? Str::TitleNg04 : Str::Title), {x, 132, x + 760, 196}, 46, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, ui_font());
+                 DWRITE_FONT_WEIGHT_BLACK, title_font());
+        text(S(ng04() ? Str::TitleNg04 : Str::Title), {x, 132, x + 760, 196}, 46, kBone, 1.0f, DWRITE_FONT_WEIGHT_BLACK, title_font());
         // the subtitle and the not-ready note cross the 2004 key art's logo: a shadow like the title's, and a dark plate
         for (int i = 0; i < 2; i++)
             text(S(ng04() ? Str::SubtitleNg04 : Str::Subtitle), {x + 1.0f + i, 201.0f + i, x + 761 + i, 229.0f + i}, 17, 0x000000, 0.55f);
