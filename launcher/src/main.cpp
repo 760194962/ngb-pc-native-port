@@ -322,11 +322,16 @@ std::wstring ini_get(const wchar_t *key, const wchar_t *def = L"")
 
 void ini_set(const wchar_t *key, const std::wstring &v) { WritePrivateProfileStringW(L"launcher", key, v.c_str(), g.ini.c_str()); }
 
-std::wstring game_exe() { return g.dir + L"\\Ninja Gaiden Black Any.exe"; }
+bool ng04() { return g.module == 1; } // the Ninja Gaiden 2004 module
+
+// The game programs, one per game (the user, 2026-11-18; before: Ninja Gaiden Black Any.exe for both). Each runs the
+// game it is given; double-clicked, each looks for its own (Black: launcher.ini game / game\; 2004: game_ng04).
+const wchar_t *const kGameExeNames[2] = {L"Ninja Gaiden Black.exe", L"Ninja Gaiden.exe"};
+std::wstring game_exe_of(int module) { return g.dir + L"\\" + kGameExeNames[module ? 1 : 0]; }
+std::wstring game_exe() { return game_exe_of(ng04() ? 1 : 0); } // the selected game's
 
 // The default game folder: game next to the launcher (the release layout; the game program looks there too when
 // double-clicked). 0.1.0 used game\x21: a launcher.ini from then keeps its path.
-bool ng04() { return g.module == 1; } // the Ninja Gaiden 2004 module
 // launcher.ini's key for the game's default.xbe, and its default folder: each game its own (2004: game_ng04)
 const wchar_t *game_key() { return ng04() ? L"game_ng04" : L"game"; }
 std::wstring default_game_folder() { return g.dir + (ng04() ? L"\\game_ng04" : L"\\game"); }
@@ -413,22 +418,50 @@ void write_gpu_preference(int v) // 2 high performance, 1 power saving, 0 let Wi
         return;
     wchar_t s[32];
     swprintf(s, 32, L"GpuPreference=%d;", v);
-    RegSetValueExW(k, game_exe().c_str(), 0, REG_SZ, (const BYTE *)s, (DWORD)((wcslen(s) + 1) * sizeof(wchar_t)));
+    for (int m = 0; m < 2; m++) // one setting for both games' programs
+        RegSetValueExW(k, game_exe_of(m).c_str(), 0, REG_SZ, (const BYTE *)s, (DWORD)((wcslen(s) + 1) * sizeof(wchar_t)));
     RegCloseKey(k);
 }
 
-// Windows' per-program graphics preference for the game (the game sets "high performance" on its first run)
+// Updating from a release with the one "Ninja Gaiden Black Any.exe": a graphics preference set for it (in this
+// folder) is copied to the new programs that have none, so the player's choice is kept (else the game's first run
+// would set "high performance"). Run at each start; it only writes where a new program has nothing.
+void carry_over_gpu_preference()
+{
+    HKEY k;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &k))
+        return;
+    wchar_t old[64] = L"";
+    DWORD size = sizeof old - sizeof(wchar_t), type;
+    if (!RegQueryValueExW(k, (g.dir + L"\\Ninja Gaiden Black Any.exe").c_str(), nullptr, &type, (BYTE *)old, &size) && type == REG_SZ)
+        for (int m = 0; m < 2; m++) {
+            wchar_t cur[64];
+            DWORD n = sizeof cur;
+            if (RegQueryValueExW(k, game_exe_of(m).c_str(), nullptr, nullptr, (BYTE *)cur, &n) == ERROR_FILE_NOT_FOUND)
+                RegSetValueExW(k, game_exe_of(m).c_str(), 0, REG_SZ, (const BYTE *)old, (DWORD)((wcslen(old) + 1) * sizeof(wchar_t)));
+        }
+    RegCloseKey(k);
+}
+
+// Windows' per-program graphics preference for the game (the game sets "high performance" on its first run): the
+// selected game's program, else the other's (set when only that one has run)
 int gpu_preference_saved()
 {
     HKEY k;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", 0, KEY_QUERY_VALUE, &k)) return -1;
-    wchar_t v[64] = L"";
-    DWORD size = sizeof v - sizeof(wchar_t), type;
-    LONG r = RegQueryValueExW(k, game_exe().c_str(), nullptr, &type, (BYTE *)v, &size);
+    int pref = -1;
+    for (int m : {ng04() ? 1 : 0, ng04() ? 0 : 1}) {
+        wchar_t v[64] = L"";
+        DWORD size = sizeof v - sizeof(wchar_t), type;
+        if (RegQueryValueExW(k, game_exe_of(m).c_str(), nullptr, &type, (BYTE *)v, &size)) continue;
+        const wchar_t *p = wcsstr(v, L"GpuPreference=");
+        if (p) {
+            pref = _wtoi(p + 14);
+            break;
+        }
+    }
     RegCloseKey(k);
-    if (r) return -1;
-    const wchar_t *p = wcsstr(v, L"GpuPreference=");
-    return p ? _wtoi(p + 14) : -1;
+    return pref;
 }
 
 int gpu_preference() { return g_pending_gpu >= 0 ? g_pending_gpu : gpu_preference_saved(); }
@@ -3683,6 +3716,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show)
     if (lang.empty()) g_lang = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE ? Lang::Zh : Lang::En;
     else g_lang = lang == L"en" ? Lang::En : Lang::Zh;
     g.module = ini_get(L"module") == L"ng04" ? 1 : 0;
+    carry_over_gpu_preference();
     saves::set_title(ng04() ? L"54430003" : L"5443000d");
     g.game = ini_get(game_key(), (default_game_folder() + L"\\default.xbe").c_str());
     set_dest(folder_of(g.game)); // installs go to the game folder

@@ -166,6 +166,15 @@ void usage()
     else if (!g_cfg.background) MessageBoxW(nullptr, widen(kUsage).c_str(), L"BLACK - command-line options", MB_OK);
 }
 
+// The game this program is for (the stub's NGB_GAME, BlackMainFor): Ninja Gaiden Black.exe 1, Ninja Gaiden.exe 2;
+// 0 = either (BlackMain: the old "Ninja Gaiden Black Any.exe", still working when it is left in a folder after an
+// update). It only decides the game started without one on the command line, and what the messages say.
+enum StubGame { kStubAny = 0, kStubBlack = 1, kStubNg04 = 2 };
+int g_stub_game = kStubAny;
+bool g_game_from_default; // no game on the command line: found beside the program (launcher.ini, game folders)
+constexpr uint32_t kTitleBlack = 0x5443000D, kTitleNg04 = 0x54430003;
+const char *kLauncherName = "Ninja Gaiden Black&2004 PC Launcher.exe";
+
 bool parse_args()
 {
     int argc = 0;
@@ -469,20 +478,27 @@ bool parse_args()
     // No game given (the program double-clicked rather than started by the launcher, which failed: the user's
     // friend, 2026-10-22): the game the launcher installed (launcher.ini beside the program: game, and hdd for the
     // saves), else game\default.xbe (the release layout), else game\x21\default.xbe (run.bat's and 0.1.0's).
+    // Ninja Gaiden.exe (2004) looks for the 2004 game the launcher installed instead: launcher.ini's game_ng04, else
+    // game_ng04\default.xbe (the launcher's default folder for it). The other game found there is refused at load.
     if (target.empty()) {
+        g_game_from_default = true;
+        const bool ng04 = g_stub_game == kStubNg04;
         std::wstring ini = g_cfg.port_dir + L"\\launcher.ini";
         wchar_t v[MAX_PATH] = L"";
-        GetPrivateProfileStringW(L"launcher", L"game", L"", v, MAX_PATH, ini.c_str());
+        GetPrivateProfileStringW(L"launcher", ng04 ? L"game_ng04" : L"game", L"", v, MAX_PATH, ini.c_str());
         if (v[0] && GetFileAttributesW(v) != INVALID_FILE_ATTRIBUTES) target = v;
         if (g_cfg.hdd_dir.empty()) {
             v[0] = 0;
             GetPrivateProfileStringW(L"launcher", L"hdd", L"", v, MAX_PATH, ini.c_str());
             if (v[0]) g_cfg.hdd_dir = (v[1] == L':' || v[0] == L'\\') ? std::wstring(v) : g_cfg.port_dir + L"\\" + v;
         }
-        for (const wchar_t *rel : {L"game\\default.xbe", L"game\\x21\\default.xbe"})
+        static const wchar_t *const kBlackDirs[] = {L"game\\default.xbe", L"game\\x21\\default.xbe"};
+        static const wchar_t *const kNg04Dirs[] = {L"game_ng04\\default.xbe"};
+        for (const wchar_t *rel : ng04 ? std::vector<const wchar_t *>(std::begin(kNg04Dirs), std::end(kNg04Dirs))
+                                       : std::vector<const wchar_t *>(std::begin(kBlackDirs), std::end(kBlackDirs)))
             if (target.empty() && GetFileAttributesW((g_cfg.port_dir + L"\\" + rel).c_str()) != INVALID_FILE_ATTRIBUTES)
                 target = g_cfg.port_dir + L"\\" + rel;
-        if (target.empty()) target = L"game\\default.xbe";
+        if (target.empty()) target = ng04 ? L"game_ng04\\default.xbe" : L"game\\default.xbe";
     }
     // Started from a shortcut or another folder: if a relative game path is not found here, look for it
     // from black.exe's own folder upwards (port -> the folder with game; work\run -> work -> project root) and make
@@ -776,12 +792,49 @@ int run(void *reserve, unsigned reserve_size)
     if (!g_xbe.load(g_cfg.xbe_path, err)) {
         wchar_t full[MAX_PATH];
         if (!GetFullPathNameW(g_cfg.xbe_path.c_str(), MAX_PATH, full, nullptr)) wcscpy_s(full, g_cfg.xbe_path.c_str());
-        startup_error("The game was not found (" + narrow(full) + ": " + err + ").\n\n"
-                      "Install it with Ninja Gaiden Black Any Launcher.exe (Install page), or give the folder with "
-                      "the game's files on the command line.\n\n"
-                      "找不到游戏。请先用启动器（Ninja Gaiden Black Any Launcher.exe）的「安装」页安装游戏。");
+        // nothing found beside the program: name the place it looked, the program's folder (the relative default was
+        // resolved against the current folder, which a shortcut or a command prompt may have set elsewhere)
+        const bool relative = !(g_cfg.xbe_path.size() >= 2 && (g_cfg.xbe_path[1] == L':' || g_cfg.xbe_path[0] == L'\\'));
+        if (g_game_from_default && relative) wcscpy_s(full, (g_cfg.port_dir + L"\\" + g_cfg.xbe_path).c_str());
+        const bool ng04 = g_stub_game == kStubNg04;
+        const std::string launcher = kLauncherName;
+        if (ng04)
+            startup_error("找不到《忍者龙剑传》（2004）。请打开启动器（" + launcher + "），在左上角切到「2004」，在「安装」页安装游戏。\n\n"
+                          "Ninja Gaiden (2004) was not found (" + narrow(full) + ": " + err + ").\n\n"
+                          "Open the launcher (" + launcher + "), choose 2004 at the top left and install the game on the "
+                          "Install page, or give the folder with the game's files on the command line.");
+        else
+            startup_error("找不到游戏。请打开启动器（" + launcher + "），在「安装」页安装游戏" +
+                          std::string(g_stub_game == kStubBlack ? "（黑之章；玩 2004 请用 Ninja Gaiden.exe）" : "") + "。\n\n"
+                          "The game was not found (" + narrow(full) + ": " + err + ").\n\n"
+                          "Install it with the launcher (" + launcher + ", Install page), or give the folder with the "
+                          "game's files on the command line." +
+                          std::string(g_stub_game == kStubBlack ? " For Ninja Gaiden (2004) use Ninja Gaiden.exe." : ""));
         return 1;
     }
+    // Found beside the program but the other game's (a 2004 install in Black's folder, say): name the right program
+    // rather than run a game this one is not named for. A game given on the command line runs as given.
+    if (g_game_from_default && g_stub_game != kStubAny) {
+        const bool want_ng04 = g_stub_game == kStubNg04;
+        if (g_xbe.title_id == (want_ng04 ? kTitleBlack : kTitleNg04)) {
+            wchar_t full[MAX_PATH];
+            if (!GetFullPathNameW(g_cfg.xbe_path.c_str(), MAX_PATH, full, nullptr)) wcscpy_s(full, g_cfg.xbe_path.c_str());
+            if (want_ng04)
+                startup_error("这里找到的是《忍者龙剑传 黑之章》（" + narrow(full) + "），不是 2004。玩黑之章请用 Ninja Gaiden Black.exe；"
+                              "玩 2004 请在启动器左上角切到「2004」并安装 2004。\n\n"
+                              "The game found here is Ninja Gaiden Black (" + narrow(full) + "), not Ninja Gaiden (2004). For Black "
+                              "use Ninja Gaiden Black.exe; for 2004 choose 2004 at the launcher's top left and install it.");
+            else
+                startup_error("这里找到的是《忍者龙剑传》（2004）（" + narrow(full) + "），不是黑之章。玩 2004 请用 Ninja Gaiden.exe；"
+                              "玩黑之章请在启动器左上角切到「黑之章」并安装黑之章。\n\n"
+                              "The game found here is Ninja Gaiden (2004) (" + narrow(full) + "), not Ninja Gaiden Black. For 2004 "
+                              "use Ninja Gaiden.exe; for Black choose Black at the launcher's top left and install it.");
+            return 1;
+        }
+    }
+    if (!g_game_from_default && g_stub_game != kStubAny &&
+        g_xbe.title_id == (g_stub_game == kStubNg04 ? kTitleBlack : kTitleNg04))
+        logf("program: %s runs the other game, given on the command line", g_stub_game == kStubNg04 ? "Ninja Gaiden.exe" : "Ninja Gaiden Black.exe");
     std::string title = narrow(g_xbe.title);
     logf("xbe: '%s' title id %08X, base 0x%08x size 0x%x entry 0x%08x, %zu sections, %zu kernel imports", title.c_str(),
          g_xbe.title_id, g_xbe.base, g_xbe.size_of_image, g_xbe.entry, g_xbe.sections.size(), g_xbe.kernel_imports().size());
@@ -915,6 +968,15 @@ int run(void *reserve, unsigned reserve_size)
 }
 
 } // namespace
+
+extern "C" __declspec(dllexport) int __cdecl BlackMain(void *reserve, unsigned reserve_size);
+
+// The stubs of Ninja Gaiden Black.exe (game 1) and Ninja Gaiden.exe (game 2): which game a start without one is for.
+extern "C" __declspec(dllexport) int __cdecl BlackMainFor(void *reserve, unsigned reserve_size, int game)
+{
+    g_stub_game = game == kStubBlack || game == kStubNg04 ? game : kStubAny;
+    return BlackMain(reserve, reserve_size);
+}
 
 extern "C" __declspec(dllexport) int __cdecl BlackMain(void *reserve, unsigned reserve_size)
 {
