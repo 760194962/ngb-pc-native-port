@@ -303,6 +303,18 @@ updating to a new version**: a new version drops the draw states learned locally
   4 s and holds 60; exclusive fullscreen switches at 4 s instead of 12; a fixed 120 Hz (no VRR) is not mistaken for VRR, so
   2.2.35's evenness stays.
 
+### 2.2.37.2: 120/180/240 Hz no longer use the display as the game clock
+
+- **The problem**: 2.2.35's "one frame every n refreshes" is 60 Hz on a fixed refresh, but a VRR panel can give an 80 Hz
+  composition tick, so the game ran at 80 fps / 4/3 speed. 2.2.37.1 checked for a tick that was too slow, not too fast.
+- **The fix**: `display_div()` accepts only 59-61 Hz; 120/180/240 Hz and their VRR modes always use the fixed 59.94 Hz timer,
+  so the game tick can no longer speed up or slow down with the display.
+- **Kept**: 2.2.37.1's slow-rate fallback and the new fast-rate fallback remain as a last resort while a 60 Hz display follows
+  the screen.
+- **Cost**: the evenness at 120/180/240 Hz goes back to 2.2.34's behaviour; 60 Hz alignment is unchanged.
+- **Not done yet**: Present and the game tick are not fully split; the target design is in
+  `work/NGB_呈现节拍目标架构设计.md`.
+
 ### 2.2.37: a program for each game; the launcher renamed
 
 - **New names**: the launcher is `Ninja Gaiden Black&2004 PC Launcher.exe`; the `Ninja Gaiden Black Any.exe` both games shared is

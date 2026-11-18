@@ -1192,9 +1192,9 @@ HANDLE g_vblank_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr); // wakes pa
 // slow frames in the performance recordings. When DwmFlush returns early (nothing presented yet, window
 // minimised) the tick falls back to the timer. Other refresh rates, --background and --timer-vblank use the
 // timer only.
-// At n x 60 Hz (120, 180, 240 Hz, each within n Hz) the tick follows every n-th composition, so a 60 fps frame stays n
-// refreshes each time. On the 59.94 Hz timer a 120 Hz desktop showed about 45% of the frames for 1 or 3 refreshes instead
-// of 2 (the user's panel driven by the RTX 3060, windowed, Desktop Duplication, 2026-11-17).
+// At about 60 Hz the tick follows the desktop composition; other refresh rates (including 120/180/240 and their
+// VRR modes) use the 59.94 Hz timer. The n-th composition rule was a fixed-refresh optimization and, under VRR,
+// could become the game's clock itself (80 Hz, 4/3 speed; 2.2.35 through 2.2.37.1).
 using DwmFlushFn = HRESULT(WINAPI *)();
 DwmFlushFn display_sync()
 {
@@ -1203,15 +1203,17 @@ DwmFlushFn display_sync()
     return m ? (DwmFlushFn)GetProcAddress(m, "DwmFlush") : nullptr;
 }
 
-std::atomic<int> g_display_hz, g_display_div; // the display's refresh, and its refreshes per tick (0: not n x 60 Hz)
+std::atomic<int> g_display_hz, g_display_div; // the display's refresh, and its refreshes per tick (1: 60 Hz, 0: timer)
 int display_div()
 {
     DEVMODEW dm = {};
     dm.dmSize = sizeof dm;
     if (!EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm)) return 0;
-    int hz = (int)dm.dmDisplayFrequency, div = 0;
-    for (int n = 1; n <= 4 && !div; n++)
-        if (abs(hz - 60 * n) <= n) div = n;
+    int hz = (int)dm.dmDisplayFrequency;
+    // Only a display near 60 Hz may drive the game's tick. 120/180/240 Hz are left to the 59.94 Hz timer: their
+    // n-th composition is a fixed-refresh rule, and under VRR it was the tick itself (80 Hz, the game 4/3 speed;
+    // 2.2.35 through 2.2.37.1). The presentation may still use the display; this clock must not.
+    int div = hz >= 59 && hz <= 61 ? 1 : 0;
     g_display_hz = hz;
     g_display_div = div;
     return div;
@@ -1272,8 +1274,8 @@ void __stdcall vblank_thread(void *)
     const bool kernel = !g_cfg.timer_vblank && (!g_cfg.background || g_cfg.display_vblank) && kv.init();
     int div = display_div();
     logf("[d3d] vblank: the display at %d Hz: %s%s", g_display_hz.load(),
-         flush && div ? (div == 1 ? "follows its compositions (DwmFlush)" : "follows every n-th composition (DwmFlush)") : "59.94 Hz timer",
-         kernel ? "; in exclusive fullscreen at n x 60 Hz its own vblank (D3DKMTWaitForVerticalBlankEvent)" : "");
+         flush && div ? "follows its compositions (DwmFlush)" : "59.94 Hz timer",
+         kernel && div ? "; in exclusive fullscreen at ~60 Hz its own vblank (D3DKMTWaitForVerticalBlankEvent)" : "");
     uint32_t from_display = 0, from_kernel = 0, waited_past = 0;
     LARGE_INTEGER minute = last;
     // A variable refresh (G-SYNC / FreeSync) is no clock: the display's vblanks then follow the Presents, and the tick
@@ -1292,7 +1294,7 @@ void __stdcall vblank_thread(void *)
     // rate, however irregular single ones are under load -- the odd-interval rule above stays for exclusive only).
     LARGE_INTEGER rate_from = last;
     uint32_t rate_ticks = 0;
-    int slow_seconds = 0;
+    int slow_seconds = 0, fast_seconds = 0;
     bool distrust = false, was_exclusive = false;
     int odd = 0, judged = 0, last_hz = 0;
     for (;;) {
@@ -1302,7 +1304,8 @@ void __stdcall vblank_thread(void *)
         if (excl != was_exclusive || g_display_hz.load() != last_hz) { // a new source: judge it afresh
             if (distrust) logf("[d3d] vblank: the display (now %d Hz%s) is tried again as the clock", g_display_hz.load(), excl ? ", exclusive" : "");
             distrust = false, odd = judged = 0;
-            slow_seconds = 0, rate_ticks = 0;
+            slow_seconds = 0, fast_seconds = 0;
+            rate_ticks = 0;
             QueryPerformanceCounter(&rate_from);
             was_exclusive = excl, last_hz = g_display_hz.load();
         }
@@ -1360,11 +1363,20 @@ void __stdcall vblank_thread(void *)
         if (now.QuadPart - rate_from.QuadPart >= f.QuadPart) { // a second: the ticks' rate (above)
             const double rate = rate_ticks * (double)f.QuadPart / (double)(now.QuadPart - rate_from.QuadPart);
             slow_seconds = !distrust && rate < 0.9 * 60000.0 / 1001.0 ? slow_seconds + 1 : 0;
+            // A variable refresh can also make the display give the tick too often: 2.2.35's n-th composition at 120 Hz
+            // was 80 Hz on a player's VRR panel, and the game ran 4/3 as fast (2026-11-18). The timer is the safe clock.
+            fast_seconds = !distrust && rate > 1.1 * 60000.0 / 1001.0 ? fast_seconds + 1 : 0;
             if (slow_seconds >= 2) {
                 distrust = true;
                 logf("[d3d] vblank: the display (%d Hz%s) gave the tick %.1f Hz for 2 s, under 90%% of 59.94 (a variable refresh?): "
                      "the 59.94 Hz timer instead", last_hz, excl ? ", exclusive" : "", rate);
                 slow_seconds = 0;
+            }
+            if (fast_seconds >= 2) {
+                distrust = true;
+                logf("[d3d] vblank: the display (%d Hz%s) gave the tick %.1f Hz for 2 s, over 110%% of 59.94 (a variable refresh?): "
+                     "the 59.94 Hz timer instead", last_hz, excl ? ", exclusive" : "", rate);
+                fast_seconds = 0;
             }
             rate_ticks = 0;
             rate_from = now;
@@ -2767,7 +2779,8 @@ struct EarlyGate {
     {
         bool display = host3d::exclusive() || g_vblank_synced.load(std::memory_order_relaxed);
         double ms = g_frame_tick ? (qpc_now() - g_frame_tick) / (double)qpc_per_ms() : 1e9;
-        // the fixed deadline is for 60 Hz: at n x 60 Hz the composition comes n times as often (120 Hz: 5 ms)
+        // the fixed deadline is for 60 Hz; higher refresh rates use the timer, and only an exclusive device may still
+        // present early there
         const int hz = g_display_hz.load();
         const double s = hz >= 50 ? 60.0 / hz : 1.0;
         double d = g_cfg.early_deadline_ms * s;
