@@ -572,8 +572,8 @@ bool pick(bool folder, std::wstring *out, const COMDLG_FILTERSPEC *filter = null
     return ok;
 }
 
-// The free space of the folder's disk: free to us, else free on the disk. A player on Batocera / Wine was told 0 for
-// both on a 461 GB disk (2026-11-18) - a full disk, or a mount telling Wine nothing. With no figure (0, or no query
+// The free space of the folder's disk, free to us (as before). A player on Batocera / Wine was told 0 free to us and
+// on the disk, of a 461 GB disk (2026-11-18) - a full disk, or a mount telling Wine nothing. With no figure (0, or no query
 // worked), 1 MB is written to a temporary file in the folder to see: it fits, and the space is unknown (kSpaceUnknown,
 // the install goes ahead; a disk that fills up fails the copy, which says so); it does not, and the disk is full (0).
 // The test is redone at most every 10 s (the page is drawn often); a disk that gives a figure never sees it.
@@ -602,8 +602,7 @@ uint64_t free_space(std::wstring dir)
     ULARGE_INTEGER avail, size, free_on_disk;
     while (!dir.empty()) {
         if (GetDiskFreeSpaceExW(dir.c_str(), &avail, &size, &free_on_disk)) {
-            if (avail.QuadPart) return avail.QuadPart;
-            if (free_on_disk.QuadPart) return free_on_disk.QuadPart;
+            if (avail.QuadPart) return avail.QuadPart; // free to us, as before (a quota / root-reserved space does not count)
             break;
         }
         size_t s = dir.find_last_of(L"\\/");
