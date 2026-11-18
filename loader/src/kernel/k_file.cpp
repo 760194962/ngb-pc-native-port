@@ -202,6 +202,22 @@ void complete(XIO_STATUS_BLOCK *iosb, NTSTATUS s, uint32_t info, HANDLE ev)
     if (ev) SetEvent(ev);
 }
 
+// How many times in a row this name has failed to open (0 after a success): a file the game asks for over and over is
+// logged at its 1st..20th failure and then every 10000th (open_common). NG2004's Master Ninja Tournament shop asked for
+// 'd:\NG' 932,579 times and the log grew to 191 MB (the user, 2026-11-18). One count per name (a loop over two missing
+// names would reset a single one), up to 256 names, under g_mutex (the game opens files from several threads).
+uint32_t note_open_result(const std::string &name, bool ok)
+{
+    static std::map<std::string, uint32_t> runs;
+    std::lock_guard<std::recursive_mutex> g(g_mutex);
+    if (ok) {
+        if (!runs.empty()) runs.erase(name);
+        return 0;
+    }
+    if (runs.size() >= 256 && !runs.count(name)) runs.clear();
+    return ++runs[name];
+}
+
 // A name the game keeps failing to open (open_common): its string's lengths, its buffer's first 64 bytes and the
 // game code's return addresses on the stack (values in the XBE's code just after a call), read under SEH.
 void log_failing_name(const XANSI_STRING *n, const uint32_t *sp)
@@ -238,7 +254,10 @@ NTSTATUS open_common(const char *what, HANDLE *FileHandle, ACCESS_MASK access, X
     Resolved r;
     NTSTATUS s = resolve(oa->RootDirectory, oa->ObjectName, r);
     if (!NT_OK(s)) {
-        logf("[k] %s('%s', root %p) -> 0x%08x (no mapping)", what, req.c_str(), oa->RootDirectory, s);
+        const uint32_t run = note_open_result(req, false);
+        if (run <= 20 || run % 10000 == 0)
+            logf("[k] %s('%s', root %p) -> 0x%08x (no mapping)%s", what, req.c_str(), oa->RootDirectory, s,
+                 run > 20 ? " (the same failure again; only every 10000th logged)" : "");
         complete(iosb, s, 0, nullptr);
         return s;
     }
@@ -295,13 +314,7 @@ NTSTATUS open_common(const char *what, HANDLE *FileHandle, ACCESS_MASK access, X
         *FileHandle = h;
         remember(h, r);
     }
-    // The same name failing over and over is logged at its 1st..20th failure and then every 10000th: NG2004's Master
-    // Ninja Tournament shop asked for 'd:\NG' 932,579 times and the log grew to 191 MB (the user, 2026-11-18). At the
-    // 100th failure in a row the game's callers and the name's whole buffer are logged once, to see what it meant.
-    static std::string fail_name;
-    static uint32_t fail_run;
-    if (!NT_OK(s)) fail_run = req == fail_name ? fail_run + 1 : (fail_name = req, 1u);
-    else if (req == fail_name) fail_run = 0;
+    const uint32_t fail_run = note_open_result(req, NT_OK(s));
     const bool quiet = !NT_OK(s) && fail_run > 20 && fail_run % 10000 != 0;
     if (!quiet)
         logf("[k] %s('%s' -> %s, access 0x%x, share %u, disp %u, opts 0x%x) -> 0x%08x handle %p%s", what, req.c_str(),

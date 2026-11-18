@@ -545,6 +545,7 @@ bool g_stage0_rendered;
 
 // Census of the glow's other kind of trick: one draw sampling the same render target in several stages (a tap
 // filter: blur, glow, depth of field), each kind (sizes, caller) logged once, with the target it is drawn into
+uint32_t g_flash_3d; // the frame's 3D draws into the back buffer while move_flash = 0 (skip_move_flash)
 bool g_rt_stage[4]; // which stages of the draw being set up sample a render target (apply_texture_stages)
 int first_game_callers(const uint32_t *sp, uint32_t *out, int max); // below
 std::string game_callers(const uint32_t *sp);
@@ -2114,6 +2115,9 @@ bool begin_draw(DrawCtx &ctx, uint32_t xprim)
     }
     if (g_cfg.widescreen && g_cfg.aspect_w * 9 != g_cfg.aspect_h * 16 && g_st.render_target && is_backbuffer(g_st.render_target))
         wide_hud_count(!(ctx.path == Path::Fvf && (ctx.fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW));
+    if (!g_cfg.move_flash && g_st.render_target && is_backbuffer(g_st.render_target) &&
+        !(ctx.path == Path::Fvf && (ctx.fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW))
+        g_flash_3d++; // skip_move_flash: 3D drawn this frame, at any picture shape
     if (ms_drawing()) {
         // MSAA: the 3D multisampled, the game's screen-space 2D (HUD, menus, text, screen copies) not: drawn as without
         // MSAA, its quads and 1-pixel rules covering whole pixels. A menu rule (a line primitive) sampled between pixel
@@ -3466,9 +3470,18 @@ bool draw_wide_lines(const DrawCtx &ctx, uint32_t xprim, uint32_t count, const v
 // routine; all three left out, black fades kept (the user: "既没有白光也没有盖白"). Fades with the word at 0xFFFF (scene
 // changes, black or white) stay. Each call chain so left out is logged once, with the HUD's state, so other users of such a draw would show.
 uint32_t g_flash_skipped;
+// Its own count of the frame's 3D draws into the back buffer (the HUD's, g_wh.threed, is kept only on a screen not 16:9:
+// at 16:9 and 4:3 nothing was left out, the user, 2026-11-18), kept only with move_flash = 0; 0 at each Swap.
+LONG g_flash_hud_end; // g_hud_shown at the last Swap: the log's "HUD shown" at any picture shape (hud_in_play is kept
+                      // only on a screen not 16:9, and said "shown" for everything at 16:9)
+void flash_frame_end()
+{
+    g_flash_3d = 0;
+    g_flash_hud_end = g_hud_shown;
+}
 bool skip_move_flash(const DrawCtx &ctx, const void *data, uint32_t count, uint32_t stride)
 {
-    if (g_cfg.move_flash || !data || count < 3 || g_wh.threed == 0) return false;
+    if (g_cfg.move_flash || !data || count < 3 || g_flash_3d == 0) return false;
     if (ctx.path != Path::Fvf || (ctx.fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW) return false;
     if (!g_st.render_target || !is_backbuffer(g_st.render_target)) return false;
     const uint32_t *rs = render_state();
@@ -3502,7 +3515,7 @@ bool skip_move_flash(const DrawCtx &ctx, const void *data, uint32_t count, uint3
     std::string key = textured ? " glow" : event_cover ? " white laid over" : " white added";
     char t[32];
     for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
-    key += hud_in_play() ? " (HUD shown" : " (HUD hidden";
+    key += !g_hud_probe ? " (HUD ?" : g_hud_shown != g_flash_hud_end ? " (HUD shown" : " (HUD hidden";
     if (g_hud_vars[2]) snprintf(t, sizeof t, ", word 0x%04x)", *(volatile uint16_t *)(uintptr_t)g_hud_vars[2]), key += t;
     else key += ")";
     if (seen.size() < 64 && seen.insert(key).second)

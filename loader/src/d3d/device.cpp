@@ -2779,6 +2779,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     DTRACE("0x%x", Flags);
     game_load::on_swap(); // the engine's load figure for the frame it hands over (game_load.cpp)
     if (g_cfg.widescreen && g_cfg.aspect_w * 9 != g_cfg.aspect_h * 16) xd3d::wide_hud_frame_end();
+    if (!g_cfg.move_flash) xd3d::flash_frame_end();
     drawwarm_frame();
     compile_later_report(); // the shaders compiled on the thread and the draws left out meanwhile (shader_cache.cpp)
     pb_flush();

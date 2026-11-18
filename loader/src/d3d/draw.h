@@ -40,6 +40,7 @@ void decl_forget(const VertexShader *vs); // vs_delete: its vertex declaration
 void ms_note_draw();
 bool ms_drawing();                       // the bound target is multisampled (MSAA)                     // a draw into the bound target: its MSAA surface is ahead (device.cpp)
 void wide_hud_count(bool threed);         // a draw into the back buffer (on a screen not 16:9): the HUD's frame model
+void flash_frame_end();                   // at Swap with move_flash = 0: the frame's 3D count for skip_move_flash back to 0
 void wide_hud_frame_end();                // at Swap: this frame's HUD pieces grouped into elements, each with its side
 void draw_drop_all();                     // a new device: the draw ring, declarations, white texel; sent state forgotten
 // Another path set the host's D3DTS_TEXTUREn: the stage texture-scale cache sends its matrix again (d3d/draw.cpp).

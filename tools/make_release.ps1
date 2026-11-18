@@ -23,7 +23,7 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
 $cmake = Get-Content "$root\loader\CMakeLists.txt" -Raw
-if ($cmake -notmatch 'project\(\S+ VERSION (\d+\.\d+\.\d+)') { throw 'no project VERSION in loader\CMakeLists.txt' }
+if ($cmake -notmatch 'project\(\S+ VERSION (\d+\.\d+\.\d+(\.\d+)?)') { throw 'no project VERSION in loader\CMakeLists.txt' }
 $version = $Matches[1]
 if ($cmake -match 'set\(NGB_VERSION_STRING "([^"]+)"\)') {
     $version = $Matches[1] -replace '\$\{PROJECT_VERSION\}', $version

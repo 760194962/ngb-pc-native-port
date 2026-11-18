@@ -292,6 +292,16 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.36.1: "Screen flashes" off works at 16:9 and 4:3 too; a file failing over and over no longer fills the log
+
+- **Screen flashes off did nothing at 16:9 and 4:3**: the switch needs 3D drawn this frame and read the ultrawide HUD's count, which is
+  kept only when the picture is not 16:9. It now keeps its own count and works at every shape (the author at 16:9: move glows and event
+  white covers left out). On, nothing changes.
+- **A file failing to open over and over grew the log without end**: NG2004's Master Ninja Tournament shop asked again and again for
+  `d:\NG`, which does not exist (the black screen is taken as the game's own), and the log reached 191 MB. Each name now has its own count
+  (safe with files opened from several threads), and its 1st..20th failure in a row is logged, then every 10000th.
+- The Screen flashes log line gives the HUD's state right at 16:9 too; the version has a fourth part (2.2.36.1 in the file properties).
+
 ### 2.2.36: a "Screen flashes" switch, the flash and the NG2004 cutscene at 21:9
 
 - **New switch "Screen flashes"** (launcher Graphics page, `black.ini move_flash`, on by default = the original): off, the white the whole
