@@ -1812,7 +1812,13 @@ HRESULT __stdcall Direct3D_CreateDevice(uint32_t Adapter, uint32_t DeviceType, u
     // targets at Xbox size x render scale, filtered into the back buffer at Swap.
     if (!host3d::open_window(g_cfg.window_w, g_cfg.window_h, g_cfg.widescreen ? g_cfg.aspect_w : 4, g_cfg.widescreen ? g_cfg.aspect_h : 3))
         return D3DERR_NOTAVAILABLE;
-    if (!host3d::create_device()) return D3DERR_NOTAVAILABLE;
+    if (!host3d::create_device()) {
+        // The game does not check this result and crashed at its first Clear (Wine without the 32-bit graphics
+        // libraries, 2026-11-18): tell the player what failed and stop here.
+        error_box(host3d::device_failure_text());
+        request_exit(3, "no Direct3D device");
+        for (;;) Sleep(INFINITE); // the game thread waits here for the exit
+    }
     g_msaa = 0; // MSAA: the count asked, or the next lower one the card has
     for (int n = std::min(g_cfg.msaa, 16); n >= 2 && !g_msaa; n--)
         if (host3d::msaa_supported(n)) g_msaa = n;

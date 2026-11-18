@@ -684,11 +684,58 @@ void prefer_dedicated_gpu()
 
 // Setup errors a player can fix (no game files, another build): started by a double-click, the console closes with
 // the process, so they also get a message box.
-void startup_error(const std::string &text)
+void startup_error(const std::string &text) { error_box(text); }
+
+} // namespace
+
+// Whether the system has a font with Chinese characters (a GB2312 font). Wine on Linux often has none, and a message
+// box's Chinese then shows as boxes (2026-11-18).
+static bool has_chinese_font()
+{
+    LOGFONTW lf = {};
+    lf.lfCharSet = GB2312_CHARSET;
+    bool found = false;
+    HDC dc = GetDC(nullptr);
+    EnumFontFamiliesExW(dc, &lf, [](const LOGFONTW *, const TEXTMETRICW *, DWORD, LPARAM p) -> int {
+        *(bool *)p = true;
+        return 0;
+    }, (LPARAM)&found, 0);
+    ReleaseDC(nullptr, dc);
+    return found;
+}
+
+void error_box(const std::string &text)
 {
     logc("%s", text.c_str());
-    if (!g_cfg.background) MessageBoxW(nullptr, widen(text).c_str(), L"Ninja Gaiden Black", MB_OK | MB_ICONERROR);
+    if (g_cfg.background) return;
+    std::wstring w = widen(text);
+    if (!has_chinese_font()) { // keep the lines without Chinese (the English part), and no leading / trailing "---"
+        std::wstring out, line;
+        auto chinese = [](const std::wstring &s) {
+            for (wchar_t c : s)
+                if ((c >= 0x3000 && c <= 0x9FFF) || (c >= 0xFF00 && c <= 0xFFEF)) return true;
+            return false;
+        };
+        for (size_t i = 0; i <= w.size(); i++) {
+            if (i < w.size() && w[i] != L'\n') {
+                line += w[i];
+                continue;
+            }
+            if (!chinese(line)) out += line + L"\n";
+            line.clear();
+        }
+        while (!out.empty() && (out[0] == L'\n' || !out.compare(0, 4, L"---\n"))) out.erase(0, out[0] == L'\n' ? 1 : 4);
+        for (;;) {
+            if (!out.empty() && out.back() == L'\n') out.pop_back();
+            else if (out.size() >= 3 && !out.compare(out.size() - 3, 3, L"---")) out.resize(out.size() - 3);
+            else break;
+        }
+        w = out;
+    }
+    MessageBoxW(nullptr, w.c_str(), L"Ninja Gaiden Black", MB_OK | MB_ICONERROR);
 }
+
+namespace {
 
 int run(void *reserve, unsigned reserve_size)
 {

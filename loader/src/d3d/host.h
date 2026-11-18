@@ -17,6 +17,7 @@ void load_program_icons();
 // The game's name for the window title: Ninja Gaiden Black x2.1 and the programs it launches, or BLACK.
 const wchar_t *game_title();
 bool create_device(); // made on the window's thread (exclusive fullscreen recovers only so); back buffer = the largest monitor
+std::string device_failure_text(); // after create_device failed: the step, results, card and what to try (zh, then en)
 // The part of the back buffer this frame uses (the client area, shrunk to fit the back buffer if needed) and
 // the picture inside it (the game's aspect, centred; the rest are black bars). present() shows that part.
 void frame_layout(RECT *frame, RECT *picture);
