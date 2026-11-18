@@ -4,7 +4,7 @@
 
 《忍者龙剑传 黑之章》（初代 Xbox）的非官方 Windows 原生移植。支持美版原版，以及基本版 va-zh-x2、飓风版 vb-zh-x2.1 / vb-jp-x2.1。
 
-`Ninja Gaiden Black Any.exe` 读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
+游戏程序（`Ninja Gaiden Black.exe`，2004 是 `Ninja Gaiden.exe`）读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
 等系统部分由加载器在 PC 上重新实现（HLE）。游戏代码不经模拟器逐条解释，也不在磁盘上修改。
 
 本项目从 [black-pc](https://github.com/Spark198rus/black-pc)（BLACK 的原生移植）分支而来，在它的加载器上加入了
@@ -219,6 +219,16 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 `cache\texture_pool.txt`、`cache\cpu_textures.bin`、`vsh_record.bin` 和 `logs\black.log` 交给作者。**要在更新到新版本之前交**：
 换版本时本地学到的绘制状态会被清掉。
 
+### 2.2.37：两个游戏各有自己的程序，启动器改名
+
+- **程序改名**：启动器是 `Ninja Gaiden Black&2004 PC Launcher.exe`；原来两个游戏共用的 `Ninja Gaiden Black Any.exe` 分成
+  `Ninja Gaiden Black.exe`（黑之章）和 `Ninja Gaiden.exe`（2004），同一份程序编两次，都用旁边的 `blackrt.dll`。
+- **直接双击游戏程序**：各自找启动器装好的那个游戏（2004 以前双击只能进黑之章）。找到的是另一个游戏时不运行，提示该用哪个程序；
+  没装时提示怎么装，路径显示程序所在的文件夹（以前显示的是当前目录）。命令行明确给的游戏照常运行。
+- **启动器**：按左上角选的游戏启动对应的程序（联网设置、仪表盘也一样）；显卡首选项两个程序一起设置；从旧版升级时，旧程序上设过的
+  显卡首选项自动带到新程序上。
+- 旧的 `Ninja Gaiden Black Any.exe` 留在文件夹里也还能用；可以删掉。
+
 ### 2.2.36.3：启动失败时说清楚原因；Windows / Linux 运行说明
 
 - **Direct3D 无法启动时不再崩溃**：以前绘图设备建不起来时，游戏照样往下跑，在第一次清屏时崩溃，什么提示都没有（在 Wine 里缺
@@ -372,15 +382,18 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 
    ```
    NGB-Hurricane\
-     Ninja Gaiden Black Any Launcher.exe   启动器：从这里进
-     Ninja Gaiden Black Any.exe            游戏程序，连同 blackrt.dll
-     game\                                 游戏安装位置（启动器装进来）
+     Ninja Gaiden Black&2004 PC Launcher.exe   启动器：从这里进（黑之章和 2004 都从这里开始）
+     Ninja Gaiden Black.exe                    黑之章的游戏程序
+     Ninja Gaiden.exe                          2004 的游戏程序（两个都用旁边的 blackrt.dll）
+     game\                                     黑之章的安装位置（启动器装进来）
+     game_ng04\                                2004 的安装位置
      savedata\                             Xbox 硬盘：存档与游戏设定（第一次运行时自动建立）
    ```
 
 2. 打开启动器，在「安装」页选你的游戏镜像（`.iso`），装到「游戏安装路径」（默认是启动器旁的 `game`）。装完会逐个核对游戏
    程序，也可以选择把镜像移到回收站。已经解包过的游戏，在同一页选那个文件夹即可。
-   装好后直接双击 `Ninja Gaiden Black Any.exe` 也能开始游戏（它会找启动器装好的游戏）。
+   装好后也可以直接双击游戏程序开始：`Ninja Gaiden Black.exe` 是黑之章，`Ninja Gaiden.exe` 是 2004（各自找启动器装好的那个游戏）。
+   从 2.2.36.3 或更早的版本升级：启动器改名为 `Ninja Gaiden Black&2004 PC Launcher.exe`，游戏程序分成 `Ninja Gaiden Black.exe`（黑之章）和 `Ninja Gaiden.exe`（2004）。覆盖解压后可以删掉旧的 `Ninja Gaiden Black Any.exe` 和 `Ninja Gaiden Black Any Launcher.exe`；桌面快捷方式和 Steam 里添加的非 Steam 游戏要改成指向新的启动器。存档、设置不受影响；显卡首选项由启动器从旧程序带到新程序上。联网时 Windows 防火墙可能会为新程序再询问一次。
    从 1.1.12 或更早的版本升级：程序改名了（原来叫 `Ninja Gaiden Black Hurricane.exe` / `…Hurricane Launcher.exe`），覆盖解压后
    可以删掉这两个旧程序，桌面快捷方式要重新建。存档和设置不受影响。
 3. 在「显示」「图形」「控制」页按需要调整（按「保存」才生效，每项旁的「?」有说明），回到「开始游戏」页开始。
@@ -392,7 +405,7 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\Ninja Gaiden Black Any.exe   构建产物，连同 blackrt.dll（见"构建"）
+  build\RelWithDebInfo\Ninja Gaiden Black.exe   构建产物，连同 blackrt.dll（见"构建"）
   game\x21\default.xbe                                       你自己解包的 x2.1 镜像（整个镜像的文件）
   savedata\                                                  Xbox 硬盘
   logs\                                                      日志 black.log、截图 shots\、命令文件 presses.txt
@@ -416,7 +429,7 @@ device ... on '显卡名'` 一行记着实际用的是哪张卡。
 **放在别的位置**：把 `default.xbe` 拖到 `run.bat` 上启动；或者在命令行里先设好路径再运行：
 
 ```bat
-set EXE=D:\ngb\Ninja Gaiden Black Any.exe
+set EXE=D:\ngb\Ninja Gaiden Black.exe
 set GAME=D:\ngb\x21\default.xbe
 set HDD=D:\ngb\savedata
 set LOGDIR=D:\ngb\logs
@@ -455,11 +468,11 @@ O 为左扳机、Q 为右扳机、B 为 Start……），在启动器的「控�
 `run.bat` 实际执行的命令（也可以自己手动输入）：
 
 ```
-"Ninja Gaiden Black Any.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+"Ninja Gaiden Black.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
 ```
 
 - `--shot-every 100000000` 让定时截图实际上不发生，只在你用 `shot:` 要求时才截。默认值 60 是每秒截一张，会造成卡顿。
-- `"Ninja Gaiden Black Any.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
+- `"Ninja Gaiden Black.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
 
 **联网（Insignia 排行榜，可选）**
 
@@ -572,7 +585,7 @@ xemu 主机设定里填的 DNS 不用，也不再显示：移植版会把游戏�
   不需要另外安装任何运行库。
 - **显卡**：第一次运行时，如果你没有为游戏程序设过 Windows 的“图形首选项”，程序会把它设为“高性能”，有独立显卡的笔记本就用独显。
   你自己设过的不会被改。
-- **日志**：从启动器开始游戏时在 `logs\black.log`；直接双击 `Ninja Gaiden Black Any.exe` 时在它旁边的 `black.log`。
+- **日志**：从启动器开始游戏时在 `logs\black.log`；直接双击游戏程序（`Ninja Gaiden Black.exe` / `Ninja Gaiden.exe`）时在它旁边的 `black.log`。
   反馈问题时请附上。
 - **启动失败时**会弹出说明（2.2.36.3 起）：例如 Direct3D 无法启动时，写明失败在哪一步、错误码的含义、显卡和驱动版本，以及该怎么办，
   然后正常退出，不再直接崩溃。
@@ -593,7 +606,7 @@ xemu 主机设定里填的 DNS 不用，也不再显示：移植版会把游戏�
 **Steam Deck**：
 
 1. 切到桌面模式，解压压缩包。
-2. Steam →「添加游戏」→「添加非 Steam 游戏」，选 `Ninja Gaiden Black Any Launcher.exe`。
+2. Steam →「添加游戏」→「添加非 Steam 游戏」，选 `Ninja Gaiden Black&2004 PC Launcher.exe`。
 3. 右键这个游戏 →「属性」→「兼容性」，勾选「强制使用特定 Steam Play 兼容工具」，选 Proton（试过的是 11.0-2，也可以选 Experimental）。
 4. 启动，在启动器里安装游戏或选好游戏路径，再开始游戏。之后在游戏模式里从库里直接启动。
 5. Deck 的按键在 Proton 里就是一个 Xbox 手柄。屏幕是 16:10，可在启动器「画面比例」里选「宽屏（16:10 显示器）」。
@@ -605,7 +618,7 @@ xemu 主机设定里填的 DNS 不用，也不再显示：移植版会把游戏�
    - Arch：`lib32-mesa` 以及 `lib32-vulkan-radeon` / `lib32-vulkan-intel` / `lib32-nvidia-utils`
 
    缺少时游戏会弹出说明并退出（2.2.36.3 起），说明里写着失败原因和要装什么。
-2. 运行启动器：`wine "Ninja Gaiden Black Any Launcher.exe"`，安装游戏、调整设置后开始游戏；也可以直接运行 `wine "Ninja Gaiden Black Any.exe"`。
+2. 运行启动器：`wine "Ninja Gaiden Black&2004 PC Launcher.exe"`，安装游戏、调整设置后开始游戏；也可以直接运行 `wine "Ninja Gaiden Black.exe"`（黑之章）或 `wine "Ninja Gaiden.exe"`（2004）。
    有 Steam 的话，也可以按上面 Steam Deck 的第 2–4 步用 Proton。
 3. Batocera 等整合系统：可以换用不同的 Wine 运行器，或切换 DXVK 开关试试。DXVK 把 Direct3D 9 转成 Vulkan，通常比 Wine 自带的
    转换快（作者没有对比测过）；不用 Batocera 时可以 `winetricks dxvk`。
@@ -632,7 +645,7 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
 cmake --build build --config RelWithDebInfo
 ```
 
-得到 `build\RelWithDebInfo\Ninja Gaiden Black Any.exe` 与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
+得到 `build\RelWithDebInfo\` 下的 `Ninja Gaiden Black.exe`、`Ninja Gaiden.exe`、启动器与 `blackrt.dll`。`loader/CMakePresets.json` 里另有上游的 Visual Studio
 2022 / 2026 预设。
 
 **SDL3**：配置时 CMake 会下载 SDL3 3.4.18 的源码包（校验 SHA256）并与程序一起编译；已有解压好的源码时用
@@ -689,7 +702,7 @@ cmake --build build --config RelWithDebInfo
 
 ## 原理
 
-`Ninja Gaiden Black Any.exe` 是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
+游戏程序（`Ninja Gaiden Black.exe` / `Ninja Gaiden.exe`，同一份源码编两次）是一个链接在 XBE 基址的小程序，抢在 Windows 往这段地址放别的东西之前占住它。`blackrt.dll` 把
 `default.xbe` 映射进这段地址，提供游戏导入的 Xbox 内核函数，并在 Xbox 库（Direct3D 8、DirectSound、XAPI）的入口
 打补丁，转到 PC 上的实现。
 

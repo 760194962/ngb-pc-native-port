@@ -5,7 +5,7 @@
 An unofficial native Windows port of *Ninja Gaiden Black* (original Xbox): the original US release, and the basic
 edition va-zh-x2 and the Hurricane editions vb-zh-x2.1 / vb-jp-x2.1 made from it.
 
-`Ninja Gaiden Black Any.exe` loads your own `default.xbe` and runs the original x86 game code directly on the PC; the Xbox kernel,
+The game program (`Ninja Gaiden Black.exe`; for 2004 `Ninja Gaiden.exe`) loads your own `default.xbe` and runs the original x86 game code directly on the PC; the Xbox kernel,
 Direct3D 8, DirectSound and the other system parts are reimplemented on the PC by the loader (HLE). The game code is
 not interpreted instruction by instruction, and it is never modified on disk.
 
@@ -243,6 +243,17 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37: a program for each game; the launcher renamed
+
+- **New names**: the launcher is `Ninja Gaiden Black&2004 PC Launcher.exe`; the `Ninja Gaiden Black Any.exe` both games shared is
+  now `Ninja Gaiden Black.exe` (Black) and `Ninja Gaiden.exe` (2004), one program built twice, both on the `blackrt.dll` beside them.
+- **Double-clicking a game program** starts its own game, the one the launcher installed (before, a double-click always meant
+  Black). If it finds the other game it says which program to use instead of running it; with nothing installed it says how to
+  install, with the path in the program's folder (it showed the current folder's). A game given on the command line runs as given.
+- **Launcher**: starts the program of the game chosen at the top left (online setup and the dashboard too); the graphics
+  preference is set for both programs; updating from an older release, a preference set for the old program is carried over.
+- An old `Ninja Gaiden Black Any.exe` left in the folder still works; it can be deleted.
+
 ### 2.2.36.3: what went wrong when the game cannot start; Windows / Linux notes
 
 - **No crash when Direct3D cannot start**: when the drawing device could not be made the game ran on and crashed at its first
@@ -438,17 +449,20 @@ XInput come with Windows, and the C++ runtime is built into the programs.
 
    ```
    NGB-Hurricane\
-     Ninja Gaiden Black Any Launcher.exe   the launcher: start here
-     Ninja Gaiden Black Any.exe            the game program, with blackrt.dll
-     game\                                 where the game is installed (by the launcher)
+     Ninja Gaiden Black&2004 PC Launcher.exe   the launcher: start here (for Black and 2004)
+     Ninja Gaiden Black.exe                    Black's game program
+     Ninja Gaiden.exe                          2004's game program (both use blackrt.dll beside them)
+     game\                                     where Black is installed (by the launcher)
+     game_ng04\                                where 2004 is installed
      savedata\                             the Xbox hard disk: saves and the game's settings (made on the first run)
    ```
 
 2. Open the launcher; on the Install page choose your game image (`.iso`) and install it to the game folder (by default
    `game` beside the launcher). The install checks the game programs and can move the image to the Recycle Bin. A
    game already extracted: choose its folder on the same page.
-   Once installed, double-clicking `Ninja Gaiden Black Any.exe` starts the game too (it finds what the launcher
-   installed).
+   Once installed, double-clicking a game program starts it too: `Ninja Gaiden Black.exe` for Black, `Ninja Gaiden.exe`
+   for 2004 (each finds the game the launcher installed for it).
+   Upgrading from 2.2.36.3 or earlier: the launcher is now `Ninja Gaiden Black&2004 PC Launcher.exe` and the game program is two, `Ninja Gaiden Black.exe` (Black) and `Ninja Gaiden.exe` (2004). After extracting over the old folder you can delete the old `Ninja Gaiden Black Any.exe` and `Ninja Gaiden Black Any Launcher.exe`; point desktop shortcuts and non-Steam games in Steam at the new launcher. Saves and settings are kept; the launcher carries the graphics preference over from the old program. Windows Firewall may ask once more for the new programs when you play online.
    Upgrading from 1.1.12 or earlier: the programs were renamed (they were `Ninja Gaiden Black Hurricane.exe` / `…Hurricane
    Launcher.exe`); after extracting over the old folder you can delete those two, and make desktop shortcuts again. Saves
    and settings are kept.
@@ -463,7 +477,7 @@ from this layout:
 ```
 ngb-pc-native-port\
   run.bat
-  build\RelWithDebInfo\Ninja Gaiden Black Any.exe   the build, with blackrt.dll (see "Building")
+  build\RelWithDebInfo\Ninja Gaiden Black.exe   the build, with blackrt.dll (see "Building")
   game\x21\default.xbe                                       your own extracted x2.1 image (all of its files)
   savedata\                                                  the Xbox hard disk
   logs\                                                      the log black.log, screenshots shots\, the command file presses.txt
@@ -491,7 +505,7 @@ overrides that choice. The log line
 **Other locations**: drop `default.xbe` onto `run.bat`, or set the paths in a command prompt first:
 
 ```bat
-set EXE=D:\ngb\Ninja Gaiden Black Any.exe
+set EXE=D:\ngb\Ninja Gaiden Black.exe
 set GAME=D:\ngb\x21\default.xbe
 set HDD=D:\ngb\savedata
 set LOGDIR=D:\ngb\logs
@@ -539,12 +553,12 @@ The Graphics page's "Clear shader cache" button removes it after a confirmation;
 The command `run.bat` runs (you can also type it yourself):
 
 ```
-"Ninja Gaiden Black Any.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
+"Ninja Gaiden Black.exe" --windowed --hdd savedata --log logs\black.log --screenshot logs\shots --shot-every 100000000 --press-file logs\presses.txt game\x21\default.xbe
 ```
 
 - `--shot-every 100000000` keeps timed screenshots from ever happening; screenshots are taken only on a `shot:`
   request. The default of 60 is one a second, which makes the game stutter.
-- `"Ninja Gaiden Black Any.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
+- `"Ninja Gaiden Black.exe" --help` lists every option. Some of them (field of view, auto-aim, the PC SETTINGS menus and others) are
   BLACK-only and have no effect on Ninja Gaiden.
 
 **Online (Insignia leaderboards, optional)**
@@ -676,7 +690,7 @@ Details and evidence: `project/docs/09_联网_Insignia.md`.
   do), and your own game image. Nothing else to install.
 - **Graphics card**: at the first start, if you have not set a Windows "graphics preference" for the game program, it sets
   "high performance", so a laptop with a dedicated card uses it. A preference you set is left alone.
-- **Log**: started from the launcher, `logs\black.log`; started by double-clicking `Ninja Gaiden Black Any.exe`, `black.log`
+- **Log**: started from the launcher, `logs\black.log`; started by double-clicking a game program (`Ninja Gaiden Black.exe` / `Ninja Gaiden.exe`), `black.log`
   next to it. Please attach it to a report.
 - **When the game cannot start** it says why (from 2.2.36.3): when Direct3D cannot start, for example, which step failed, what the
   error code means, the card and its driver version, and what to try - then it exits instead of crashing.
@@ -697,7 +711,7 @@ There is no separate Linux build: the Windows one runs in Wine or Proton.
 **Steam Deck**:
 
 1. In desktop mode, unpack the archive.
-2. Steam -> "Add a Game" -> "Add a Non-Steam Game", choose `Ninja Gaiden Black Any Launcher.exe`.
+2. Steam -> "Add a Game" -> "Add a Non-Steam Game", choose `Ninja Gaiden Black&2004 PC Launcher.exe`.
 3. Right-click it -> "Properties" -> "Compatibility", tick "Force the use of a specific Steam Play compatibility tool" and choose Proton (11.0-2 was tried; Experimental works too).
 4. Start it, install the game or choose its folder in the launcher, then play. Later, start it from the library in game mode.
 5. In Proton the Deck's controls are an Xbox pad. The screen is 16:10: choose "Widescreen (16:10 monitor)" under the launcher's aspect setting.
@@ -709,8 +723,8 @@ There is no separate Linux build: the Windows one runs in Wine or Proton.
    - Arch: `lib32-mesa` and `lib32-vulkan-radeon` / `lib32-vulkan-intel` / `lib32-nvidia-utils`
 
    Without them the game shows what failed and what to install, and exits (from 2.2.36.3).
-2. Run the launcher: `wine "Ninja Gaiden Black Any Launcher.exe"`, install the game, set things up and play; or run
-   `wine "Ninja Gaiden Black Any.exe"` directly. With Steam, Proton as in steps 2-4 for the Deck works too.
+2. Run the launcher: `wine "Ninja Gaiden Black&2004 PC Launcher.exe"`, install the game, set things up and play; or run
+   `wine "Ninja Gaiden Black.exe"` (Black) or `wine "Ninja Gaiden.exe"` (2004) directly. With Steam, Proton as in steps 2-4 for the Deck works too.
 3. Batocera and similar systems: try another Wine runner, or switch DXVK on or off. DXVK turns Direct3D 9 into Vulkan and is usually
    faster than Wine's own translation (not measured by the author); outside Batocera, `winetricks dxvk`.
 
@@ -739,7 +753,7 @@ cmake -S loader -B build -G "Visual Studio 15 2017" -A Win32
 cmake --build build --config RelWithDebInfo
 ```
 
-This produces `build\RelWithDebInfo\Ninja Gaiden Black Any.exe` and `blackrt.dll`. `loader/CMakePresets.json` also has upstream's
+This produces `Ninja Gaiden Black.exe`, `Ninja Gaiden.exe`, the launcher and `blackrt.dll` in `build\RelWithDebInfo\`. `loader/CMakePresets.json` also has upstream's
 Visual Studio 2022 / 2026 presets.
 
 **SDL3**: at configure time CMake downloads the SDL3 3.4.18 source release (SHA256 checked) and builds it with the
@@ -797,7 +811,7 @@ Decompiler and disassembler output, game files and test-run folders stay local a
 
 ## How it works
 
-`Ninja Gaiden Black Any.exe` is a small stub linked at the XBE's base address, so that it holds that address range before Windows can
+Each game program (`Ninja Gaiden Black.exe` / `Ninja Gaiden.exe`, one source built twice) is a small stub linked at the XBE's base address, so that it holds that address range before Windows can
 put anything there. `blackrt.dll` maps `default.xbe` into the range, provides the Xbox kernel functions the game
 imports, and patches the entry points of the Xbox libraries (Direct3D 8, DirectSound, XAPI) to go to PC
 implementations.
