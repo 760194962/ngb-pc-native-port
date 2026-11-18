@@ -33,7 +33,7 @@ work\                符号表（functions_x21.csv）、反汇编等中间物（
 ```
 # 配置（只需一次；生成器 VS 15 2017 Win32，CMake 用路线 A 的便携版）
 "E:\games\emu\ninja gaiden black hurricane recomp\toolchain\cmake-4.4.4-windows-x86_64\bin\cmake.exe" -S ngb-recomp-native\loader -B build\ngb2 -G "Visual Studio 15 2017" -A Win32
-# 构建（输出 build\ngb2\RelWithDebInfo\：Ninja Gaiden Black Any.exe、blackrt.dll、… Launcher.exe）
+# 构建（输出 build\ngb2\RelWithDebInfo\：Ninja Gaiden Black.exe、Ninja Gaiden.exe（2004）、blackrt.dll、Ninja Gaiden Black&2004 PC Launcher.exe）
 "<同上 cmake.exe>" --build build\ngb2 --config RelWithDebInfo
 # 试玩：用户存档的副本 run\play\hdd_user，日志 run\play\black.log，额外参数透传
 play.bat [--audio ac3 ...]

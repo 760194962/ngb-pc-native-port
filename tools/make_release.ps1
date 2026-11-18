@@ -1,6 +1,7 @@
 # Packs a release zip: dist\ngb-hurricane-pc-<version>-win32.zip with one folder, NGB-Hurricane\, holding the
-# launcher (the way in: it installs the game from the player's own image and starts it), Ninja Gaiden Black
-# Hurricane.exe, blackrt.dll, README.md, README.en.md and LICENSE.txt. The launcher's background art is inside its
+# launcher (Ninja Gaiden Black&2004 PC Launcher.exe, the way in: it installs the game from the player's own image and
+# starts it), the game programs Ninja Gaiden Black.exe and Ninja Gaiden.exe (2004), blackrt.dll, README.md, README.en.md
+# and LICENSE.txt. The launcher's background art is inside its
 # .exe and both programs carry the Dragon Sword icon (launcher/art: the exceptions to "no game assets", README, Legal).
 # The launcher installs the game into game\ inside that folder by default, where the game program also looks when it
 # is double-clicked; what the programs write stays there too (savedata\, black.ini, cache\). The script checks that
@@ -30,9 +31,10 @@ if ($cmake -match 'set\(NGB_VERSION_STRING "([^"]+)"\)') {
 }
 if (-not $Bin) { $Bin = "$root\loader\build\win32\$Config" }
 $Bin = (Resolve-Path $Bin).Path
-$game = "$Bin\Ninja Gaiden Black Any.exe"
-$launcher = "$Bin\Ninja Gaiden Black Any Launcher.exe"
-foreach ($f in $game, $launcher, "$Bin\blackrt.dll") { if (-not (Test-Path $f)) { throw "missing ${f}: build first" } }
+# The game programs, one per game (2026-11-18; before: Ninja Gaiden Black Any.exe), and the launcher
+$games = @("$Bin\Ninja Gaiden Black.exe", "$Bin\Ninja Gaiden.exe")
+$launcher = "$Bin\Ninja Gaiden Black&2004 PC Launcher.exe"
+foreach ($f in $games + @($launcher, "$Bin\blackrt.dll")) { if (-not (Test-Path -LiteralPath $f)) { throw "missing ${f}: build first" } }
 $seed = "$root\seed\shader_seed.bin"
 if (-not (Test-Path $seed)) { throw "missing ${seed}: tools\make_shader_seed.py makes it" }
 $texseed = "$root\seed\texture_pool.txt"
@@ -53,13 +55,15 @@ public static class ReleaseRes {
   [DllImport("kernel32.dll")] public static extern bool FreeLibrary(IntPtr m);
 }
 "@
-$m = [ReleaseRes]::LoadLibraryExW($game, [IntPtr]::Zero, 0x22) # LOAD_LIBRARY_AS_DATAFILE | AS_IMAGE_RESOURCE
-if ($m -eq [IntPtr]::Zero) { throw "cannot read the resources of $game" }
-$icon = [ReleaseRes]::FindResourceW($m, [IntPtr]1, [IntPtr]14) # RT_GROUP_ICON 1
-[ReleaseRes]::FreeLibrary($m) | Out-Null
-if ($icon -eq [IntPtr]::Zero) { throw "$game has no icon (built with PORT_ICON empty): rebuild with the default" }
+foreach ($game in $games) {
+    $m = [ReleaseRes]::LoadLibraryExW($game, [IntPtr]::Zero, 0x22) # LOAD_LIBRARY_AS_DATAFILE | AS_IMAGE_RESOURCE
+    if ($m -eq [IntPtr]::Zero) { throw "cannot read the resources of $game" }
+    $icon = [ReleaseRes]::FindResourceW($m, [IntPtr]1, [IntPtr]14) # RT_GROUP_ICON 1
+    [ReleaseRes]::FreeLibrary($m) | Out-Null
+    if ($icon -eq [IntPtr]::Zero) { throw "$game has no icon (built with PORT_ICON empty): rebuild with the default" }
+}
 
-# Windows Defender scan of the three programs: 1.1.11's launcher was a machine-learning false positive
+# Windows Defender scan of the four programs: 1.1.11's launcher was a machine-learning false positive
 # (Trojan:Win32/Bearfoos.A!ml) while a second build of the same source was clean. A flagged build is not shipped:
 # rebuild and pack again.
 $mp = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
@@ -69,11 +73,11 @@ $av = Get-MpComputerStatus -ErrorAction SilentlyContinue
 if ((Test-Path $mp) -and $av -and -not $av.AntivirusEnabled) {
     Write-Warning 'Windows Defender is turned off on this PC: the programs were not scanned'
 } elseif (Test-Path $mp) {
-    foreach ($f in $launcher, $game, "$Bin\blackrt.dll") {
+    foreach ($f in @($launcher) + $games + @("$Bin\blackrt.dll")) {
         $r = & $mp -Scan -ScanType 3 -File $f -DisableRemediation | Out-String
         if ($r -notmatch 'found no threats') { throw "Windows Defender flags ${f}: rebuild it and pack again`n$r" }
     }
-    'Windows Defender: the three programs are clean'
+    'Windows Defender: the four programs are clean'
 } else { Write-Warning 'MpCmdRun.exe not found: the programs were not scanned' }
 
 $name = "ngb-hurricane-pc-$version-win32"
@@ -85,7 +89,7 @@ $stage = "$dist\_stage-$PID"
 $sym = "$stage-symbols"
 $out = "$stage\NGB-Hurricane"
 New-Item -ItemType Directory -Force $out, $sym | Out-Null
-Copy-Item $launcher, $game, "$Bin\blackrt.dll", $seed, $texseed, $drawseed, $vshseed, $cputexseed $out
+Copy-Item -LiteralPath (@($launcher) + $games + @("$Bin\blackrt.dll", $seed, $texseed, $drawseed, $vshseed, $cputexseed)) $out
 Copy-Item "$root\README.md", "$root\README.en.md" $out
 Copy-Item "$root\LICENSE" "$out\LICENSE.txt"
 Copy-Item "$Bin\blackrt.pdb", "$Bin\blackrt.map" $sym

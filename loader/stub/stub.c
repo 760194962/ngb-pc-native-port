@@ -1,5 +1,8 @@
 /*
- * black.exe: address-space owner for the Xbox image.
+ * The game programs' stub: address-space owner for the Xbox image. Built twice (loader/CMakeLists.txt):
+ * Ninja Gaiden Black.exe with NGB_GAME=1 and Ninja Gaiden.exe (2004) with NGB_GAME=2; started without a game on the
+ * command line, each looks for its own game (blackrt.dll, BlackMainFor). Without NGB_GAME it calls BlackMain, as the
+ * old Ninja Gaiden Black Any.exe did.
  *
  * Linked at base 0x10000 (/FIXED, no CRT). The uninitialized array below makes this image span
  * 0x10000 up to about 0x800000, which covers the XBE (0x10000-0x587a40). Windows maps the exe before
@@ -14,11 +17,20 @@
 
 #define XBOX_RESERVE_SIZE 0x00EA0000u
 
-__declspec(dllimport) int __cdecl BlackMain(void *reserve, unsigned reserve_size);
-
 static unsigned char g_xbox_image_reserve[XBOX_RESERVE_SIZE];
+
+#ifdef NGB_GAME
+__declspec(dllimport) int __cdecl BlackMainFor(void *reserve, unsigned reserve_size, int game);
+
+void __cdecl StubEntry(void)
+{
+    ExitProcess((UINT)BlackMainFor(g_xbox_image_reserve, XBOX_RESERVE_SIZE, NGB_GAME));
+}
+#else
+__declspec(dllimport) int __cdecl BlackMain(void *reserve, unsigned reserve_size);
 
 void __cdecl StubEntry(void)
 {
     ExitProcess((UINT)BlackMain(g_xbox_image_reserve, XBOX_RESERVE_SIZE));
 }
+#endif
