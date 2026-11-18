@@ -1192,9 +1192,9 @@ HANDLE g_vblank_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr); // wakes pa
 // slow frames in the performance recordings. When DwmFlush returns early (nothing presented yet, window
 // minimised) the tick falls back to the timer. Other refresh rates, --background and --timer-vblank use the
 // timer only.
-// At n x 60 Hz (120, 180, 240 Hz, each within n Hz) the tick follows every n-th composition, so a 60 fps frame stays n
-// refreshes each time. On the 59.94 Hz timer a 120 Hz desktop showed about 45% of the frames for 1 or 3 refreshes instead
-// of 2 (the user's panel driven by the RTX 3060, windowed, Desktop Duplication, 2026-11-17).
+// At about 60 Hz the tick follows the desktop composition; other refresh rates (including 120/180/240 and their
+// VRR modes) use the 59.94 Hz timer. The n-th composition rule was a fixed-refresh optimization and, under VRR,
+// could become the game's clock itself (80 Hz, 4/3 speed; 2.2.35 through 2.2.37.1).
 using DwmFlushFn = HRESULT(WINAPI *)();
 DwmFlushFn display_sync()
 {
@@ -1274,8 +1274,8 @@ void __stdcall vblank_thread(void *)
     const bool kernel = !g_cfg.timer_vblank && (!g_cfg.background || g_cfg.display_vblank) && kv.init();
     int div = display_div();
     logf("[d3d] vblank: the display at %d Hz: %s%s", g_display_hz.load(),
-         flush && div ? (div == 1 ? "follows its compositions (DwmFlush)" : "follows every n-th composition (DwmFlush)") : "59.94 Hz timer",
-         kernel ? "; in exclusive fullscreen at n x 60 Hz its own vblank (D3DKMTWaitForVerticalBlankEvent)" : "");
+         flush && div ? "follows its compositions (DwmFlush)" : "59.94 Hz timer",
+         kernel && div ? "; in exclusive fullscreen at ~60 Hz its own vblank (D3DKMTWaitForVerticalBlankEvent)" : "");
     uint32_t from_display = 0, from_kernel = 0, waited_past = 0;
     LARGE_INTEGER minute = last;
     // A variable refresh (G-SYNC / FreeSync) is no clock: the display's vblanks then follow the Presents, and the tick
@@ -2779,7 +2779,8 @@ struct EarlyGate {
     {
         bool display = host3d::exclusive() || g_vblank_synced.load(std::memory_order_relaxed);
         double ms = g_frame_tick ? (qpc_now() - g_frame_tick) / (double)qpc_per_ms() : 1e9;
-        // the fixed deadline is for 60 Hz: at n x 60 Hz the composition comes n times as often (120 Hz: 5 ms)
+        // the fixed deadline is for 60 Hz; higher refresh rates use the timer, and only an exclusive device may still
+        // present early there
         const int hz = g_display_hz.load();
         const double s = hz >= 50 ? 60.0 / hz : 1.0;
         double d = g_cfg.early_deadline_ms * s;
