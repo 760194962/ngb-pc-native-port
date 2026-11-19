@@ -243,6 +243,35 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.3: the stable branch without 2.2.35
+
+This build takes **2.2.34's presentation clock** as its base and merges only the features of 2.2.36, 2.2.36.1,
+2.2.36.2, 2.2.36.3 and 2.2.37.
+
+It does **not** include 2.2.35's:
+
+- n-th-refresh pacing at 120/180/240 Hz;
+- FLIPEX / Present Statistics;
+- present_early's deadline / miss / back-off;
+- 2.2.35's VRR check.
+
+So:
+
+```text
+60 Hz      -> follows the screen (2.2.34 behaviour)
+120/240    -> 59.94 Hz timer (2.2.34 behaviour)
+144/165    -> 59.94 Hz timer
+VRR        -> no longer sped up or slowed by n x 60
+```
+
+Cost:
+
+- the evenness at 120/240 Hz is back to 2.2.34;
+- 2.2.35's "wait past a too-soon refresh" is absent, but the timer path did not need it;
+- 2.2.34's low-latency present still presents early unconditionally, without 2.2.35's deadline check.
+
+This is the "stable first, no 2.2.35" build; the presenter architecture is separate work.
+
 ### 2.2.37: a program for each game; the launcher renamed
 
 - **New names**: the launcher is `Ninja Gaiden Black&2004 PC Launcher.exe`; the `Ninja Gaiden Black Any.exe` both games shared is
@@ -309,6 +338,8 @@ updating to a new version**: a new version drops the draw states learned locally
   pictures not taken for a movie and the HUD routine's three tests.
 
 ### 2.2.35: an even picture on 120 Hz screens, the occasional few seconds of stutter fixed, the low-latency present redone (still off by default)
+
+> 2.2.37.3 does not include this release; the section below is history.
 
 With the low-latency present off (the default), input lag and the way frames go out are as in 2.2.34; this release changes how
 the game's beat lines up with the screen.
