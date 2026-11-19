@@ -727,39 +727,26 @@ const Pair kText[(int)Str::Count] = {
      L"A shader compiled once is kept in the cache and never affects later play. Keep it off if missing pieces bother you more than a brief stutter."},
     {L"低延迟呈现（实验性）",
      L"Low-latency present"},
-    {L"画得快的帧提前送出，延迟更低；只在 60 Hz 或独占全屏时起作用",
-     L"Experimental: frames drawn quickly go out early, lower lag; 60 Hz or exclusive fullscreen only"},
+    {L"画完立刻送去显示，延迟更低；窗口模式下可能不够顺",
+     L"Experimental: frames go out as soon as drawn; lower lag, may look less smooth windowed"},
     {L"实验性，默认关闭。\n\n"
-     L"游戏按主机的节奏每秒 60 帧：每帧开头读手柄，算好、画好，再等到下一个节拍才送去显示。开启后，来得及的帧画完立刻送出，"
-     L"从读手柄到画面送出约 16 ms → 1–5 ms；来不及的帧照旧等节拍。游戏本身的节奏完全不变。\n\n"
-     L"怎样算来得及：窗口模式下改用翻页呈现，程序从系统读取每一帧实际显示在哪次刷新，自动找出桌面合成的截止时刻，有帧没赶上就立刻收紧。"
-     L"显卡不直接连着屏幕（笔记本混合输出时用独显）、系统不提供这些统计，或在独占全屏下，用固定的“节拍后 10 ms 内”。\n\n"
-     L"为什么不是每帧都提前：每一帧必须赶在桌面合成的截止时刻前送到，赶不上时屏幕会“一帧多显示一次、紧接着一帧没显示”。"
-     L"最初的版本（2.2.33）画完就送，有玩家在 60 Hz 显示器、集成显卡上感觉到不顺。\n\n"
-     L"实测（60 Hz 窗口，150 秒，屏幕抓取逐帧核对“多显示一次 + 没显示”的次数，括号里是关闭时）：\n"
-     L"• 独显直连屏幕：约四到八成的帧提前，0 次（0–7 次）——收益最大；\n"
-     L"• 集成显卡：约两成的帧提前，约 6 次（约 4 次）；2.2.33 是约 136 次。4 倍分辨率下几乎没有帧来得及，约 45 次（约 42 次）；\n"
-     L"• 笔记本混合输出时的独显：约四成的帧提前，0–7 次。\n"
-     L"在“提前”和“等节拍”之间切换的那一下会多一次重复，所以集成显卡上开启后大约每分钟多一次，收益也小；独显直连屏幕时推荐开启。\n\n"
-     L"60 Hz 显示器上效果最好。120 Hz 时一帧只有约 5 ms 可以提前，实测几乎没有帧来得及，开了也基本等于关闭；"
-     L"其他刷新率（如 144、165 Hz）的窗口模式不起作用。只在一台笔记本上测过，请按自己的感受决定开不开。",
+     L"游戏按主机的节奏每秒 60 帧：每帧开头读手柄，算好、画好，再等到下一个节拍才换下一帧。"
+     L"以前画好的帧也要跟着等到节拍那一刻才送去显示，白等十几毫秒。开启后画完立刻送去显示，再等节拍，游戏本身的节奏完全不变，只是画面出来得更早。\n\n"
+     L"实测（核显和独显，默认与高画质）：从游戏读到手柄输入到画面送出，窗口模式约 16 ms → 2.5 ms，独占全屏约 18 ms → 8.5 ms；"
+     L"帧率、迟到帧和过场影片的节奏都没有变化。\n\n"
+     L"已知问题：有玩家在 60 Hz 显示器、集成显卡的电脑上反馈窗口模式下画面不如关闭时顺。原因推测是：画完立刻送出时，较重的一帧可能赶不上"
+     L"桌面合成的截止时刻，上一帧会多显示一次，接着两帧挤进同一次合成、其中一帧没显示出来。上面的实测只量了游戏节奏和送出时刻，"
+     L"没有量到屏幕上实际显示的帧，所以改回默认关闭，查清之前请按自己的感受决定开不开。",
      L"Experimental, off by default.\n\n"
-     L"The game runs on the console's beat, 60 frames a second: each frame reads the pad at its start, is worked out and drawn, then waits for the next beat "
-     L"before it goes to the screen. On, a frame ready in time goes out as soon as it is drawn: from the pad read to the picture going out about 16 ms -> 1-5 ms; "
-     L"one that is not waits for the beat as before. The game's own timing is exactly as before.\n\n"
-     L"What 'in time' means: windowed, frames go out by flip and the program reads from the system which refresh showed each one, finding the desktop "
-     L"compositor's deadline itself and tightening at the first frame that missed it. Where the GPU does not drive the screen (a laptop's dedicated GPU "
-     L"under hybrid graphics), where the system gives no such statistics, and in exclusive fullscreen, a fixed 'within 10 ms of the beat' is used.\n\n"
-     L"Why not every frame: each must reach the desktop compositor before its deadline; one that misses it makes the screen show a picture twice and then "
-     L"skip one. The first version (2.2.33) sent every frame as soon as drawn, which a player on a 60 Hz display with integrated graphics felt as less smooth.\n\n"
-     L"Measured (60 Hz, windowed, 150 s, 'shown twice + skipped' counted frame by frame from a screen capture; with it off in brackets):\n"
-     L"• dedicated GPU driving the screen: about 40-80% of the frames early, 0 (0-7) - the most to gain;\n"
-     L"• integrated GPU: about 20% early, about 6 (about 4); 2.2.33 had about 136. At 4x resolution hardly a frame is in time: about 45 (about 42);\n"
-     L"• a laptop's dedicated GPU under hybrid graphics: about 40% early, 0-7.\n"
-     L"Each switch between 'early' and 'on the beat' costs one repeat, so on integrated graphics it adds about one a minute for a small gain; with a "
-     L"dedicated GPU driving the screen it is recommended.\n\n"
-     L"Best on a 60 Hz display. At 120 Hz a frame has only about 5 ms to go early and hardly any made it in the tests, so it is about the same as off; "
-     L"windowed at other refresh rates (144, 165 Hz) it does nothing. Tested on one laptop only: turn it on if it feels right to you."},
+     L"The game runs on the console's beat, 60 frames a second: each frame reads the pad at its start, is worked out and drawn, then waits for the next beat. "
+     L"Before, a finished frame also waited for that beat before it went to the screen, a dozen milliseconds for nothing. On, it goes to the screen as soon as it is drawn "
+     L"and the wait comes after: the game's own timing is exactly as before, only the picture comes out sooner.\n\n"
+     L"Measured (integrated and dedicated GPU, default and high quality): from the game reading the pad to the picture going out, about 16 ms -> 2.5 ms windowed, "
+     L"18 ms -> 8.5 ms in exclusive fullscreen; frame rate, late frames and the movies' pacing unchanged.\n\n"
+     L"Known issue: a player on a 60 Hz display with integrated graphics found it less smooth than off, windowed. The likely cause: sent as soon as "
+     L"it is drawn, a heavy frame can miss the desktop compositor's deadline, so the last picture is shown twice and then two frames land in one "
+     L"composition, one of them never shown. The measurements above covered the game's pacing and when pictures were sent, not what the screen "
+     L"showed, so it is off by default again; until this is sorted out, turn it on only if it feels right to you."},
     {L"垂直同步时用 60 Hz",
      L"60 Hz with V-Sync"},
     {L"高刷新率屏幕上独占全屏开垂直同步时切到 60 Hz，画面不抖",

@@ -4,7 +4,7 @@ console (an emulator or a console that runs unsigned programs) as well as in the
 
     python tools/ng04_camera_menu.py <1.06 default.xbe> <out.xbe>      (needs keystone-engine: pip install keystone-engine)
 
-What the patch does (the reasons: loader/src/ng04_camera.cpp and project notes, 2026-11-12):
+What the patch does (the reasons: the loader's former src/ng04_camera.cpp, in git history before the v2.2.37.3 merge, 2026-11-12):
 - Controller Settings gets two rows, after "Controls While in Water":
     3rd Person Camera         On at Start / Off at Start    options +0x14 (0 is On: new saves start with it on)
     3rd Person Camera Stages  Hurricane Packs / All Stages  options +0x15

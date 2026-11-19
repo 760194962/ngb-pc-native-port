@@ -292,28 +292,34 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
-### 2.2.37.1: fixed the frame rate held low with VRR (G-SYNC / FreeSync) since 2.2.35
+### 2.2.37.3: the stable branch without 2.2.35
 
-- **The problem**: a player with VRR on got 24 fps on a 240 Hz monitor (12 in cutscenes) and 40-43 at 120 Hz, where 2.2.34
-  held a steady 60. Since 2.2.35 the game steps once every n refreshes at n x 60 Hz; under VRR the display refreshes only when
-  a frame comes, so each waited for the other. 2.2.35's VRR check worked in exclusive fullscreen only, after 600 slow frames.
-- **The fix**: the game's tick rate is checked every second; in any display mode, two seconds in a row under 90% of 59.94 Hz
-  and a 59.94 Hz timer takes over (what 2.2.34 did).
-- Tested by the author (120 Hz + G-SYNC): borderless with low-latency present gave about 45 fps in 2.2.37, the fix switches at
-  4 s and holds 60; exclusive fullscreen switches at 4 s instead of 12; a fixed 120 Hz (no VRR) is not mistaken for VRR, so
-  2.2.35's evenness stays.
+This build takes **2.2.34's presentation clock** as its base and merges only the features of 2.2.36, 2.2.36.1,
+2.2.36.2, 2.2.36.3 and 2.2.37.
 
-### 2.2.37.2: 120/180/240 Hz no longer use the display as the game clock
+It does **not** include 2.2.35's:
 
-- **The problem**: 2.2.35's "one frame every n refreshes" is 60 Hz on a fixed refresh, but a VRR panel can give an 80 Hz
-  composition tick, so the game ran at 80 fps / 4/3 speed. 2.2.37.1 checked for a tick that was too slow, not too fast.
-- **The fix**: `display_div()` accepts only 59-61 Hz; 120/180/240 Hz and their VRR modes always use the fixed 59.94 Hz timer,
-  so the game tick can no longer speed up or slow down with the display.
-- **Kept**: 2.2.37.1's slow-rate fallback and the new fast-rate fallback remain as a last resort while a 60 Hz display follows
-  the screen.
-- **Cost**: the evenness at 120/180/240 Hz goes back to 2.2.34's behaviour; 60 Hz alignment is unchanged.
-- **Not done yet**: Present and the game tick are not fully split; the target design is in
-  `work/NGB_呈现节拍目标架构设计.md`.
+- n-th-refresh pacing at 120/180/240 Hz;
+- FLIPEX / Present Statistics;
+- present_early's deadline / miss / back-off;
+- 2.2.35's VRR check.
+
+So:
+
+```text
+60 Hz      -> follows the screen (2.2.34 behaviour)
+120/240    -> 59.94 Hz timer (2.2.34 behaviour)
+144/165    -> 59.94 Hz timer
+VRR        -> no longer sped up or slowed by n x 60
+```
+
+Cost:
+
+- the evenness at 120/240 Hz is back to 2.2.34;
+- 2.2.35's "wait past a too-soon refresh" is absent, but the timer path did not need it;
+- 2.2.34's low-latency present still presents early unconditionally, without 2.2.35's deadline check.
+
+This is the "stable first, no 2.2.35" build; the presenter architecture is separate work.
 
 ### 2.2.37: a program for each game; the launcher renamed
 
@@ -381,6 +387,8 @@ updating to a new version**: a new version drops the draw states learned locally
   pictures not taken for a movie and the HUD routine's three tests.
 
 ### 2.2.35: an even picture on 120 Hz screens, the occasional few seconds of stutter fixed, the low-latency present redone (still off by default)
+
+> 2.2.37.3 does not include this release; the section below is history.
 
 With the low-latency present off (the default), input lag and the way frames go out are as in 2.2.34; this release changes how
 the game's beat lines up with the screen.

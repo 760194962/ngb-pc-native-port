@@ -143,7 +143,6 @@ void usage()
            "  --audio M         the console's audio: stereo (default), mono, surround (Dolby Surround: rear matrixed\n"
            "                    into the two channels), ac3 or dts (Dolby Digital / DTS: 5.1 out) (black.ini audio_mode...)\n"
            "  --no-movie-skip   movies skip only as in the original (default: A / START skip every movie)\n"
-           "  --ng04-cam        Ninja Gaiden (2004) update: the right-stick camera on from the start (black.ini ng04_cam)\n"
            "  --no-sdl-pads     XInput controllers only (default: also DualShock, DualSense, Switch and DirectInput pads)\n"
            "  --online-eeprom F --online-hdd F  online play through Insignia with this registered EEPROM and xemu disk\n"
            "                    image (both only read; black.ini online = 1, online_eeprom, online_hdd); --offline: off\n"
@@ -308,10 +307,6 @@ bool parse_args()
         else if (a == L"--cpu-tex-verify") g_cfg.cpu_tex_verify = true;
         else if (a == L"--compile-port-shaders") g_cfg.compile_port_shaders = true;
         else if (a == L"--keep-refresh") { g_cfg.exclusive_60hz = false; settings_mark_cli("exclusive_60hz"); }
-        else if (a == L"--frame-marker") g_cfg.frame_marker = true;
-        else if (a == L"--flipex") g_cfg.flipex = true;
-        else if (a == L"--flip-nostats") g_cfg.flip_nostats = true;
-        else if (a == L"--early-deadline" && i + 1 < argc) g_cfg.early_deadline_ms = _wtof(argv[++i]);
         else if (a == L"--present-early" && i + 1 < argc) { g_cfg.present_early = _wtoi(argv[++i]) != 0; settings_mark_cli("low_latency_present"); }
         else if (a == L"--vsh-record") {
             if (!next(g_cfg.vsh_record)) return false;
@@ -400,8 +395,6 @@ bool parse_args()
         } else if (a == L"--press-file") {
             if (!next(g_cfg.press_file)) return false;
         } else if (a == L"--no-movie-skip") { g_cfg.skip_movies = false; settings_mark_cli("skipanymovie"); }
-        else if (a == L"--ng04-cam") { g_cfg.ng04_cam = true; settings_mark_cli("ng04_cam"); }
-        else if (a == L"--ng04-cam-global") { g_cfg.ng04_cam_global = true; settings_mark_cli("ng04_cam_global"); }
         else if (a == L"--no-sdl-pads") g_cfg.sdl_pads = false;
         else if (a == L"--no-pc-menus") g_cfg.pc_menus = false;
         else if (a == L"--timer-vblank") g_cfg.timer_vblank = true;
@@ -981,7 +974,6 @@ int run(void *reserve, unsigned reserve_size)
     else g_cfg.aspect_w = 16, g_cfg.aspect_h = 9;
     if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
     install_ng04_exitmenu(); // Ninja Gaiden (2004)'s title menu: the same, its own way
-    install_ng04_camera();   // Ninja Gaiden (2004) update: the right-stick camera at start, inversion
     if (profile && !black && !profile->aux) install_music51_fix(); // the music player's six channels at -96 dB
     if (profile && !black) // the ripple textures the game makes on the CPU, kept (ngb_cpu_textures.cpp)
         if (const XbeSection *t = g_xbe.section_named(".text")) install_cpu_textures(t->vaddr, t->vsize);
