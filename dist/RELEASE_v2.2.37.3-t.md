@@ -1,6 +1,6 @@
-# 《忍者龙剑传 黑之章》PC 原生移植 **2.2.37.3-t**（测试版）
+# 《忍者龙剑传 黑之章》PC 原生移植 **2.2.37.3-t**
 
-这是 **2.2.37.3** 的测试版，只多了启动器的「稳定游戏速度」开关和相应设置，不改变关闭开关时的游戏行为。
+这是 **2.2.37.3** 的版本，只多了启动器的「稳定游戏速度」开关和相应设置，不改变关闭开关时的游戏行为。
 
 ## 这个版本是什么
 
@@ -74,9 +74,9 @@
 
 ---
 
-# Ninja Gaiden Black PC native port **2.2.37.3-t** (test build)
+# Ninja Gaiden Black PC native port **2.2.37.3-t**
 
-This is a test build of **2.2.37.3**. It adds only the launcher's **Steady game speed** switch and its setting; with the
+This is **2.2.37.3** with only the launcher's **Steady game speed** switch and its setting; with the
 switch off, the game behaves as 2.2.37.3.
 
 ## What this build is
