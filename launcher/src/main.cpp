@@ -147,7 +147,7 @@ enum {
     kHitSave, kHitDiscard, kHitAskAlt,
     kHitHelpSet = 400, // + the setting's index in kSettingHelp: its "?"
     kHitMode = 200, kHitAspect = 210, kHitAa = 230, kHitSeam = 240, kHitFx = 250, kHitGpu = 260, kHitListClose = 269,
-    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitBudget = 298, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370, kHitCpuMode = 380, kHitPresent = 384, kHitExcl60 = 386, kHitMoveFlash = 388,
+    kHitGain = 270, kHitGamma, kHitWin = 280, kHitVsync = 290, kHitHud = 294, kHitFsRes = 296, kHitBudget = 298, kHitResList = 300, kHitShadow = 320, kHitAniso = 340, kHitSysLang = 350, kHitAudioMode = 360, kHitDigital = 364, kHitShadowSoft = 370, kHitCpuMode = 380, kHitPresent = 384, kHitExcl60 = 386, kHitMoveFlash = 388, kHitFixedClock = 390,
     kHitCtlTab = 600, kHitKey = 620, kHitPadMap = 700, // + input * 2 + slot; + button * 16 (+ 1 + row: its list)
     kHitWebsite = 490, kHitClearCache = 495, kHitOpenSaves = 500, kHitBackupNow, kHitOpenBackups, kHitPickXrevive, kHitImport, kHitExport, kHitRestore = 510,
     kHitOnline = 520, kHitPickEeprom = 530, kHitPickHdd, kHitImportXemu, kHitNewConsole, kHitRegister, kHitDashboard, kHitRebuildConsole, kHitDnsMode = 540, kHitNetCheck = 545, kHitInsignia, kHitDnsAddr, kHitDnsFind, kHitHelpRegister,
@@ -156,6 +156,17 @@ enum {
     kHitResign = 590,
     kHitDupRemove = 1900, // + row of the Saves page's same-number list (App::dup_rows): its Remove
     kHitUninstall = 2000, // Ninja Gaiden 2004's content to uninstall: its drop-down list (+ 1 + row)
+};
+// The Start page's prominent toggles. One entry per card; the click handler and the card share this table,
+// so adding a second one does not duplicate the key or the geometry.
+struct StartToggle {
+    int base;
+    Str title;
+    Str note;
+    const char *key;
+};
+constexpr StartToggle kStartToggles[] = {
+    {kHitFixedClock, Str::FixedClock, Str::FixedClockNote, "timer_vblank"},
 };
 constexpr int kDupRowsMax = 60; // same-number rows with a Remove button (30 numbers; more than two a number is rare)
 // Ids in a range must not run into the next fixed id (2.2.8's kHitClearCache once put Export on Open folder's 500).
@@ -1661,6 +1672,21 @@ struct Painter {
         return s + L"  \x00B7  " + aspect_name(aspect_index(true));
     }
 
+    // A single aligned row between Play and the summary: title, when to use it, and the switch share one
+    // baseline. The table above owns the ids and the black.ini key, so draw and click stay in step.
+    void start_toggle(const StartToggle &t, D2D1_RECT_F f)
+    {
+        bool on = black_ini(t.key) == "1";
+        fill(f, kInk, 0.55f, 4);
+        stroke(f, kInk3, 1.0f, 4);
+        fill({f.left, f.top + 6, f.left + 2, f.bottom - 6}, kGold, 0.75f);
+        const float row = f.top + 5;
+        text(S(t.title), {f.left + 16, row, f.left + 172, row + 30}, 14, kBone, 1.0f,
+             DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        text(S(t.note), {f.left + 180, row, f.right - 132, row + 30}, 10, kAsh, 0.82f);
+        segmented(t.base, f.right - 122, row, {S(Str::On), S(Str::Off)}, on ? 0 : 1, 50);
+    }
+
     void start_page()
     {
         const float x = kNavW + 56;
@@ -1696,6 +1722,10 @@ struct Painter {
         if (!ready) {
             fill({b.right + 10, b.top, b.right + 430, b.bottom}, kInk, 0.78f, 4);
             text(S(Str::NotReady), {b.right + 20, b.top, b.right + 420, b.bottom}, 13.5f, kAsh);
+        } else {
+            // A fixed-clock switch: VRR / high refresh can make the game speed wrong; this pins the game
+            // clock to 59.94 without following the screen.
+            for (const StartToggle &t : kStartToggles) start_toggle(t, {x, 330, x + 620, 370});
         }
 
         // the summary card
@@ -3567,6 +3597,17 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (id == kHitResetPage) g.ask = kAskReset;
         else if (id >= kHitSeam && id < kHitSeam + 2) black_ini_set("seamfill", id == kHitSeam ? "1" : "0");
         else if (id >= kHitBudget && id < kHitBudget + 2) black_ini_set("compile_budget", id == kHitBudget ? "4" : "-1");
+        else if (id >= kHitFixedClock && id < kHitFixedClock + 2) {
+            for (const StartToggle &t : kStartToggles)
+                if (id >= t.base && id < t.base + 2) {
+                    // This Start-page switch is written at once (like CPU cores), not kept in g_pending:
+                    // closing the launcher without starting the game keeps the choice. The game still reads
+                    // black.ini only when it starts.
+                    black_ini_write(t.key, id == t.base ? "1" : "0");
+                    g_pending.erase(t.key);
+                    break;
+                }
+        }
         else if (id >= kHitPresent && id < kHitPresent + 2) black_ini_set("low_latency_present", id == kHitPresent ? "1" : "0");
         else if (id >= kHitExcl60 && id < kHitExcl60 + 2) black_ini_set("exclusive_60hz", id == kHitExcl60 ? "1" : "0");
         else if (id >= kHitMoveFlash && id < kHitMoveFlash + 2) black_ini_set("move_flash", id == kHitMoveFlash ? "1" : "0");

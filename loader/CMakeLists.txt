@@ -8,7 +8,7 @@ if(PROJECT_VERSION_TWEAK STREQUAL "")
 else()
   set(NGB_VERSION_TWEAK ${PROJECT_VERSION_TWEAK})
 endif()
-set(NGB_VERSION_STRING "${PROJECT_VERSION}") # test packages carry -tN (1.1.5-t..1.1.8-t, 2.2.0-t1, -t2); releases none
+set(NGB_VERSION_STRING "${PROJECT_VERSION}-t") # test packages carry -tN (1.1.5-t..1.1.8-t, 2.2.0-t1, -t2); releases none
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
   message(FATAL_ERROR "The loader must be 32-bit: configure with -A Win32 (or use the 'win32' preset).")

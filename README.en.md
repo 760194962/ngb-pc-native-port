@@ -272,6 +272,10 @@ Cost:
 
 This is the "stable first, no 2.2.35" build; the presenter architecture is separate work.
 
+The launcher's Start page now has a **Steady game speed** switch: turn it on when CG, cutscenes or combat clearly run
+fast or slow. It pins the game clock to 59.94 Hz, stops following the screen, and does not cap the render rate; it
+applies from the next start.
+
 ### 2.2.37: a program for each game; the launcher renamed
 
 - **New names**: the launcher is `Ninja Gaiden Black&2004 PC Launcher.exe`; the `Ninja Gaiden Black Any.exe` both games shared is

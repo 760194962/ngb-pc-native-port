@@ -259,6 +259,9 @@ const Pair kText[(int)Str::Count] = {
     {L"自动分配（实验性）", L"Automatic (experimental)"},
     {L"单核最接近 Xbox，也最稳定。自动分配让游戏线程分到多个性能核上，但游戏的主要计算集中在一个线程，不会更快，实测还略慢一点（第一章约 0.5 毫秒），也可能出现原版没有的问题；遇到异常请改回单核。下次启动游戏时生效。",
      L"One core is closest to the Xbox and the most stable. Automatic spreads the game's threads over the performance cores, but most of its work is on one thread: no faster (about 0.5 ms a frame slower in chapter 1), and it may bring problems the console never had; if so, switch back. Applies from the next start."},
+    {L"稳定游戏速度", L"Steady game speed"},
+    {L"CG、过场或战斗明显变快 / 变慢时打开；固定游戏时钟 59.94 Hz，不跟屏幕，不锁帧。下次启动生效。",
+     L"On when CG, cutscenes or combat clearly speed up or slow down. Fixed 59.94 Hz clock; no frame cap. Next start."},
     {L"清理着色器缓存", L"Clear shader cache"},
     {L"删除着色器缓存。下次启动游戏会重新编译，可能需要多等一会儿。", L"Delete the shader cache. The next start will compile the shaders again and may take a little longer."},
     {L"删除启动器目录下的着色器缓存？下次启动游戏会重新编译着色器，可能需要多等一会儿。", L"Delete the shader cache in the launcher folder? The next start will compile the shaders again and may take a little longer."},
@@ -373,8 +376,8 @@ const Pair kText[(int)Str::Count] = {
      L"Smooths jagged edges.\n\nFXAA (the default): a filter at the window’s size after the picture is scaled to it, almost free. When the 3D picture is at least twice the window’s size, the scaling down is supersampling by itself (each window pixel is the average of every rendered pixel it covers) and FXAA is not applied.\n\nMSAA 2×/4×/8×: multisampling: the 3D picture’s edges are drawn with several samples a pixel, sharper than FXAA and without blurring textures. 8× is the most graphics cards offer under Direct3D 9. It suits a low render scale (1×–2×) best; from 3× the rendering is already supersampled, so MSAA adds little and costs more the higher it goes. Seam fill does nothing while MSAA is on.\n\nPerformance (integrated GPU, chapter 1, median frame time): at 3× render scale off 6.1 ms, 2× 5.7, 4× 10.7, 8× 23.8 (the game slows down); at 1×, 8× costs nothing (4.65 ms)."},
     {L"只在「独占全屏」下起作用：等显示器刷新时才换画面，防止画面横向撕裂。窗口和无边框全屏的画面由 Windows 桌面合成显示，本来就不会撕裂，这时这一项不起作用。\n\n性能：独占全屏下实测几乎没有代价（第一关同一段路的游戏速度）：集显 60 Hz 屏幕 96.9%（关闭时 97.0%），集显 165 Hz 96.6%（关闭时 96.6%），独显 60 Hz 97.1%（关闭时 97.1%）。",
      L"Works only in exclusive fullscreen: the picture changes only when the display refreshes, so it never tears horizontally. In a window or borderless fullscreen Windows' desktop compositor shows the picture and it never tears anyway; this setting does nothing there.\n\nPerformance: measured at almost no cost in exclusive fullscreen (game speed over the same stretch of chapter 1): integrated GPU at 60 Hz 96.9% (97.0% off), at 165 Hz 96.6% (96.6% off), dedicated GPU at 60 Hz 97.1% (97.1% off)."},
-    {L"把模型拼接处在高渲染倍数下露出的细小裂缝补起来（由周围的颜色填上）。在本游戏中实测作用很小：第 1 章一帧只改了约 415 万像素中的 72 个，放大也看不出差别。保持开启即可。\n\n渲染画面达到窗口的 3 倍以上时，一条裂缝缩小后最多只占屏幕像素的三分之一，会被平均掉，这一项自动不做。\n\n性能：影响很小。",
-     L"Fills the hairline cracks that open where model pieces meet at high render scales (with the colour around them). In this game it does very little: one chapter-1 frame had 72 of about 4.1 million pixels changed, invisible even zoomed in. It can stay on.\n\nWhen the 3D picture is at least three times the window’s size, a crack is a third of a window pixel at most once scaled down and is averaged away; this step is then skipped.\n\nPerformance: very small."},
+    {L"把模型拼接处在高渲染倍数下露出的细小裂缝补起来（由周围的颜色填上）。在本游戏中实测作用很小：第 1 章一帧只改了约 415 万像素中的 72 个，放大也看不出差别。默认关闭；只有接缝明显时才开（MSAA 开启时无效）。\n\n渲染画面达到窗口的 3 倍以上时，一条裂缝缩小后最多只占屏幕像素的三分之一，会被平均掉，这一项自动不做。\n\n性能：影响很小。",
+     L"Fills the hairline cracks that open where model pieces meet at high render scales (with the colour around them). In this game it does very little: one chapter-1 frame had 72 of about 4.1 million pixels changed, invisible even zoomed in. Off by default; turn it on only if cracks are visible (MSAA makes it do nothing).\n\nWhen the 3D picture is at least three times the window’s size, a crack is a third of a window pixel at most once scaled down and is averaged away; this step is then skipped.\n\nPerformance: very small."},
     {L"光晕、灯光、模糊这些特效原本画在 320×240、160×120 之类的小缓冲区里。默认（关）把它们和画面一起放大并平滑；打开则保持 Xbox 原来的大小，光晕更柔、颗粒更粗，更接近原版主机的样子。\n\n性能：影响很小，打开反而稍省。集成显卡实测平均帧时间 7.97 对 7.63 毫秒，差别在测量误差内。",
      L"Glow, light and blur effects are drawn into small buffers (320\u00D7240, 160\u00D7120 and so on). Off (the default) scales them with the picture and smooths them; on keeps them at the Xbox\u2019s size: softer, coarser glows, closer to the original console.\n\nPerformance: very small; on is slightly cheaper. Measured on integrated graphics: 7.63 against 7.97 ms a frame on average, within measurement noise."},
     {L"在游戏画面右上角显示：帧率、显卡与 CPU 的名称和使用率（CPU 另外列出游戏本身的占用）、内存、磁盘。\n\n性能：几乎没有影响。实测每帧只多 0.02 毫秒；读取这些数据在一个最低优先级的后台线程里，每秒一次，每次约 2–3 毫秒。",
@@ -729,7 +732,8 @@ const Pair kText[(int)Str::Count] = {
      L"帧率、迟到帧和过场影片的节奏都没有变化。\n\n"
      L"已知问题：有玩家在 60 Hz 显示器、集成显卡的电脑上反馈窗口模式下画面不如关闭时顺。原因推测是：画完立刻送出时，较重的一帧可能赶不上"
      L"桌面合成的截止时刻，上一帧会多显示一次，接着两帧挤进同一次合成、其中一帧没显示出来。上面的实测只量了游戏节奏和送出时刻，"
-     L"没有量到屏幕上实际显示的帧，所以改回默认关闭，查清之前请按自己的感受决定开不开。",
+     L"没有量到屏幕上实际显示的帧，所以改回默认关闭，查清之前请按自己的感受决定开不开。\n\n"
+     L"如果真全屏或高刷下出现 CG 变速、45/24 帧、Alt+Tab 后卡顿，先关掉这项再测。",
      L"Experimental, off by default.\n\n"
      L"The game runs on the console's beat, 60 frames a second: each frame reads the pad at its start, is worked out and drawn, then waits for the next beat. "
      L"Before, a finished frame also waited for that beat before it went to the screen, a dozen milliseconds for nothing. On, it goes to the screen as soon as it is drawn "
@@ -739,7 +743,8 @@ const Pair kText[(int)Str::Count] = {
      L"Known issue: a player on a 60 Hz display with integrated graphics found it less smooth than off, windowed. The likely cause: sent as soon as "
      L"it is drawn, a heavy frame can miss the desktop compositor's deadline, so the last picture is shown twice and then two frames land in one "
      L"composition, one of them never shown. The measurements above covered the game's pacing and when pictures were sent, not what the screen "
-     L"showed, so it is off by default again; until this is sorted out, turn it on only if it feels right to you."},
+     L"showed, so it is off by default again; until this is sorted out, turn it on only if it feels right to you.\n\n"
+     L"If a cutscene's speed changes, you see 45/24 fps, or Alt+Tab is followed by stutter in exclusive fullscreen or at a high refresh rate, turn this off first."},
     {L"垂直同步时用 60 Hz",
      L"60 Hz with V-Sync"},
     {L"高刷新率屏幕上独占全屏开垂直同步时切到 60 Hz，画面不抖",
@@ -749,6 +754,8 @@ const Pair kText[(int)Str::Count] = {
      L"也就是 18 ms 和 12 ms 来回变，画面一顿一顿的。开启后进入独占全屏时把屏幕换成同分辨率的 60 Hz（屏幕要支持），每帧正好显示一次，"
      L"游戏的节拍也直接跟着屏幕的刷新走。\n\n"
      L"代价：进出独占全屏（包括 Alt+Tab）要切换显示模式，会多黑约 1.5 秒；画面要等 60 Hz 的刷新才显示，比 165 Hz 时稍晚几毫秒。\n\n"
+     L"注意：120/180/240 Hz 本来就能整除 60，不需要切；只有 144/165 Hz 这类除不尽的才有均匀度收益。"
+     L"如果切到 60 Hz 后 30fps 过场变慢，或 Alt+Tab 后卡顿/掉帧，先关掉这项。\n\n"
      L"关闭则沿用桌面的刷新率（以前的方式）。",
      L"On by default. It only applies to exclusive fullscreen with V-Sync on; windows, borderless fullscreen and V-Sync off are not affected.\n\n"
      L"The game makes 60 frames a second. On a 120, 144 or 165 Hz screen V-Sync can only line them up with the screen's refreshes: at 165 Hz "
@@ -757,6 +764,8 @@ const Pair kText[(int)Str::Count] = {
      L"beat follows the screen's refresh.\n\n"
      L"Costs: entering or leaving exclusive fullscreen (Alt+Tab too) changes the display mode, about 1.5 s more of black screen; "
      L"a picture waits for a 60 Hz refresh, a few ms later than at 165 Hz.\n\n"
+     L"Note: 120/180/240 Hz divide 60 exactly and do not need the switch; only 144/165 Hz and similar uneven rates gain evenness. "
+     L"If a 30 fps cutscene gets slower after switching to 60 Hz, or Alt+Tab is followed by stutter, turn this off.\n\n"
      L"Off keeps the desktop's refresh rate (the old way)."},
     {L"屏幕白光",
      L"Screen flashes"},

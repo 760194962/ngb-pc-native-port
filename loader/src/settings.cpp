@@ -99,6 +99,7 @@ bool apply_line(const char *line, bool from_cli)
         else if (k == "move_flash") g_cfg.move_flash = v != 0; // d3d/draw.cpp skip_move_flash
         else if (k == "shadowsoft") g_cfg.shadow_pcf = v != 0 ? 1 : 0; // soft shadow edges (d3d/nv2a_psh.cpp; 1: over the host map, 2.2.18)
         else if (k == "vsync") g_cfg.vsync = v != 0;
+        else if (k == "timer_vblank") g_cfg.timer_vblank = v != 0; // the launcher's fixed 60 Hz game clock
         else if (k == "perfhud") g_cfg.perfhud = v != 0;
         else if (k == "multicore") g_cfg.multicore = v != 0;
         else if (k == "msaa") g_cfg.msaa = std::clamp(atoi(val), 0, 16); // MSAA samples (0 off)
@@ -243,6 +244,7 @@ void write_all(FILE *f)
     fprintf(f, "compile_budget = %g\n", g_cfg.compile_budget_ms < 0 ? -1.0 : g_cfg.compile_budget_ms);
     fprintf(f, "low_latency_present = %d\n", g_cfg.present_early ? 1 : 0);
     fprintf(f, "exclusive_60hz = %d\n", g_cfg.exclusive_60hz ? 1 : 0);
+    fprintf(f, "timer_vblank = %d\n", g_cfg.timer_vblank ? 1 : 0);
     fprintf(f, "move_flash = %d\n", g_cfg.move_flash ? 1 : 0);
     fprintf(f, "shadow = %d\nvsync = %d\nperfhud = %d\naniso = %d\n", g_cfg.shadow_scale, g_cfg.vsync ? 1 : 0,
             g_cfg.perfhud ? 1 : 0, g_cfg.aniso);
