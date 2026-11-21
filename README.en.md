@@ -15,7 +15,11 @@ support is kept.
 
 **You need your own copy of the game.** This repository contains no game code or data and no Microsoft XDK code.
 
-## Smoothness settings (measured)
+## Smoothness settings (high refresh can also switch to 60 Hz)
+
+> **High refresh rate and want a fixed 60 Hz? Yes, you can.**
+> **Turn on "60 Hz with V-Sync" and "Steady game speed" together.**
+> With only the 60 Hz switch on, it switches to 60 Hz and the tick falls to 47; a 30 fps cutscene drops to 24.
 
 On a 60 Hz display, pick one of these two setups.
 
@@ -38,12 +42,16 @@ The picture flips directly instead of going through DWM, usually the smoothest a
 
 The picture goes through Windows' desktop composition (DWM): no mode switch, the most stable, a little more latency than A.
 
-**High refresh / VRR displays**
+**C · high refresh rate, fixed 60 Hz**
 
-- Steady game speed: on
-- "60 Hz with V-Sync": keep it off
+- "60 Hz with V-Sync": on
+- Steady game speed: required, on
+- V-Sync: on
+- Low-latency present: off
 
-If you do turn this 60 Hz switch on, Steady game speed must also be on. It switches the screen to 60 Hz first; without the fixed clock the tick follows kernel vblank, can fall to 47 and a 30 fps cutscene drops to 24. With the fixed clock it is close to setup A, but you lose the high refresh rate.
+It is close to A: the screen switches to 60 Hz and the tick stays at 59.94. The cost is losing the high refresh rate, a black screen on mode switches, and some Alt+Tab risk.
+
+If you do not want to switch to 60 Hz, on high refresh / VRR just turn Steady game speed on and leave the 60 Hz switch off.
 
 ## Screenshots
 
