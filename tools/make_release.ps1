@@ -1,6 +1,7 @@
 # Packs a release zip: dist\ngb-hurricane-pc-<version>-win32.zip with one folder, NGB-Hurricane\, holding the
 # launcher (Ninja Gaiden Black&2004 PC Launcher.exe, the way in: it installs the game from the player's own image and
-# starts it), the game programs Ninja Gaiden Black.exe and Ninja Gaiden.exe (2004), blackrt.dll, README.md, README.en.md
+# starts it), the game programs Ninja Gaiden Black.exe and Ninja Gaiden.exe (2004), blackrt.dll, the Chinese and English
+# smoothness guides,
 # and LICENSE.txt. The launcher's background art is inside its
 # .exe and both programs carry the Dragon Sword icon (launcher/art: the exceptions to "no game assets", README, Legal).
 # The launcher installs the game into game\ inside that folder by default, where the game program also looks when it
@@ -90,7 +91,8 @@ $sym = "$stage-symbols"
 $out = "$stage\NGB-Hurricane"
 New-Item -ItemType Directory -Force $out, $sym | Out-Null
 Copy-Item -LiteralPath (@($launcher) + $games + @("$Bin\blackrt.dll", $seed, $texseed, $drawseed, $vshseed, $cputexseed)) $out
-Copy-Item "$root\README.md", "$root\README.en.md" $out
+Copy-Item "$root\project\docs\18_Smoothness_Settings_CN.md" "$out\Smoothness-Settings-CN.md"
+Copy-Item "$root\project\docs\18_Smoothness_Settings_EN.md" "$out\Smoothness-Settings-EN.md"
 Copy-Item "$root\LICENSE" "$out\LICENSE.txt"
 Copy-Item "$Bin\blackrt.pdb", "$Bin\blackrt.map" $sym
 
