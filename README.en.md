@@ -15,6 +15,10 @@ support is kept.
 
 **You need your own copy of the game.** This repository contains no game code or data and no Microsoft XDK code.
 
+> **Smoothness recommendation (measured)**  
+> **Windowed or borderless fullscreen, set the display to 60 Hz, and turn off the launcher's Steady game speed — this is the smoothest setup right now.**  
+> The game tick and the picture both follow Windows' desktop composition (DWM). If high refresh / VRR makes the game run fast or slow, turn Steady game speed on; at a high refresh rate do not turn on 60 Hz with V-Sync.
+
 ## Screenshots
 
 From the game's own attract demo (it plays when the title screen is left alone) and from saves, rendered at 1440 lines and scaled down.
