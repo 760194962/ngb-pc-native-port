@@ -66,6 +66,7 @@
 - `ngb-hurricane-pc-2.2.37.3-t-win32.zip`
   - 3,441,320 字节
   - SHA-256：`7900f21fabc137049c83d5a0ba68d71ca770a21a3447f40ff3366e7d5690291e`
+  - 压缩包内附：`Smoothness-Settings-CN.md`、`Smoothness-Settings-EN.md`（中文 / 英文流畅度设置指南）。
 - `ngb-hurricane-pc-2.2.37.3-t-win32-symbols.zip`
   - 40,376,141 字节
   - SHA-256：`35c3be5de51233921701c5656731bf47a4408ef8da2866215314e6984b357a91`
@@ -145,6 +146,7 @@ So:
 - `ngb-hurricane-pc-2.2.37.3-t-win32.zip`
   - 3,441,320 bytes
   - SHA-256: `7900f21fabc137049c83d5a0ba68d71ca770a21a3447f40ff3366e7d5690291e`
+  - Inside: `Smoothness-Settings-CN.md` and `Smoothness-Settings-EN.md` (Chinese / English smoothness guides).
 - `ngb-hurricane-pc-2.2.37.3-t-win32-symbols.zip`
   - 40,376,141 bytes
   - SHA-256: `35c3be5de51233921701c5656731bf47a4408ef8da2866215314e6984b357a91`
