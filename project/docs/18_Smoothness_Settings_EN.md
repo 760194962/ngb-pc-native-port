@@ -6,11 +6,12 @@ Applies to 2.2.37.3-t. The goal is a smoother, steadier picture with the current
 
 | Display | Display mode | Steady game speed | V-Sync | 60 Hz with V-Sync | Low-latency present |
 |---|---|---|---|---|---|
-| High refresh | Exclusive fullscreen | On | On | On | Off |
+| 120 / 240 Hz | Exclusive fullscreen | On | On | Off | Off |
+| 144 / 165 Hz | Exclusive fullscreen | On | On | On | Off |
 | 60 Hz | Exclusive fullscreen | On | On | Off | Off |
 | 60 Hz | Windowed / borderless | Off | On | Off | Off |
 
-For a high refresh display, use the first row: in exclusive fullscreen, let the game switch the display to 60 Hz while keeping the game clock fixed.
+120 / 240 Hz divide 60 exactly, so keep the high refresh rate; 144 / 165 Hz switch to 60 Hz so each frame gets one refresh.
 
 ## Where the settings are
 
@@ -28,7 +29,21 @@ Press Save after changing the Graphics page. Steady game speed is written as soo
 
 ## High refresh display: exclusive fullscreen
 
-1. On the Graphics page, choose exclusive fullscreen.
+120 / 240 Hz:
+
+1. Choose exclusive fullscreen.
+2. Turn V-Sync on.
+3. Leave "60 Hz with V-Sync" off.
+4. Turn Low-latency present off.
+5. Press Save.
+6. Go back to the Start page and turn Steady game speed on.
+7. Start the game.
+
+Result: the display stays at 120 / 240 Hz; 60 fps gets 2 / 4 refreshes per frame.
+
+144 / 165 Hz:
+
+1. Choose exclusive fullscreen.
 2. Turn V-Sync on.
 3. Turn "60 Hz with V-Sync" on.
 4. Turn Low-latency present off.
@@ -36,7 +51,7 @@ Press Save after changing the Graphics page. Steady game speed is written as soo
 6. Go back to the Start page and turn Steady game speed on.
 7. Start the game.
 
-Result: entering exclusive fullscreen switches the display from 120 / 144 / 165 / 240 Hz to 60 Hz, and the game runs at a fixed 60.
+Result: entering exclusive fullscreen switches the display from 144 / 165 Hz to 60 Hz, with one refresh per frame.
 
 ## 60 Hz display: exclusive fullscreen
 
@@ -64,7 +79,7 @@ Steady game speed: pins the game clock to 59.94 Hz and stops following the displ
 
 V-Sync: changes the picture on a display refresh to avoid tearing. In exclusive fullscreen it is needed together with the 60 Hz mode.
 
-60 Hz with V-Sync: only applies in exclusive fullscreen with V-Sync on. It switches a high refresh display to 60 Hz. Steady game speed must also be on; otherwise the game beat follows kernel vblank, can fall to 47 and a 30 fps cutscene drops to 24.
+60 Hz with V-Sync: only applies in exclusive fullscreen with V-Sync on. It switches a 144 / 165 Hz display to 60 Hz; 120 / 240 Hz divide 60 exactly and do not need it. Steady game speed must also be on; otherwise the game beat follows kernel vblank, can fall to 47 and a 30 fps cutscene drops to 24.
 
 Low-latency present: experimental. Keep it off in exclusive fullscreen to avoid Present and the beat waiting twice.
 

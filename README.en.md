@@ -21,10 +21,8 @@ The goal is a smooth experience in every setup; choose the one that matches your
 
 **High refresh display, exclusive fullscreen (recommended)**
 
-- "60 Hz with V-Sync": on
-- Steady game speed: on
-- V-Sync: on
-- Low-latency present: off
+- 120 / 240 Hz: Steady game speed on, V-Sync on, "60 Hz with V-Sync" off, Low-latency present off.
+- 144 / 165 Hz: Steady game speed on, V-Sync on, "60 Hz with V-Sync" on, Low-latency present off.
 
 **60 Hz display, exclusive fullscreen**
 
@@ -270,6 +268,14 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `args = --vsh-record "<game folder>\vsh_record.bin" --hitch-detail`, play, then give the author `cache\shaders\`,
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
+
+### 2.2.37.4: 2.2.37.3-t promoted to a release
+
+- The Start page has a **Steady game speed** switch; on, the game clock stays at 59.94 Hz instead of following the screen;
+- `black.ini` supports `timer_vblank`;
+- `--timer-vblank` wins over `black.ini`;
+- the zip includes Chinese / English smoothness guides;
+- with the switch off, the game behaves like 2.2.37.3.
 
 ### 2.2.37.3: the stable branch without 2.2.35
 
