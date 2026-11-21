@@ -24,7 +24,6 @@ This repository is a fork of [akirahayabusa/ngb-pc-native-port](https://github.c
   instead of a fixed list of hashes, and has xdelta built in, so your own Redump ISO plus a patch installs in one step
   (no separate xdelta3 tool is needed; you still supply your own Redump image).
 - **Loader**: tells the Chinese and Japanese x2.1 Hurricane builds apart, and runs unknown-but-identically-structured XBEs (e.g. the patched ones below) as the matching build.
-- **Ninja Gaiden 2004**: the Hurricane pack's third-person camera works in every stage and supports inversion.
 - **Two menu patches** (xdelta, made against Redump images; work on console, emulators and this port):
   - *NG 2004 1.06 camera menu*: Camera Control (Normal/Reverse), 3rd Person Camera (On/Off at start) and 3rd Person Camera Stages
     (Hurricane/All) in OPTIONS → CONTROLLER SETTINGS.
@@ -63,6 +62,32 @@ can be install from the launcher's Install page.
   SETTINGS (on at start by default). The release's patch is made against the Redump disc's 1.02 `default.xbe` and
   gives the 1.06 update with these options, run from the disc folder; on the launcher's 2004 Install page, choose it
   as the Patch and it is applied once the image is unpacked. (I guess you still need the dlc files to make everything work, please check og Xbox live connection guide for this.)
+
+## Smoothness settings
+
+The goal is a smooth experience in every setup; choose the one that matches your display and habits.
+
+**High refresh display, exclusive fullscreen (recommended)**
+
+- 120 / 240 Hz: Steady game speed on, V-Sync on, "60 Hz with V-Sync" off, Low-latency present off.
+- 144 / 165 Hz: Steady game speed on, V-Sync on, "60 Hz with V-Sync" on, Low-latency present off.
+
+**60 Hz display, exclusive fullscreen**
+
+- Display: exclusive fullscreen
+- Steady game speed: on
+- V-Sync: on
+- Low-latency present: off
+- "60 Hz with V-Sync": off (it does nothing on a 60 Hz display)
+
+**60 Hz display, windowed / borderless**
+
+- Display: windowed or borderless
+- Steady game speed: off
+- V-Sync: on
+- "60 Hz with V-Sync": off
+
+Windowed / borderless goes through Windows' desktop composition (DWM) and does not switch the display mode.
 
 ## Screenshots
 
@@ -292,6 +317,14 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.4: 2.2.37.3-t promoted to a release
+
+- The Start page has a **Steady game speed** switch; on, the game clock stays at 59.94 Hz instead of following the screen;
+- `black.ini` supports `timer_vblank`;
+- `--timer-vblank` wins over `black.ini`;
+- the zip includes Chinese / English smoothness guides;
+- with the switch off, the game behaves like 2.2.37.3.
+
 ### 2.2.37.3: the stable branch without 2.2.35
 
 This build takes **2.2.34's presentation clock** as its base and merges only the features of 2.2.36, 2.2.36.1,
@@ -320,6 +353,10 @@ Cost:
 - 2.2.34's low-latency present still presents early unconditionally, without 2.2.35's deadline check.
 
 This is the "stable first, no 2.2.35" build; the presenter architecture is separate work.
+
+The launcher's Start page now has a **Steady game speed** switch: turn it on when CG, cutscenes or combat clearly run
+fast or slow. It pins the game clock to 59.94 Hz, stops following the screen, and does not cap the render rate; it
+applies from the next start.
 
 ### 2.2.37: a program for each game; the launcher renamed
 

@@ -42,8 +42,9 @@ black.ini
 # Performance recordings (Tools > Record performance, F2): machine-specific, may show game function names
 perf/
 
-# Release zips and their symbols (tools/make_release.ps1)
-dist/
+# Release zips and staged folders (tools/make_release.ps1); the RELEASE_*.md notes stay tracked
+dist/*.zip
+dist/*/
 # The port's rebuilt front-end files (made at start from the user's game files)
 cache/
 

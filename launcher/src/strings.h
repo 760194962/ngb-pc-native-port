@@ -196,6 +196,8 @@ enum class Str {
     CpuSingle,
     CpuAuto,
     CpuNote,
+    FixedClock,
+    FixedClockNote,
     ClearCacheButton,
     ClearCacheNote,
     ClearCacheConfirm,
