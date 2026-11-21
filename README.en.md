@@ -19,18 +19,9 @@ support is kept.
 
 The goal is a smooth experience in every setup; choose the one that matches your display and habits.
 
-**High refresh display, exclusive fullscreen**
-
-Fixed 60 Hz:
+**High refresh display, exclusive fullscreen (recommended)**
 
 - "60 Hz with V-Sync": on
-- Steady game speed: on
-- V-Sync: on
-- Low-latency present: off
-
-Keep the high refresh rate:
-
-- "60 Hz with V-Sync": off
 - Steady game speed: on
 - V-Sync: on
 - Low-latency present: off
