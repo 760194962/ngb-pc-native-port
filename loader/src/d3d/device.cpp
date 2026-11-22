@@ -2439,7 +2439,7 @@ void recover_device(bool requested)
     if (hr == D3D_OK && requested) { // a Reset asked for (request_device_reset), on a device that is fine
         hr = D3DERR_DEVICENOTRESET;
         g_presenter.lost_since = GetTickCount64();
-        logf("[d3d] device reset requested (%s)", g_presenter.reset_reason.load());
+        logf("[d3d] device reset requested (%s)", g_presenter.reset_reason_text());
     } else if (hr == D3D_OK) {
         g_presenter.device_lost = false;
         return;
@@ -2486,7 +2486,7 @@ void recover_device(bool requested)
         return;
     }
     if (asked && g_presenter.reset_requested.compare_exchange_strong(asked, 0))
-        logf("[d3d] a Reset asked for (%s) before this one is met by it", g_presenter.reset_reason.load());
+        logf("[d3d] a Reset asked for (%s) before this one is met by it", g_presenter.reset_reason_text());
     d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &g_host_backbuffer);
     d->GetDepthStencilSurface(&g_host_depth);
     resend_game_state(d);
@@ -3805,6 +3805,7 @@ void compile_all_port_shaders()
 void host3d::WindowState::request_reset(const char *why)
 {
     logf("[d3d] reset asked (%s), frame %u%s", why, g_frame_count.load(), reset_requested ? ", one already waiting" : "");
+    std::lock_guard<std::mutex> lock(reset_lock);
     reset_reason = why;
     reset_requested = ++reset_seq;
 }

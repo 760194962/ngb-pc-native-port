@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <d3d9.h>
 
 namespace host3d {
@@ -19,6 +20,7 @@ struct WindowState {
     std::atomic<WindowMode> actual{WindowMode::Windowed};
     std::atomic<PresentPath> present{PresentPath::Copy};
     std::atomic<bool> focused{false};
+    std::atomic<bool> fullscreen{false}; // the window covers a monitor (borderless or exclusive)
     std::atomic<bool> restyle_pending{false};
 
     // Reset lifecycle, shared with d3d/device.cpp (its requests come from several threads; Swap consumes them).
@@ -27,14 +29,21 @@ struct WindowState {
     std::atomic<const char *> reset_reason{""};
     std::atomic<bool> device_lost{false};
     std::atomic<uint64_t> lost_since{0};
+    mutable std::mutex reset_lock; // makes reset_reason and reset_requested one publication
 
     bool requested_exclusive() const { return requested.load() == WindowMode::Exclusive; }
     bool actual_exclusive() const { return actual.load() == WindowMode::Exclusive; }
     bool present_flip() const { return present.load() == PresentPath::Flip; }
     bool is_focused() const { return focused.load(); }
+    bool is_fullscreen() const { return fullscreen.load(); }
     void focus(bool on) { focused = on; }
+    void set_fullscreen(bool on) { fullscreen = on; }
     void request(WindowMode m) { requested = m; }
     bool take_reset() { return reset_requested.exchange(0) != 0; }
+    const char *reset_reason_text() const {
+        std::lock_guard<std::mutex> lock(reset_lock);
+        return reset_reason.load();
+    }
     void request_reset(const char *why);
     void commit(const D3DPRESENT_PARAMETERS &pp) {
         actual = pp.Windowed ? WindowMode::Windowed : WindowMode::Exclusive;

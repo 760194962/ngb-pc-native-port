@@ -32,16 +32,17 @@ requested  = Windowed / Exclusive（請求）
 actual     = Windowed / Exclusive（device 實際）
 present    = Copy / Flip（實際 swapchain）
 focused    = 焦點
+fullscreen = 視窗是否覆蓋螢幕（borderless 或 exclusive）
 restyle_pending = 等 device 變 windowed 後再改視窗外觀
 
 reset_requested = Reset 請求編號，0 = 無
 reset_seq       = 最後一次請求編號
-reset_reason    = 請求原因
+reset_reason    = 請求原因（和 requested 由 reset_lock 一起發布）
 device_lost     = device 是否 lost
 lost_since      = lost 開始時間
 ```
 
-`reset_requested` 是跨執行緒請求；Swap 用 `take_reset()` 消費，`recover_device()` 用同一份狀態執行 Reset。Reset 不再有第二份 `g_reset_requested`。
+無邊框全屏現在由 `fullscreen` 表示，不再只靠 `WS_CAPTION` 推斷。`reset_requested` 是跨執行緒請求；Swap 用 `take_reset()` 消費，`recover_device()` 用同一份狀態執行 Reset。Reset 不再有第二份 `g_reset_requested`。
 
 只有 `CreateDeviceEx` / `ResetEx` 成功後，`commit(pp)` 才更新 `actual` / `present`：
 
@@ -77,6 +78,14 @@ vsync 關：PresentationInterval = IMMEDIATE
 ```
 
 這樣獨佔只有一條 flip 鏈，不再有 `ExclusiveCopy`。
+
+## 邊界修正
+
+- `exclusive_params()` 回報是否真的讀到 display mode；讀不到時請求回退到 windowed，並在 Reset 後 restyle，不留下「fullscreen style + windowed device」。
+- `check_exclusive_present()` 在 create/reset 後檢查 exclusive 是否真的是 `DISCARD` + 2 buffers；不是就 log。
+- `restyle_pending` 只在 `SetWindowPlacement` / `SetWindowPos` 都成功後才清除。
+- capture/resume 仍以 `GetForegroundWindow()` 為主，`WindowState.focused` 只作補充，不阻擋原本可 capture 的情況。
+- `g_bb_w/g_bb_h` 改為 atomic，避免 reset 執行緒寫、render 執行緒讀的 plain data race。
 
 ## 測試
 
