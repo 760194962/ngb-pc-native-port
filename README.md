@@ -245,6 +245,13 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 `cache\texture_pool.txt`、`cache\cpu_textures.bin`、`vsh_record.bin` 和 `logs\black.log` 交给作者。**要在更新到新版本之前交**：
 换版本时本地学到的绘制状态会被清掉。
 
+### 2.2.37.7：Alt+Enter 立即重查 display-60
+
+- `host3d::exclusive()` 一变化就重查 `near_60`；
+- 高刷 + 60Hz 开关 + 回窗口时，不再短暂选到 165Hz DwmFlush；
+- 60Hz 真全屏 tick 仍固定 timer；
+- 窗口 60Hz 仍用 DwmFlush。
+
 ### 2.2.37.6：60Hz 真全屏 tick 固定用 timer
 
 - 60Hz 真全屏不再使用 kernel vblank 作为游戏 tick；

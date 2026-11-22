@@ -269,6 +269,13 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.7: refresh display-60 immediately on Alt+Enter
+
+- `near_60` is rechecked as soon as `host3d::exclusive()` changes;
+- high refresh + 60 Hz switch + back to window no longer briefly selects 165 Hz DwmFlush;
+- 60 Hz exclusive tick is still the fixed timer;
+- windowed 60 Hz still uses DwmFlush.
+
 ### 2.2.37.6: 60 Hz exclusive tick uses the timer
 
 - 60 Hz exclusive fullscreen no longer uses kernel vblank as the game tick;

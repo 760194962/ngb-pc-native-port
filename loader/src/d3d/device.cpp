@@ -1230,11 +1230,20 @@ void __stdcall vblank_thread(void *)
     source = choose_source();
     logf("[d3d] vblank: source %s%s", source_name(source), host3d::exclusive() ? " (exclusive)" : "");
     Source logged_source = source;
+    bool last_exclusive = host3d::exclusive();
     uint32_t from_display = 0;
     LARGE_INTEGER minute = last;
     for (;;) {
         bool synced = false;
-        if (g_vblank_count % 300 == 0) near_60 = display_near_60(); // the mode changes with exclusive fullscreen
+        const bool exclusive_now = host3d::exclusive();
+        if (exclusive_now != last_exclusive) {
+            // Alt+Enter changes the display mode and the window/exclusive state together; waiting for the 300-tick
+            // refresh would keep the old 60 Hz answer and could pick DwmFlush at 165 Hz for a moment.
+            last_exclusive = exclusive_now;
+            near_60 = display_near_60();
+        } else if (g_vblank_count % 300 == 0) {
+            near_60 = display_near_60(); // the mode can change with exclusive fullscreen
+        }
         Source next = choose_source();
         if (next != logged_source) {
             logf("[d3d] vblank: source %s%s", source_name(next), host3d::exclusive() ? " (exclusive)" : "");
