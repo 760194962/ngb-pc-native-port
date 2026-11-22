@@ -78,6 +78,7 @@ kernel 不可用 → Timer，不是 DwmFlush
 6. kernel wait 失败时退回 Timer，下一次重试。
 7. 日志记录来源变化和 kernel 失败原因，不再只有启动时一行。
 8. 修正 `from_display` 只统计 Dwm，`from_kernel` 只统计 kernel。
+9. gdi32 的 export 只加载一次，重试时复用，不在每 300 tick 重复 LoadLibrary。
 
 设计原则：时间来源和显示来源分开；DwmFlush 只属于窗口；独佔没有 kernel 就用 timer。
 
