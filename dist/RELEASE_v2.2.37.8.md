@@ -94,12 +94,12 @@ Alt+Enter 退出后 black.ini：fullscreen = 0
 ## 发布包
 
 - `ngb-hurricane-pc-2.2.37.8-win32.zip`
-  - PACKAGE_SIZE 字节
-  - SHA-256：`PACKAGE_SHA256`
+  - 3,448,898 字节
+  - SHA-256：`163dfa912d7f2430304e41cbc02a7ae8a775a7f48a9755ed5a6f8a09696fd7ee`
   - 压缩包内附：`Smoothness-Settings-CN.md`、`Smoothness-Settings-EN.md`。
 - `ngb-hurricane-pc-2.2.37.8-win32-symbols.zip`
-  - SYMBOLS_SIZE 字节
-  - SHA-256：`SYMBOLS_SHA256`
+  - 38,770,294 字节
+  - SHA-256：`7117f1a5cdc410856f9dd5cc070666faafd4f9ee9a5ffc0092b6382ba2c266c0`
 
 作者：b站 哈雅布撒（QQ：2682557218）
 
@@ -201,11 +201,11 @@ black.ini after leaving exclusive: fullscreen = 0
 ## Packages
 
 - `ngb-hurricane-pc-2.2.37.8-win32.zip`
-  - PACKAGE_SIZE bytes
-  - SHA-256: `PACKAGE_SHA256`
+  - 3,448,898 bytes
+  - SHA-256: `163dfa912d7f2430304e41cbc02a7ae8a775a7f48a9755ed5a6f8a09696fd7ee`
   - Inside: `Smoothness-Settings-CN.md` and `Smoothness-Settings-EN.md`.
 - `ngb-hurricane-pc-2.2.37.8-win32-symbols.zip`
-  - SYMBOLS_SIZE bytes
-  - SHA-256: `SYMBOLS_SHA256`
+  - 38,770,294 bytes
+  - SHA-256: `7117f1a5cdc410856f9dd5cc070666faafd4f9ee9a5ffc0092b6382ba2c266c0`
 
 Author: bilibili 哈雅布撒 (QQ: 2682557218)
