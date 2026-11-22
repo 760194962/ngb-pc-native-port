@@ -170,6 +170,7 @@ void capture_mouse(bool on, bool hold_first = true)
     } else {
         ClipCursor(nullptr);
         g_buttons = 0;
+        g_hold_left = false;
     }
     g_mouse_dx = g_mouse_dy = g_wheel = 0;
 }
@@ -265,7 +266,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_APP_CAPTURE: // from the input poll: pause frees the mouse, resuming play takes it again
         if (!wp) capture_mouse(false);
-        else if (GetForegroundWindow() == h && !IsIconic(h)) capture_mouse(true, false);
+        else if (!g_cfg.background && GetForegroundWindow() == h && !IsIconic(h)) capture_mouse(true, false);
         return 0;
     case WM_SYSKEYDOWN: // Alt+Enter: fullscreen <-> window, as PC SETTINGS > VIDEO > FULLSCREEN (first press, not repeats)
         if (wp == VK_RETURN && (lp & (1 << 29)) && !(lp & (1 << 30))) {
