@@ -47,6 +47,10 @@ int g_bb_w, g_bb_h;                 // host back buffer: the largest monitor, so
 // while the window is fullscreen. Alt+Enter switches by a Reset at the next Swap (d3d/device.cpp recover_device).
 std::atomic<bool> g_exclusive_now{false};
 std::atomic<bool> g_dev_exclusive{false}; // the device is exclusive now (g_exclusive_now leads it until the next Reset)
+// What the present device actually is, set only after CreateDeviceEx / ResetEx succeed. g_exclusive_now is the
+// request and may lead this by one Swap; Present must follow the device, never the request.
+enum class PresentationMode { WindowedCopy, ExclusiveCopy, ExclusiveFlip };
+std::atomic<PresentationMode> g_present_mode{PresentationMode::WindowedCopy};
 int g_frame_w, g_frame_h;           // the part of the back buffer the current frame uses
 int g_out_w, g_out_h;               // the window size as set (open_window): fullscreen's with black.ini fullscreen_res = window
 WINDOWPLACEMENT g_windowed_place = {sizeof(WINDOWPLACEMENT)};
@@ -569,6 +573,21 @@ D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp)
     return pp;
 }
 
+// The presentation path is a property of the device that was actually created, not of the Alt+Enter request.
+static PresentationMode presentation_mode(const D3DPRESENT_PARAMETERS &pp)
+{
+    if (pp.Windowed) return PresentationMode::WindowedCopy;
+    return pp.SwapEffect == D3DSWAPEFFECT_DISCARD && pp.BackBufferCount >= 2 ? PresentationMode::ExclusiveFlip
+                                                                          : PresentationMode::ExclusiveCopy;
+}
+
+static const char *presentation_name(PresentationMode m)
+{
+    return m == PresentationMode::ExclusiveFlip ? "flip"
+         : m == PresentationMode::ExclusiveCopy ? "copy (exclusive)"
+                                                 : "copy (window)";
+}
+
 
 namespace {
 
@@ -646,10 +665,12 @@ bool create_device_here()
     g_bb_w = (int)pp.BackBufferWidth; // exclusive: the display mode's size
     g_bb_h = (int)pp.BackBufferHeight;
     g_dev_exclusive = !pp.Windowed;
+    g_present_mode = presentation_mode(pp);
     if (!pp.Windowed)
-        logf("host: exclusive fullscreen %ux%u at %u Hz, vsync %s", pp.BackBufferWidth, pp.BackBufferHeight, pp.FullScreen_RefreshRateInHz,
-             pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
+        logf("host: exclusive fullscreen %ux%u at %u Hz, vsync %s, present %s", pp.BackBufferWidth, pp.BackBufferHeight, pp.FullScreen_RefreshRateInHz,
+             pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off", presentation_name(g_present_mode));
     else if (g_cfg.vsync) logf("host: windowed: vsync is not used (the desktop compositor shows the frames without tearing)");
+    if (pp.Windowed) logf("host: present %s", presentation_name(g_present_mode));
     if (g_cfg.api_count) apicount::install(g_dev);
     D3DADAPTER_IDENTIFIER9 id = {};
     g_d3d->GetAdapterIdentifier(D3DADAPTER_DEFAULT, 0, &id);
@@ -723,8 +744,9 @@ bool reset_device_here()
     g_bb_w = (int)pp.BackBufferWidth; // the exclusive mode's size can differ from the largest monitor's
     g_bb_h = (int)pp.BackBufferHeight;
     g_dev_exclusive = !pp.Windowed;
-    logf("host: device reset, %s %ux%u, vsync %s", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth, pp.BackBufferHeight,
-         pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
+    g_present_mode = presentation_mode(pp);
+    logf("host: device reset, %s %ux%u, vsync %s, present %s", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth,
+         pp.BackBufferHeight, pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off", presentation_name(g_present_mode));
     if (pp.Windowed && g_restyle_pending.exchange(false)) restyle_windowed(); // now the window can change
     return true;
 }
@@ -959,7 +981,8 @@ HRESULT present()
     // 1-10 s, a black window with the game stopped (the user, 2026-10-24, borderless; r514-r518). Under plain Direct3D 9
     // an exclusive device was lost there and its Reset dropped the pile; a 9Ex device is not lost.
     bool whole = g_dev_exclusive && g_frame_w > 0 && g_frame_h > 0 && (g_frame_w < g_bb_w || g_frame_h < g_bb_h) && present_stretch();
-    if (g_exclusive_now && g_cfg.vsync) return g_dev->Present(nullptr, nullptr, nullptr, nullptr); // flipped (exclusive_params)
+    // The swapchain decides this, not the Alt+Enter request: until ResetEx succeeds, Present still uses the old device.
+    if (g_present_mode.load() == PresentationMode::ExclusiveFlip) return g_dev->Present(nullptr, nullptr, nullptr, nullptr);
     RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w, g_frame_h && !whole ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)
 }
