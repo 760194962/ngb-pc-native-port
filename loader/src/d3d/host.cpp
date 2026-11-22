@@ -98,6 +98,11 @@ void toggle_fullscreen()
                                         mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
         g_cfg.fullscreen = sized != FALSE;
         g_window.set_fullscreen(sized != FALSE);
+        if (!sized) {
+            logf("host: fullscreen SetWindowPos failed (%lu); going back to a window", GetLastError());
+            restyle_windowed();
+            return;
+        }
         logf("host: fullscreen %ldx%ld%s", mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
              g_cfg.exclusive ? " (exclusive)" : "");
         if (g_cfg.exclusive && sized) {

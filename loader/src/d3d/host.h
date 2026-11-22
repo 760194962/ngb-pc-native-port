@@ -13,12 +13,11 @@ namespace host3d {
 // One state machine for the window and the device: what was requested, what actually exists, how it presents,
 // whether it has focus, and the Reset queue that changes one into the other.
 enum class WindowMode : uint8_t { Windowed, Exclusive };
-enum class PresentPath : uint8_t { Copy, Flip };
+enum class PresentationState : uint8_t { WindowedCopy, ExclusiveCopy, ExclusiveFlip };
 
 struct WindowState {
     std::atomic<WindowMode> requested{WindowMode::Windowed};
-    std::atomic<WindowMode> actual{WindowMode::Windowed};
-    std::atomic<PresentPath> present{PresentPath::Copy};
+    std::atomic<PresentationState> presentation{PresentationState::WindowedCopy};
     std::atomic<bool> focused{false};
     std::atomic<bool> fullscreen{false}; // the window covers a monitor (borderless or exclusive)
     std::atomic<bool> restyle_pending{false};
@@ -32,8 +31,8 @@ struct WindowState {
     mutable std::mutex reset_lock; // makes reset_reason and reset_requested one publication
 
     bool requested_exclusive() const { return requested.load() == WindowMode::Exclusive; }
-    bool actual_exclusive() const { return actual.load() == WindowMode::Exclusive; }
-    bool present_flip() const { return present.load() == PresentPath::Flip; }
+    bool actual_exclusive() const { return presentation.load() != PresentationState::WindowedCopy; }
+    bool present_flip() const { return presentation.load() == PresentationState::ExclusiveFlip; }
     bool is_focused() const { return focused.load(); }
     bool is_fullscreen() const { return fullscreen.load(); }
     void focus(bool on) { focused = on; }
@@ -46,8 +45,10 @@ struct WindowState {
     }
     void request_reset(const char *why);
     void commit(const D3DPRESENT_PARAMETERS &pp) {
-        actual = pp.Windowed ? WindowMode::Windowed : WindowMode::Exclusive;
-        present = pp.SwapEffect == D3DSWAPEFFECT_DISCARD && pp.BackBufferCount >= 2 ? PresentPath::Flip : PresentPath::Copy;
+        // One store: actual_exclusive() and present_flip() must never see two different swapchains.
+        presentation = pp.Windowed ? PresentationState::WindowedCopy
+                       : pp.SwapEffect == D3DSWAPEFFECT_DISCARD && pp.BackBufferCount >= 2 ? PresentationState::ExclusiveFlip
+                                                                                           : PresentationState::ExclusiveCopy;
     }
 };
 
