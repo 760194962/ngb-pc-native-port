@@ -47,12 +47,12 @@ vblank: source 59.94 Hz timer (exclusive)
 ## 发布包
 
 - `ngb-hurricane-pc-2.2.37.7-win32.zip`
-  - 3,446,734 字节
-  - SHA-256：`421279e0093a50353fc15dc4ccdef1983bee7113a9de573d6ebdfc0b3f508241`
+  - 3,446,780 字节
+  - SHA-256：`069f002ccfa1cc122a6dc4c1d376ce9e5fc8a9aba3a7943d496e4c9cddaa1570`
   - 压缩包内附：`Smoothness-Settings-CN.md`、`Smoothness-Settings-EN.md`。
 - `ngb-hurricane-pc-2.2.37.7-win32-symbols.zip`
-  - 38,935,012 字节
-  - SHA-256：`5d9840f3c109c46c03bffa1671f55329fbfbfbc9f14d3ff60a866ecb8d47f446`
+  - 38,991,452 字节
+  - SHA-256：`c0db2ee5cb096d94ea974ca6e2dd1a774c32527903dda61dfbbdcfea669492d2`
 
 作者：b站 哈雅布撒（QQ：2682557218）
 
@@ -75,11 +75,11 @@ keep: windowed 60 Hz uses DwmFlush
 ## Packages
 
 - `ngb-hurricane-pc-2.2.37.7-win32.zip`
-  - 3,446,734 bytes
-  - SHA-256: `421279e0093a50353fc15dc4ccdef1983bee7113a9de573d6ebdfc0b3f508241`
+  - 3,446,780 bytes
+  - SHA-256: `069f002ccfa1cc122a6dc4c1d376ce9e5fc8a9aba3a7943d496e4c9cddaa1570`
   - Inside: `Smoothness-Settings-CN.md` and `Smoothness-Settings-EN.md`.
 - `ngb-hurricane-pc-2.2.37.7-win32-symbols.zip`
-  - 38,935,012 bytes
-  - SHA-256: `5d9840f3c109c46c03bffa1671f55329fbfbfbc9f14d3ff60a866ecb8d47f446`
+  - 38,991,452 bytes
+  - SHA-256: `c0db2ee5cb096d94ea974ca6e2dd1a774c32527903dda61dfbbdcfea669492d2`
 
 Author: bilibili 哈雅布撒 (QQ: 2682557218)
