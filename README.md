@@ -245,6 +245,14 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 `cache\texture_pool.txt`、`cache\cpu_textures.bin`、`vsh_record.bin` 和 `logs\black.log` 交给作者。**要在更新到新版本之前交**：
 换版本时本地学到的绘制状态会被清掉。
 
+### 2.2.37.6：60Hz 真全屏 tick 固定用 timer
+
+- 60Hz 真全屏不再使用 kernel vblank 作为游戏 tick；
+- tick 直接固定 59.94 Hz timer；
+- 窗口 60Hz 仍用 DwmFlush；
+- 高刷 / 固定游戏速度仍用 timer；
+- kernel vblank 不再作为游戏时间来源。
+
 ### 2.2.37.5：60Hz 真全屏 vblank 来源修复
 
 - 60Hz 真全屏下 kernel vblank 不可用时，不再错误使用 DwmFlush；

@@ -1189,8 +1189,8 @@ HANDLE g_vblank_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr); // wakes pa
 // vblank. A free-running 59.94 Hz timer drifts against the display (59.95 Hz on the user's), and while the phase sat
 // near the composition deadline, frames were shown a refresh late or skipped: stutter now and then with no slow frames
 // in the performance recordings. When DwmFlush returns early (nothing presented yet, window minimised) the tick falls
-// back to the timer. Exclusive fullscreen has no DWM clock; it uses the display's own vblank when that works, and the
-// timer otherwise. Other refresh rates, --background and --timer-vblank use the timer only.
+// back to the timer. Exclusive fullscreen never uses DwmFlush: kernel vblank measured 16.7 -> 19-21 ms in 2026-11-22
+// diagnostics, so its tick is the fixed timer. Other refresh rates, --background and --timer-vblank use the timer only.
 using DwmFlushFn = HRESULT(WINAPI *)();
 DwmFlushFn load_dwm()
 {
@@ -1198,64 +1198,6 @@ DwmFlushFn load_dwm()
     HMODULE m = LoadLibraryW(L"dwmapi.dll");
     return m ? (DwmFlushFn)GetProcAddress(m, "DwmFlush") : nullptr;
 }
-
-// An exclusive device at about 60 Hz: the display's own vertical blank (D3DKMTWaitForVerticalBlankEvent on the primary
-// display's adapter, gdi32). DwmFlush is no clock there: exclusive at 60 Hz with vsync (exclusive_mode picks it on a
-// 165 Hz panel) the tick ran at 53.9 Hz in the attract's movie (its frames 50-65 ms, 18 over 50 ms against 1 at 165 Hz on
-// the timer; Iris Xe, 2026-11-17), DwmFlush returning late while the movie uploaded 1.3 MB a frame.
-struct KernelVblank {
-    struct Open {
-        HDC hdc;
-        UINT adapter;
-        LUID luid;
-        UINT source;
-    };
-    struct Wait {
-        UINT adapter, device, source;
-    };
-    using OpenFn = LONG(APIENTRY *)(Open *);
-    using WaitFn = LONG(APIENTRY *)(const Wait *);
-    WaitFn wait = nullptr;
-    Wait w = {};
-    char failure[128] = {};
-    bool init()
-    {
-        failure[0] = 0;
-        // The exports do not change during a run; retries reuse them instead of LoadLibrary on every attempt.
-        static HMODULE g = LoadLibraryW(L"gdi32.dll");
-        static auto open = g ? (OpenFn)GetProcAddress(g, "D3DKMTOpenAdapterFromHdc") : nullptr;
-        static auto wf = g ? (WaitFn)GetProcAddress(g, "D3DKMTWaitForVerticalBlankEvent") : nullptr;
-        if (!g) {
-            snprintf(failure, sizeof failure, "gdi32.dll not loaded");
-            return false;
-        }
-        if (!open || !wf) {
-            snprintf(failure, sizeof failure, "D3DKMT exports missing");
-            return false;
-        }
-        DISPLAY_DEVICEW dd = {sizeof dd};
-        for (DWORD i = 0; EnumDisplayDevicesW(nullptr, i, &dd, 0); i++, dd.cb = sizeof dd) {
-            if (!(dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)) continue;
-            HDC dc = CreateDCW(nullptr, dd.DeviceName, nullptr, nullptr);
-            if (!dc) {
-                snprintf(failure, sizeof failure, "CreateDC failed for the primary display");
-                return false;
-            }
-            Open o = {dc};
-            LONG st = open(&o);
-            DeleteDC(dc);
-            if (st != 0) {
-                snprintf(failure, sizeof failure, "D3DKMTOpenAdapterFromHdc failed (0x%08lx)", (unsigned long)st);
-                return false;
-            }
-            w = {o.adapter, 0, o.source};
-            wait = wf;
-            return true;
-        }
-        snprintf(failure, sizeof failure, "no primary display");
-        return false;
-    }
-};
 
 bool display_near_60()
 {
@@ -1274,70 +1216,35 @@ void __stdcall vblank_thread(void *)
     QueryPerformanceCounter(&last);
     const int64_t period = f.QuadPart * 1001 / 60000; // 59.94 Hz
     DwmFlushFn dwm = load_dwm();
-    KernelVblank kv;
-    bool kernel_ready = false, kernel_tried = false;
-    uint32_t kernel_retry_at = 0;
     bool near_60 = display_near_60();
-    enum class Source { Timer, Dwm, Kernel };
+    enum class Source { Timer, Dwm };
     Source source = Source::Timer;
-    const bool allow_kernel = !g_cfg.timer_vblank && (!g_cfg.background || g_cfg.display_vblank);
-    std::string last_kernel_failure;
-    auto source_name = [](Source s) {
-        return s == Source::Kernel ? "the display's vblank (exclusive)" : s == Source::Dwm ? "DwmFlush (window)" : "59.94 Hz timer";
-    };
-    auto kernel_eligible = [&] { return allow_kernel && near_60 && host3d::exclusive(); };
+    auto source_name = [](Source s) { return s == Source::Dwm ? "DwmFlush (window)" : "59.94 Hz timer"; };
     auto choose_source = [&] {
-        if (kernel_ready && kernel_eligible()) return Source::Kernel;
-        // DwmFlush is a clock only in a window. In exclusive fullscreen DWM does not compose the game, and its
-        // late returns were the 53.9 Hz movie tick; exclusive without kernel vblank must use the timer.
-        if (!host3d::exclusive() && near_60 && dwm) return Source::Dwm;
+        // Exclusive fullscreen has no DWM clock and kernel vblank is not used as the game clock: its wait interval
+        // was measured at 16.7 -> 19-21 ms while the game must stay at 59.94. Windowed 60 Hz is the one case where
+        // DwmFlush is both valid and useful; every other case is the timer.
+        if (!g_cfg.timer_vblank && !host3d::exclusive() && near_60 && dwm) return Source::Dwm;
         return Source::Timer;
     };
-    auto retry_kernel = [&] {
-        if (kernel_ready || !kernel_eligible()) return;
-        if (kernel_tried && (uint32_t)(g_vblank_count - kernel_retry_at) < 300) return;
-        kernel_tried = true;
-        kernel_retry_at = g_vblank_count;
-        kernel_ready = kv.init();
-        if (kernel_ready)
-            logf("[d3d] vblank: kernel vblank ready for exclusive fullscreen");
-        else if (last_kernel_failure != kv.failure) {
-            logf("[d3d] vblank: kernel vblank unavailable: %s", kv.failure);
-            last_kernel_failure = kv.failure;
-        }
-    };
-    retry_kernel();
     source = choose_source();
-    logf("[d3d] vblank: source %s; DwmFlush %s, kernel vblank %s%s", source_name(source), dwm ? "available" : "unavailable",
-         kernel_ready ? "ready" : "not ready", kernel_ready ? "" : kv.failure[0] ? " (see log)" : "");
+    logf("[d3d] vblank: source %s%s", source_name(source), host3d::exclusive() ? " (exclusive)" : "");
     Source logged_source = source;
-    uint32_t from_display = 0, from_kernel = 0;
+    uint32_t from_display = 0;
     LARGE_INTEGER minute = last;
     for (;;) {
         bool synced = false;
         if (g_vblank_count % 300 == 0) near_60 = display_near_60(); // the mode changes with exclusive fullscreen
-        retry_kernel();
         Source next = choose_source();
         if (next != logged_source) {
-            logf("[d3d] vblank: source %s", source_name(next));
+            logf("[d3d] vblank: source %s%s", source_name(next), host3d::exclusive() ? " (exclusive)" : "");
             logged_source = next;
         }
         source = next;
-        if (source == Source::Kernel) {
-            if (kv.wait(&kv.w) == 0) {
-                QueryPerformanceCounter(&now);
-                synced = now.QuadPart - last.QuadPart > period / 2;
-                from_kernel += synced;
-            } else {
-                logf("[d3d] vblank: kernel vblank wait failed; back to the timer until the next retry");
-                kernel_ready = false;
-            }
-        } else if (source == Source::Dwm) {
-            if (SUCCEEDED(dwm())) {
-                QueryPerformanceCounter(&now);
-                synced = now.QuadPart - last.QuadPart > period / 2;
-                from_display += synced;
-            }
+        if (source == Source::Dwm && SUCCEEDED(dwm())) {
+            QueryPerformanceCounter(&now);
+            synced = now.QuadPart - last.QuadPart > period / 2;
+            from_display += synced;
         }
         if (!synced) {
             int64_t due = last.QuadPart + period;
@@ -1356,10 +1263,10 @@ void __stdcall vblank_thread(void *)
         uint32_t vb = ++g_vblank_count;
         g_vblank_qpc.store(now.QuadPart);
         SetEvent(g_vblank_wake);
-        if ((dwm || kernel_ready) && vb % 3600 == 0) {
-            logf("[d3d] vblank: %u of the last 3600 from the display (%u its vblank, exclusive), %.3f Hz", from_display, from_kernel,
+        if (dwm && vb % 3600 == 0) {
+            logf("[d3d] vblank: %u of the last 3600 from DwmFlush, %.3f Hz", from_display,
                  3600.0 * f.QuadPart / (double)(now.QuadPart - minute.QuadPart));
-            from_display = from_kernel = 0;
+            from_display = 0;
             minute = now;
         }
         ksync_signal_object(g_dev + DEV_VBLANKEVENT);
