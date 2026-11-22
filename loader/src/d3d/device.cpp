@@ -1217,19 +1217,16 @@ void __stdcall vblank_thread(void *)
     const int64_t period = f.QuadPart * 1001 / 60000; // 59.94 Hz
     DwmFlushFn dwm = load_dwm();
     bool near_60 = display_near_60();
-    enum class Source { Timer, Dwm };
-    Source source = Source::Timer;
-    auto source_name = [](Source s) { return s == Source::Dwm ? "DwmFlush (window)" : "59.94 Hz timer"; };
-    auto choose_source = [&] {
+    auto follow_dwm = [&] {
         // Exclusive fullscreen has no DWM clock and kernel vblank is not used as the game clock: its wait interval
         // was measured at 16.7 -> 19-21 ms while the game must stay at 59.94. Windowed 60 Hz is the one case where
         // DwmFlush is both valid and useful; every other case is the timer.
-        if (!g_cfg.timer_vblank && !host3d::exclusive() && near_60 && dwm) return Source::Dwm;
-        return Source::Timer;
+        return !g_cfg.timer_vblank && !host3d::exclusive() && near_60 && dwm;
     };
-    source = choose_source();
-    logf("[d3d] vblank: source %s%s", source_name(source), host3d::exclusive() ? " (exclusive)" : "");
-    Source logged_source = source;
+    auto source_label = [](bool d) { return d ? "DwmFlush (window)" : "59.94 Hz timer"; };
+    bool use_dwm = follow_dwm();
+    logf("[d3d] vblank: source %s%s", source_label(use_dwm), host3d::exclusive() ? " (exclusive)" : "");
+    bool logged_dwm = use_dwm;
     bool last_exclusive = host3d::exclusive();
     uint32_t from_display = 0;
     LARGE_INTEGER minute = last;
@@ -1244,13 +1241,13 @@ void __stdcall vblank_thread(void *)
         } else if (g_vblank_count % 300 == 0) {
             near_60 = display_near_60(); // the mode can change with exclusive fullscreen
         }
-        Source next = choose_source();
-        if (next != logged_source) {
-            logf("[d3d] vblank: source %s%s", source_name(next), host3d::exclusive() ? " (exclusive)" : "");
-            logged_source = next;
+        const bool next_dwm = follow_dwm();
+        if (next_dwm != logged_dwm) {
+            logf("[d3d] vblank: source %s%s", source_label(next_dwm), host3d::exclusive() ? " (exclusive)" : "");
+            logged_dwm = next_dwm;
         }
-        source = next;
-        if (source == Source::Dwm && SUCCEEDED(dwm())) {
+        use_dwm = next_dwm;
+        if (use_dwm && SUCCEEDED(dwm())) {
             QueryPerformanceCounter(&now);
             synced = now.QuadPart - last.QuadPart > period / 2;
             from_display += synced;
