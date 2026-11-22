@@ -84,7 +84,8 @@ vsync 關：PresentationInterval = IMMEDIATE
 - `exclusive_params()` 回報是否真的讀到 display mode；讀不到時請求回退到 windowed，並在 Reset 後 restyle，不留下「fullscreen style + windowed device」。
 - `check_exclusive_present()` 在 create/reset 後檢查 exclusive 是否真的是 `DISCARD` + 2 buffers；不是就 log。
 - `restyle_pending` 只在 `SetWindowPlacement` / `SetWindowPos` 都成功後才清除。
-- capture/resume 仍以 `GetForegroundWindow()` 為主，`WindowState.focused` 只作補充，不阻擋原本可 capture 的情況。
+- 退出獨佔時先把 `g_cfg.fullscreen` 設回 false，`settings_save()` 不會再把「已選窗口」寫回全屏。
+- capture/resume 仍以 `GetForegroundWindow()` 為主，`WindowState.focused` 只作狀態記錄，不阻擋原本可 capture 的情況。
 - `g_bb_w/g_bb_h` 改為 atomic，避免 reset 執行緒寫、render 執行緒讀的 plain data race。
 
 ## 測試

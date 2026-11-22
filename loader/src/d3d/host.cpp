@@ -109,6 +109,7 @@ void toggle_fullscreen()
             // The device is exclusive now: go back to a windowed device first, then restyle in reset_device_here.
             g_window.request(WindowMode::Windowed);
             g_window.restyle_pending = true;
+            g_cfg.fullscreen = false; // the user's choice is windowed now, even though the device resets first
             xd3d::request_device_reset("Alt+Enter: a window");
             return;
         }
@@ -275,7 +276,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_APP_CAPTURE: // from the input poll: pause frees the mouse, resuming play takes it again
         if (!wp) capture_mouse(false);
-        else if ((g_window.is_focused() || GetForegroundWindow() == h) && !IsIconic(h)) capture_mouse(true);
+        else if (GetForegroundWindow() == h && !IsIconic(h)) capture_mouse(true);
         return 0;
     case WM_SYSKEYDOWN: // Alt+Enter: fullscreen <-> window, as PC SETTINGS > VIDEO > FULLSCREEN (first press, not repeats)
         if (wp == VK_RETURN && (lp & (1 << 29)) && !(lp & (1 << 30))) {
