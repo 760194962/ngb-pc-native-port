@@ -267,6 +267,29 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 `cache\texture_pool.txt`、`cache\cpu_textures.bin`、`vsh_record.bin` 和 `logs\black.log` 交给作者。**要在更新到新版本之前交**：
 换版本时本地学到的绘制状态会被清掉。
 
+### 2.2.37.7：Alt+Enter 立即重查 display-60
+
+- `host3d::exclusive()` 一变化就重查 `near_60`；
+- 高刷 + 60Hz 开关 + 回窗口时，不再短暂选到 165Hz DwmFlush；
+- 60Hz 真全屏 tick 仍固定 timer；
+- 窗口 60Hz 仍用 DwmFlush。
+
+### 2.2.37.6：60Hz 真全屏 tick 固定用 timer
+
+- 60Hz 真全屏不再使用 kernel vblank 作为游戏 tick；
+- tick 直接固定 59.94 Hz timer；
+- 窗口 60Hz 仍用 DwmFlush；
+- 高刷 / 固定游戏速度仍用 timer；
+- kernel vblank 不再作为游戏时间来源。
+
+### 2.2.37.5：60Hz 真全屏 vblank 来源修复
+
+- 60Hz 真全屏下 kernel vblank 不可用时，不再错误使用 DwmFlush；
+- 独佔全屏回落到固定 59.94 Hz timer；
+- kernel 每 300 tick 重试，切模式后可重新初始化；
+- 日志记录 kernel 初始化失败原因和 vblank 来源切换；
+- CG / 主选单的稀疏呈现仍需 Presenter / frame pacing。
+
 ### 2.2.37.4：2.2.37.3-t 转正式版
 
 - 启动器「开始游戏」页新增「稳定游戏速度」开关；打开后游戏时钟固定 59.94 Hz，不跟屏幕；

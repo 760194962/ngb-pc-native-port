@@ -317,6 +317,29 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.7: refresh display-60 immediately on Alt+Enter
+
+- `near_60` is rechecked as soon as `host3d::exclusive()` changes;
+- high refresh + 60 Hz switch + back to window no longer briefly selects 165 Hz DwmFlush;
+- 60 Hz exclusive tick is still the fixed timer;
+- windowed 60 Hz still uses DwmFlush.
+
+### 2.2.37.6: 60 Hz exclusive tick uses the timer
+
+- 60 Hz exclusive fullscreen no longer uses kernel vblank as the game tick;
+- the tick is the fixed 59.94 Hz timer;
+- windowed 60 Hz still uses DwmFlush;
+- high refresh / Steady game speed still use the timer;
+- kernel vblank is no longer a game-time source.
+
+### 2.2.37.5: 60 Hz exclusive vblank source fix
+
+- 60 Hz exclusive fullscreen no longer falls back to DwmFlush when kernel vblank is unavailable;
+- exclusive fullscreen falls back to the fixed 59.94 Hz timer;
+- kernel retries every 300 ticks and after a display-mode change;
+- the log records the kernel failure reason and every vblank source change;
+- sparse CG / menu presentation still needs Presenter / frame pacing.
+
 ### 2.2.37.4: 2.2.37.3-t promoted to a release
 
 - The Start page has a **Steady game speed** switch; on, the game clock stays at 59.94 Hz instead of following the screen;
