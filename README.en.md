@@ -269,6 +269,14 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.5: 60 Hz exclusive vblank source fix
+
+- 60 Hz exclusive fullscreen no longer falls back to DwmFlush when kernel vblank is unavailable;
+- exclusive fullscreen falls back to the fixed 59.94 Hz timer;
+- kernel retries every 300 ticks and after a display-mode change;
+- the log records the kernel failure reason and every vblank source change;
+- sparse CG / menu presentation still needs Presenter / frame pacing.
+
 ### 2.2.37.4: 2.2.37.3-t promoted to a release
 
 - The Start page has a **Steady game speed** switch; on, the game clock stays at 59.94 Hz instead of following the screen;
