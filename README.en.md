@@ -269,6 +269,14 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.8: window / exclusive state cleanup
+
+- window / exclusive / focus / reset live in one `WindowState`;
+- borderless fullscreen is no longer inferred from `WS_CAPTION` only;
+- leaving exclusive with Alt+Enter now saves the windowed choice;
+- an unavailable exclusive display mode falls back to a window; a failed `SetWindowPos` rolls back;
+- exclusive + vsync off also uses `DISCARD / 2 buffers / flip`; window / borderless still use `COPY + DWM`.
+
 ### 2.2.37.7: refresh display-60 immediately on Alt+Enter
 
 - `near_60` is rechecked as soon as `host3d::exclusive()` changes;

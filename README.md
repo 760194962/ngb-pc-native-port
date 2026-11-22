@@ -245,6 +245,14 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 `cache\texture_pool.txt`、`cache\cpu_textures.bin`、`vsh_record.bin` 和 `logs\black.log` 交给作者。**要在更新到新版本之前交**：
 换版本时本地学到的绘制状态会被清掉。
 
+### 2.2.37.8：窗口 / 真全屏状态整理
+
+- 窗口 / 独占 / 焦点 / Reset 收进单一 `WindowState`；
+- 无边框全屏不再只靠 `WS_CAPTION` 推断；
+- Alt+Enter 退出真全屏后，设置正确保存为窗口；
+- 独占 display mode 读不到时回退窗口，`SetWindowPos` 失败时回滚；
+- 真全屏 + vsync 关也统一为 `DISCARD / 2 buffers / flip`；窗口 / 无边框仍是 `COPY + DWM`。
+
 ### 2.2.37.7：Alt+Enter 立即重查 display-60
 
 - `host3d::exclusive()` 一变化就重查 `near_60`；
