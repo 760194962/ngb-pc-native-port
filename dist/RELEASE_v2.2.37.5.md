@@ -1,5 +1,7 @@
 # 《忍者龙剑传 黑之章》PC 原生移植 **2.2.37.5**
 
+> **已被 2.2.37.6 取代。** 2.2.37.5 只修了 kernel vblank 初始化失败；kernel 初始化成功但事件本身变慢（16.7 → 19–21ms）的情况仍会掉到 52。请使用 2.2.37.6。
+
 **2.2.37.4 的修复版。** 修正 60Hz 真全屏下 kernel vblank 不可用时错误使用 DwmFlush 的问题。
 
 ## 这个版本是什么
@@ -97,6 +99,8 @@
 ---
 
 # Ninja Gaiden Black PC native port **2.2.37.5**
+
+> **Superseded by 2.2.37.6.** 2.2.37.5 fixed only kernel vblank initialization failure; when initialization succeeds but the event itself slows down (16.7 → 19–21 ms), it can still fall to 52. Use 2.2.37.6.
 
 **A fix release for 2.2.37.4.** It fixes 60 Hz exclusive fullscreen falling back to DwmFlush when kernel vblank is unavailable.
 
