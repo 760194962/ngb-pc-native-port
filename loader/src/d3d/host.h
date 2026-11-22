@@ -3,9 +3,46 @@
 
 #include "common.h"
 
+#include <atomic>
+#include <cstdint>
 #include <d3d9.h>
 
 namespace host3d {
+
+// One state machine for the window and the device: what was requested, what actually exists, how it presents,
+// whether it has focus, and the Reset queue that changes one into the other.
+enum class WindowMode : uint8_t { Windowed, Exclusive };
+enum class PresentPath : uint8_t { Copy, Flip };
+
+struct WindowState {
+    std::atomic<WindowMode> requested{WindowMode::Windowed};
+    std::atomic<WindowMode> actual{WindowMode::Windowed};
+    std::atomic<PresentPath> present{PresentPath::Copy};
+    std::atomic<bool> focused{false};
+    std::atomic<bool> restyle_pending{false};
+
+    // Reset lifecycle, shared with d3d/device.cpp (its requests come from several threads; Swap consumes them).
+    std::atomic<uint32_t> reset_requested{0}; // the request number; 0 = none
+    std::atomic<uint32_t> reset_seq{0};       // the last request's number
+    std::atomic<const char *> reset_reason{""};
+    std::atomic<bool> device_lost{false};
+    std::atomic<uint64_t> lost_since{0};
+
+    bool requested_exclusive() const { return requested.load() == WindowMode::Exclusive; }
+    bool actual_exclusive() const { return actual.load() == WindowMode::Exclusive; }
+    bool present_flip() const { return present.load() == PresentPath::Flip; }
+    bool is_focused() const { return focused.load(); }
+    void focus(bool on) { focused = on; }
+    void request(WindowMode m) { requested = m; }
+    bool take_reset() { return reset_requested.exchange(0) != 0; }
+    void request_reset(const char *why);
+    void commit(const D3DPRESENT_PARAMETERS &pp) {
+        actual = pp.Windowed ? WindowMode::Windowed : WindowMode::Exclusive;
+        present = pp.SwapEffect == D3DSWAPEFFECT_DISCARD && pp.BackBufferCount >= 2 ? PresentPath::Flip : PresentPath::Copy;
+    }
+};
+
+WindowState &window_state();
 
 // Starts the UI thread; returns once the window exists. A zero width fits the largest aspect_w:aspect_h client
 // area on the screen; a zero height alone follows from the width and the aspect.

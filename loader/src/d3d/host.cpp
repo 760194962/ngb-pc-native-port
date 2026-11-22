@@ -27,7 +27,15 @@ void draw_ring_prepare(IDirect3DDevice9 *d);    // draw.cpp: the draw ring sets 
                         "processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 namespace host3d {
+WindowState &window_state()
+{
+    static WindowState state;
+    return state;
+}
+
 namespace {
+
+WindowState &g_window = window_state();
 
 HWND g_hwnd;
 HICON g_icon, g_icon_sm; // load_program_icons
@@ -47,28 +55,6 @@ int g_bb_w, g_bb_h;                 // host back buffer: the largest monitor, so
 // while the window is fullscreen. Alt+Enter switches by a Reset at the next Swap (d3d/device.cpp recover_device).
 // One state machine owns the window: request, the device that actually exists, its presentation path and focus.
 // A request may lead the device by one Swap; Present and frame sizing follow the device, never the request.
-enum class WindowMode : uint8_t { Windowed, Exclusive };
-enum class PresentPath : uint8_t { Copy, Flip };
-
-struct WindowState {
-    std::atomic<WindowMode> requested{WindowMode::Windowed};
-    std::atomic<WindowMode> actual{WindowMode::Windowed};
-    std::atomic<PresentPath> present{PresentPath::Copy};
-    std::atomic<bool> focused{false};
-    std::atomic<bool> restyle_pending{false};
-
-    bool requested_exclusive() const { return requested.load() == WindowMode::Exclusive; }
-    bool actual_exclusive() const { return actual.load() == WindowMode::Exclusive; }
-    bool present_flip() const { return present.load() == PresentPath::Flip; }
-    bool is_focused() const { return focused.load(); }
-    void focus(bool on) { focused = on; }
-    void request(WindowMode m) { requested = m; }
-    void commit(const D3DPRESENT_PARAMETERS &pp) {
-        actual = pp.Windowed ? WindowMode::Windowed : WindowMode::Exclusive;
-        present = pp.SwapEffect == D3DSWAPEFFECT_DISCARD && pp.BackBufferCount >= 2 ? PresentPath::Flip : PresentPath::Copy;
-    }
-};
-WindowState g_window;
 int g_frame_w, g_frame_h;           // the part of the back buffer the current frame uses
 int g_out_w, g_out_h;               // the window size as set (open_window): fullscreen's with black.ini fullscreen_res = window
 WINDOWPLACEMENT g_windowed_place = {sizeof(WINDOWPLACEMENT)};

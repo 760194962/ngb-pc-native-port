@@ -25,7 +25,7 @@ exclusive + vsync 開 → DISCARD / 2 buffers + Present(nullptr)
 
 ## 設計
 
-`WindowState` 是唯一的窗口狀態機，保存：
+`WindowState` 是唯一的窗口/device 狀態機，保存：
 
 ```text
 requested  = Windowed / Exclusive（請求）
@@ -33,7 +33,15 @@ actual     = Windowed / Exclusive（device 實際）
 present    = Copy / Flip（實際 swapchain）
 focused    = 焦點
 restyle_pending = 等 device 變 windowed 後再改視窗外觀
+
+reset_requested = Reset 請求編號，0 = 無
+reset_seq       = 最後一次請求編號
+reset_reason    = 請求原因
+device_lost     = device 是否 lost
+lost_since      = lost 開始時間
 ```
+
+`reset_requested` 是跨執行緒請求；Swap 用 `take_reset()` 消費，`recover_device()` 用同一份狀態執行 Reset。Reset 不再有第二份 `g_reset_requested`。
 
 只有 `CreateDeviceEx` / `ResetEx` 成功後，`commit(pp)` 才更新 `actual` / `present`：
 
