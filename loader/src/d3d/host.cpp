@@ -285,6 +285,11 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_LBUTTONDOWN:
         capture_mouse(true);
         return 0;
+    case WM_NCLBUTTONDOWN:
+        // A title-bar / resize click is the window manager's, not the game's: let go of the pointer so our
+        // ClipCursor cannot turn a click into a drag.
+        capture_mouse(false);
+        break;
     case WM_ACTIVATE:
         if (LOWORD(wp) == WA_INACTIVE) capture_mouse(false);
         else if (!g_cfg.background && !IsIconic(h)) capture_mouse(true, false);
