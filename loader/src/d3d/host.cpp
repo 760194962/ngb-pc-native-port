@@ -159,14 +159,14 @@ void clip_to_client()
     ClipCursor(&r);
 }
 
-void capture_mouse(bool on)
+void capture_mouse(bool on, bool hold_first = true)
 {
     if (on == g_captured) return;
     g_captured = on;
     if (on) {
         clip_to_client();
         SetCursor(nullptr);
-        g_hold_left = true;
+        g_hold_left = hold_first;
     } else {
         ClipCursor(nullptr);
         g_buttons = 0;
@@ -265,7 +265,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_APP_CAPTURE: // from the input poll: pause frees the mouse, resuming play takes it again
         if (!wp) capture_mouse(false);
-        else if (GetForegroundWindow() == h && !IsIconic(h)) capture_mouse(true);
+        else if (GetForegroundWindow() == h && !IsIconic(h)) capture_mouse(true, false);
         return 0;
     case WM_SYSKEYDOWN: // Alt+Enter: fullscreen <-> window, as PC SETTINGS > VIDEO > FULLSCREEN (first press, not repeats)
         if (wp == VK_RETURN && (lp & (1 << 29)) && !(lp & (1 << 30))) {
@@ -286,6 +286,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_ACTIVATE:
         if (LOWORD(wp) == WA_INACTIVE) capture_mouse(false);
+        else if (!g_cfg.background && !IsIconic(h)) capture_mouse(true, false);
         break;
     case WM_APP_DEVICE: // create_device, reset_device, test_cooperative_level: on this thread
         if (wp == kDeviceCreate) return create_device_here();
@@ -302,6 +303,9 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
     case WM_KILLFOCUS:
         capture_mouse(false);
+        break;
+    case WM_SETFOCUS:
+        if (!g_cfg.background && !IsIconic(h)) capture_mouse(true, false);
         break;
     case WM_SETCURSOR:
         if (g_captured && LOWORD(lp) == HTCLIENT) {
@@ -362,6 +366,9 @@ DWORD WINAPI ui_thread(void *)
     if (!g_cfg.background) {
         SetForegroundWindow(g_hwnd);
         logf("host: window %s", GetForegroundWindow() == g_hwnd ? "in front" : "not given the front by Windows");
+        // Hide the pointer as soon as the game owns the foreground. This is not the click-to-capture path, so the
+        // first click must reach the game: hold_first = false.
+        if (GetForegroundWindow() == g_hwnd) capture_mouse(true, false);
     }
     if (g_cfg.fullscreen) toggle_fullscreen();
     SetEvent(g_window_ready);
