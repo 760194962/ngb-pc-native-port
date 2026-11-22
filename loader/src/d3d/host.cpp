@@ -49,7 +49,7 @@ std::atomic<bool> g_exclusive_now{false};
 std::atomic<bool> g_dev_exclusive{false}; // the device is exclusive now (g_exclusive_now leads it until the next Reset)
 // What the present device actually is, set only after CreateDeviceEx / ResetEx succeed. g_exclusive_now is the
 // request and may lead this by one Swap; Present must follow the device, never the request.
-enum class PresentationMode { WindowedCopy, ExclusiveCopy, ExclusiveFlip };
+enum class PresentationMode { WindowedCopy, ExclusiveFlip };
 std::atomic<PresentationMode> g_present_mode{PresentationMode::WindowedCopy};
 int g_frame_w, g_frame_h;           // the part of the back buffer the current frame uses
 int g_out_w, g_out_h;               // the window size as set (open_window): fullscreen's with black.ini fullscreen_res = window
@@ -565,27 +565,22 @@ D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp)
     // With one copied back buffer Present waited for each frame to be shown before the next could start, so on the
     // Iris Xe at 60 Hz the game ran at 78% (r361); two flipped buffers let the next frame start meanwhile. A flipped
     // buffer is shown whole: the frame fills the screen here (frame_layout), and present() gives no rectangle.
+    // Both vsync states use the flip chain; PresentationInterval is the only difference (ONE waits, IMMEDIATE does not).
     pp.PresentationInterval = g_cfg.vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
-    if (g_cfg.vsync) {
-        pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-        pp.BackBufferCount = 2;
-    }
+    pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    pp.BackBufferCount = 2;
     return pp;
 }
 
 // The presentation path is a property of the device that was actually created, not of the Alt+Enter request.
 static PresentationMode presentation_mode(const D3DPRESENT_PARAMETERS &pp)
 {
-    if (pp.Windowed) return PresentationMode::WindowedCopy;
-    return pp.SwapEffect == D3DSWAPEFFECT_DISCARD && pp.BackBufferCount >= 2 ? PresentationMode::ExclusiveFlip
-                                                                          : PresentationMode::ExclusiveCopy;
+    return pp.Windowed ? PresentationMode::WindowedCopy : PresentationMode::ExclusiveFlip;
 }
 
 static const char *presentation_name(PresentationMode m)
 {
-    return m == PresentationMode::ExclusiveFlip ? "flip"
-         : m == PresentationMode::ExclusiveCopy ? "copy (exclusive)"
-                                                 : "copy (window)";
+    return m == PresentationMode::ExclusiveFlip ? "flip" : "copy (window)";
 }
 
 
