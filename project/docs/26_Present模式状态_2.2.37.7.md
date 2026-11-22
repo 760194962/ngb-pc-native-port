@@ -25,28 +25,31 @@ exclusive + vsync 開 → DISCARD / 2 buffers + Present(nullptr)
 
 ## 設計
 
-`PresentationMode` 只留兩種：
+`WindowState` 是唯一的窗口狀態機，保存：
 
 ```text
-WindowedCopy
-ExclusiveFlip
+requested  = Windowed / Exclusive（請求）
+actual     = Windowed / Exclusive（device 實際）
+present    = Copy / Flip（實際 swapchain）
+focused    = 焦點
+restyle_pending = 等 device 變 windowed 後再改視窗外觀
 ```
 
-這個值是 **device 實際狀態**，只在 `CreateDeviceEx` / `ResetEx` 成功後更新：
+只有 `CreateDeviceEx` / `ResetEx` 成功後，`commit(pp)` 才更新 `actual` / `present`：
 
 ```text
 pp.Windowed → WindowedCopy
 !Windowed   → ExclusiveFlip
 ```
 
-`Present` 只看這個模式：
+`Present` 只看 `present`：
 
 ```text
-ExclusiveFlip → Present(nullptr)
-WindowedCopy  → Present(&src)
+Flip → Present(nullptr)
+Copy → Present(&src)
 ```
 
-`g_exclusive_now` 仍然代表請求；它不再參與 Present 路徑。
+`requested` 只代表 Alt+Enter 的請求，不參與 Present。
 
 ## 獨佔 swapchain
 
