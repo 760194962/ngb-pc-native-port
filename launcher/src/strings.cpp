@@ -747,7 +747,7 @@ const Pair kText[(int)Str::Count] = {
      L"It only changes when a picture goes out, never the game's speed."},
     {L"垂直同步时用 60 Hz",
      L"60 Hz with V-Sync"},
-    {L"独占全屏开垂直同步时把屏幕切到 60 Hz，每帧显示一次（适合 144 / 165 Hz）",
+    {L"独占全屏开垂直同步时切到 60 Hz，每帧一次刷新（适合 144/165 Hz）",
      L"Exclusive fullscreen with V-Sync switches the screen to 60 Hz, one refresh a frame (for 144 / 165 Hz)"},
     {L"默认开启。只在“独占全屏”并且打开了“垂直同步”时起作用；窗口、无边框全屏和关掉垂直同步时都不受影响。\n\n"
      L"游戏每秒 60 帧。屏幕是 120、144、165 Hz 这类刷新率时，垂直同步只能对齐屏幕的刷新：在 165 Hz 上每帧停 3、3、3、2 次刷新交替，"
