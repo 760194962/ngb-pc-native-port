@@ -2330,11 +2330,8 @@ namespace {
 // forget the states they sent, and the transforms, material, lights, target, viewport and scissor are set here.
 // Game textures drop their DEFAULT copies, made again from their system copies at the next use (texture.cpp);
 // shaders and vertex declarations survive a Reset.
-bool g_device_lost;
-ULONGLONG g_lost_since;
-std::atomic<uint32_t> g_reset_requested;      // request_device_reset (Alt+Enter, a mode change, press-file "reset"): its number, 0 = none
-std::atomic<uint32_t> g_reset_seq;            // the last request's number
-std::atomic<const char *> g_reset_reason{""};
+// The window/device state machine owns these: requests come from several threads; Swap consumes them.
+host3d::WindowState &g_presenter = host3d::window_state();
 std::atomic<bool> g_visquery_requested; // tests: press-file "visquery" (a visibility test, as the game's first leaves it)
 
 std::atomic<bool> g_recreate_requested; // tests: press-file "recreate"
@@ -2431,7 +2428,7 @@ void recreate_device(const char *why)
     d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &g_host_backbuffer);
     d->GetDepthStencilSurface(&g_host_depth);
     resend_game_state(d);
-    g_device_lost = false;
+    g_presenter.device_lost = false;
     logf("[d3d] the new device draws, after %.1f s", (GetTickCount64() - t0) / 1000.0);
 }
 
@@ -2441,20 +2438,20 @@ void recover_device(bool requested)
     HRESULT hr = host3d::test_cooperative_level();
     if (hr == D3D_OK && requested) { // a Reset asked for (request_device_reset), on a device that is fine
         hr = D3DERR_DEVICENOTRESET;
-        g_lost_since = GetTickCount64();
-        logf("[d3d] device reset requested (%s)", g_reset_reason.load());
+        g_presenter.lost_since = GetTickCount64();
+        logf("[d3d] device reset requested (%s)", g_presenter.reset_reason_text());
     } else if (hr == D3D_OK) {
-        g_device_lost = false;
+        g_presenter.device_lost = false;
         return;
-    } else if (!g_device_lost) {
-        g_device_lost = true;
-        g_lost_since = GetTickCount64();
+    } else if (!g_presenter.device_lost) {
+        g_presenter.device_lost = true;
+        g_presenter.lost_since = GetTickCount64();
         logf("[d3d] the Direct3D device is lost (0x%08lx)", hr);
     }
     // A 9Ex device is lost only to a hung or removed driver (host3d::test_cooperative_level), and a Reset does not
     // bring it back: a new device. Any other loss that lasts 2 s gets one too.
     if (hr == D3DERR_DEVICEHUNG || hr == D3DERR_DEVICEREMOVED ||
-        (hr != D3DERR_DEVICENOTRESET && GetTickCount64() - g_lost_since >= 2000)) {
+        (hr != D3DERR_DEVICENOTRESET && GetTickCount64() - g_presenter.lost_since >= 2000)) {
         char why[64];
         snprintf(why, sizeof why, "the device is lost: 0x%08lx", hr);
         recreate_device(why);
@@ -2474,9 +2471,9 @@ void recover_device(bool requested)
     // back null and Alt+Tab in exclusive fullscreen crashed in bind_render_target (r495, a query left alive:
     // vis_release). So the game does not go on until the device is back: Reset again for 2 s, then a new device.
     // A Reset asked for before this one starts is met by it: the window thread runs the Reset after it set the state
-    // asked for (Alt+Enter sets g_exclusive_now first). The 30-frame mode-change Reset and Alt+Enter at the same frame
-    // made two exclusive Resets in a row, 0.6 s apart (2026-10-25, frames 4115 and 4116).
-    uint32_t asked = g_reset_seq;
+    // asked for (Alt+Enter moves WindowState.requested first). The 30-frame mode-change Reset and Alt+Enter at the same
+    // frame made two exclusive Resets in a row, 0.6 s apart (2026-10-25, frames 4115 and 4116).
+    uint32_t asked = g_presenter.reset_seq;
     bool ok = host3d::reset_device();
     for (int tries = 1; !ok && tries < 40 && !host3d::window_closed(); tries++) {
         Sleep(50);
@@ -2488,13 +2485,13 @@ void recover_device(bool requested)
         if (!host3d::window_closed()) recreate_device("Reset kept failing for 2 s");
         return;
     }
-    if (asked && g_reset_requested.compare_exchange_strong(asked, 0))
-        logf("[d3d] a Reset asked for (%s) before this one is met by it", g_reset_reason.load());
+    if (asked && g_presenter.reset_requested.compare_exchange_strong(asked, 0))
+        logf("[d3d] a Reset asked for (%s) before this one is met by it", g_presenter.reset_reason_text());
     d->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &g_host_backbuffer);
     d->GetDepthStencilSurface(&g_host_depth);
     resend_game_state(d);
-    g_device_lost = false;
-    logf("[d3d] the Direct3D device was reset; drawing again after %.1f s", (GetTickCount64() - g_lost_since) / 1000.0);
+    g_presenter.device_lost = false;
+    logf("[d3d] the Direct3D device was reset; drawing again after %.1f s", (GetTickCount64() - g_presenter.lost_since) / 1000.0);
 }
 
 } // namespace
@@ -2716,8 +2713,8 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     mode_changed_frames = presented == S_PRESENT_MODE_CHANGED && !host3d::exclusive() ? mode_changed_frames + 1 : 0;
     if (mode_changed_frames == 30) request_device_reset("Present said S_PRESENT_MODE_CHANGED for 30 frames");
     if (g_recreate_requested.exchange(false)) recreate_device("tests: press-file recreate");
-    bool requested = g_reset_requested.exchange(0) != 0;
-    if (presented == D3DERR_DEVICELOST || presented == D3DERR_DEVICEHUNG || presented == D3DERR_DEVICEREMOVED || g_device_lost || requested)
+    bool requested = g_presenter.take_reset();
+    if (presented == D3DERR_DEVICELOST || presented == D3DERR_DEVICEHUNG || presented == D3DERR_DEVICEREMOVED || g_presenter.device_lost || requested)
         recover_device(requested);
     check_render_size();
     perf::frame_end(host_w(g_width), host_h(g_height));
@@ -3762,12 +3759,7 @@ const Hle *hle_device_table_ngb(size_t *count)
 
 #include "auxtab/device_tables.inc"
 
-void request_device_reset(const char *why)
-{
-    logf("[d3d] reset asked (%s), frame %u%s", why, g_frame_count.load(), g_reset_requested ? ", one already waiting" : "");
-    g_reset_reason = why;
-    g_reset_requested = ++g_reset_seq;
-}
+void request_device_reset(const char *why) { g_presenter.request_reset(why); }
 void request_visibility_test() { g_visquery_requested = true; }
 void request_device_recreate() { g_recreate_requested = true; }
 
@@ -3809,3 +3801,11 @@ void compile_all_port_shaders()
 }
 
 } // namespace xd3d
+
+void host3d::WindowState::request_reset(const char *why)
+{
+    logf("[d3d] reset asked (%s), frame %u%s", why, g_frame_count.load(), reset_requested ? ", one already waiting" : "");
+    std::lock_guard<std::mutex> lock(reset_lock);
+    reset_reason = why;
+    reset_requested = ++reset_seq;
+}

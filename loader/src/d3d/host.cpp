@@ -27,7 +27,15 @@ void draw_ring_prepare(IDirect3DDevice9 *d);    // draw.cpp: the draw ring sets 
                         "processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 namespace host3d {
+WindowState &window_state()
+{
+    static WindowState state;
+    return state;
+}
+
 namespace {
+
+WindowState &g_window = window_state();
 
 HWND g_hwnd;
 HICON g_icon, g_icon_sm; // load_program_icons
@@ -42,13 +50,13 @@ IDirect3DDevice9Ex *g_devex; // the same device
 bool g_in_scene;
 std::atomic<int> g_win_w, g_win_h; // client area, follows WM_SIZE
 int g_aspect_w = 4, g_aspect_h = 3; // the picture's shape; the window keeps it when resized
-int g_bb_w, g_bb_h;                 // host back buffer: the largest monitor, so any window size is drawn 1:1
+std::atomic<int> g_bb_w, g_bb_h; // host back buffer: the largest monitor, so any window size is drawn 1:1
 // Exclusive fullscreen (black.ini fullscreen = 2): the device runs with Windowed = FALSE at the desktop's display mode
 // while the window is fullscreen. Alt+Enter switches by a Reset at the next Swap (d3d/device.cpp recover_device).
-std::atomic<bool> g_exclusive_now{false};
-std::atomic<bool> g_dev_exclusive{false}; // the device is exclusive now (g_exclusive_now leads it until the next Reset)
+// One state machine owns the window: request, the device that actually exists and its presentation path.
+// A request may lead the device by one Swap; Present and frame sizing follow the device, never the request.
 int g_frame_w, g_frame_h;           // the part of the back buffer the current frame uses
-int g_out_w, g_out_h;               // the window size as set (open_window): fullscreen's with black.ini fullscreen_res = window
+std::atomic<int> g_out_w, g_out_h; // the window size as set (open_window): fullscreen's with black.ini fullscreen_res = window
 WINDOWPLACEMENT g_windowed_place = {sizeof(WINDOWPLACEMENT)};
 
 // Mouse: raw input counts and buttons, used only while the cursor is captured (click the window; focus loss
@@ -60,7 +68,6 @@ constexpr UINT WM_APP_CAPTURE = WM_APP + 0x52; // wParam: 1 = capture, 0 = relea
 constexpr UINT WM_APP_FULLSCREEN = WM_APP + 0x53; // wParam: 1 = fullscreen, 0 = windowed (set_fullscreen)
 
 void restyle_windowed();
-std::atomic<bool> g_restyle_pending{false}; // out of exclusive fullscreen: restyle the window once the device is windowed
 
 // The device is created, tested and Reset on the window's thread (WM_APP_DEVICE; the game's render thread draws).
 // Created on the render thread, the device stayed lost after Alt+Tab in exclusive fullscreen: the window did not even
@@ -78,7 +85,7 @@ void release_stretch(); // present_stretch's target
 void toggle_fullscreen()
 {
     DWORD style = GetWindowLongW(g_hwnd, GWL_STYLE);
-    if (style & WS_CAPTION) {
+    if (!g_window.is_fullscreen()) {
         MONITORINFO mi = {sizeof mi};
         if (!GetWindowPlacement(g_hwnd, &g_windowed_place) ||
             !GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY), &mi))
@@ -87,26 +94,32 @@ void toggle_fullscreen()
         // window, and it came back over the whole screen behind the next program opened (2026-10-25, iconic stayed 0).
         // Exclusive fullscreen styles the window itself (0x14000000) and minimizes it when it loses the front.
         SetWindowLongW(g_hwnd, GWL_STYLE, (style & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_MINIMIZEBOX);
-        g_cfg.fullscreen = true;
-        SetWindowPos(g_hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
-                     mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        const BOOL sized = SetWindowPos(g_hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
+                                        mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        g_cfg.fullscreen = sized != FALSE;
+        g_window.set_fullscreen(sized != FALSE);
+        if (!sized) {
+            logf("host: fullscreen SetWindowPos failed (%lu); going back to a window", GetLastError());
+            restyle_windowed();
+            return;
+        }
         logf("host: fullscreen %ldx%ld%s", mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
              g_cfg.exclusive ? " (exclusive)" : "");
-        if (g_cfg.exclusive) {
-            g_exclusive_now = true;
+        if (g_cfg.exclusive && sized) {
+            g_window.request(WindowMode::Exclusive);
             if (g_dev) xd3d::request_device_reset("Alt+Enter: exclusive fullscreen"); // at start: made exclusive (create_device)
         }
     } else {
-        if (g_exclusive_now && g_dev) {
-            // Out of exclusive fullscreen the device goes windowed first (the Reset at the next Swap) and the window is
-            // restyled after that (reset_device_here). Restyled while the device was still exclusive, the runtime's
-            // window hook waited on the device (r277, when the render thread did the Reset).
-            g_exclusive_now = false;
-            g_restyle_pending = true;
+        if (g_window.actual_exclusive()) {
+            // The device is exclusive now: go back to a windowed device first, then restyle in reset_device_here.
+            g_window.request(WindowMode::Windowed);
+            g_window.restyle_pending = true;
+            g_cfg.fullscreen = false; // the user's choice is windowed now, even though the device resets first
             xd3d::request_device_reset("Alt+Enter: a window");
             return;
         }
-        g_exclusive_now = false;
+        // The device is still windowed (an exclusive request has not been committed yet): only undo the request.
+        g_window.request(WindowMode::Windowed);
         restyle_windowed();
     }
 }
@@ -117,8 +130,11 @@ void restyle_windowed()
     DWORD style = GetWindowLongW(g_hwnd, GWL_STYLE);
     SetWindowLongW(g_hwnd, GWL_STYLE, (style & ~WS_POPUP) | WS_OVERLAPPEDWINDOW);
     g_cfg.fullscreen = false;
-    SetWindowPlacement(g_hwnd, &g_windowed_place);
-    SetWindowPos(g_hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    g_window.set_fullscreen(false);
+    const BOOL placed = SetWindowPlacement(g_hwnd, &g_windowed_place);
+    const BOOL sized = SetWindowPos(g_hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    if (placed && sized) g_window.restyle_pending = false;
+    else logf("host: windowed style restored, but the saved placement failed (placement %d, frame %d)", (int)placed, (int)sized);
     logf("host: windowed");
 }
 
@@ -159,18 +175,17 @@ void clip_to_client()
     ClipCursor(&r);
 }
 
-void capture_mouse(bool on, bool hold_first = true)
+void capture_mouse(bool on)
 {
     if (on == g_captured) return;
     g_captured = on;
     if (on) {
         clip_to_client();
         SetCursor(nullptr);
-        g_hold_left = hold_first;
+        g_hold_left = true;
     } else {
         ClipCursor(nullptr);
         g_buttons = 0;
-        g_hold_left = false;
     }
     g_mouse_dx = g_mouse_dy = g_wheel = 0;
 }
@@ -204,7 +219,7 @@ void raw_input(HRAWINPUT h)
 
 // Fullscreen = no caption: in exclusive fullscreen the runtime sets the style itself (0x14000000, no WS_POPUP), so
 // WS_POPUP alone took that for a window and Alt+Enter went into fullscreen again (2026-10-25)
-bool is_fullscreen() { return !(GetWindowLongW(g_hwnd, GWL_STYLE) & WS_CAPTION); }
+bool is_fullscreen() { return g_window.is_fullscreen(); }
 
 // A performance recording was saved (perf.cpp): windowed, offer to open its folder; fullscreen, the title says it.
 void perf_report(HWND hwnd)
@@ -266,7 +281,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_APP_CAPTURE: // from the input poll: pause frees the mouse, resuming play takes it again
         if (!wp) capture_mouse(false);
-        else if (!g_cfg.background && GetForegroundWindow() == h && !IsIconic(h)) capture_mouse(true, false);
+        else if (GetForegroundWindow() == h && !IsIconic(h)) capture_mouse(true);
         return 0;
     case WM_SYSKEYDOWN: // Alt+Enter: fullscreen <-> window, as PC SETTINGS > VIDEO > FULLSCREEN (first press, not repeats)
         if (wp == VK_RETURN && (lp & (1 << 29)) && !(lp & (1 << 30))) {
@@ -285,14 +300,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_LBUTTONDOWN:
         capture_mouse(true);
         return 0;
-    case WM_NCLBUTTONDOWN:
-        // A title-bar / resize click is the window manager's, not the game's: let go of the pointer so our
-        // ClipCursor cannot turn a click into a drag.
-        capture_mouse(false);
-        break;
     case WM_ACTIVATE:
         if (LOWORD(wp) == WA_INACTIVE) capture_mouse(false);
-        else if (!g_cfg.background && !IsIconic(h)) capture_mouse(true, false);
         break;
     case WM_APP_DEVICE: // create_device, reset_device, test_cooperative_level: on this thread
         if (wp == kDeviceCreate) return create_device_here();
@@ -309,9 +318,6 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         }
     case WM_KILLFOCUS:
         capture_mouse(false);
-        break;
-    case WM_SETFOCUS:
-        if (!g_cfg.background && !IsIconic(h)) capture_mouse(true, false);
         break;
     case WM_SETCURSOR:
         if (g_captured && LOWORD(lp) == HTCLIENT) {
@@ -372,9 +378,6 @@ DWORD WINAPI ui_thread(void *)
     if (!g_cfg.background) {
         SetForegroundWindow(g_hwnd);
         logf("host: window %s", GetForegroundWindow() == g_hwnd ? "in front" : "not given the front by Windows");
-        // Hide the pointer as soon as the game owns the foreground. This is not the click-to-capture path, so the
-        // first click must reach the game: hold_first = false.
-        if (GetForegroundWindow() == g_hwnd) capture_mouse(true, false);
     }
     if (g_cfg.fullscreen) toggle_fullscreen();
     SetEvent(g_window_ready);
@@ -473,11 +476,11 @@ bool window_closed() { return g_closed; }
 void frame_layout(RECT *frame, RECT *picture)
 {
     int cw = std::max(1, g_win_w.load()), ch = std::max(1, g_win_h.load());
-    if (g_dev_exclusive && g_bb_w > 0 && g_bb_h > 0) { // exclusive: the whole back buffer, the display mode's size
+    if (g_window.actual_exclusive() && g_bb_w > 0 && g_bb_h > 0) { // exclusive: the whole back buffer, the display mode's size
         cw = g_bb_w;
         ch = g_bb_h;
     }
-    if (g_cfg.fs_window_res && g_out_w > 0 && g_out_h > 0 && (g_dev_exclusive || is_fullscreen())) {
+    if (g_cfg.fs_window_res && g_out_w > 0 && g_out_h > 0 && (g_window.actual_exclusive() || is_fullscreen())) {
         // Fullscreen at the window size (black.ini fullscreen_res = window, for slow machines): the frame keeps the
         // screen's shape, shrunk to fit within the window size, and is stretched over the screen evenly (borderless:
         // by Present; exclusive: by present_stretch). The picture (and with render = native the 3D render) follows:
@@ -517,7 +520,7 @@ void set_fullscreen(bool on)
 }
 
 bool fullscreen() { return g_hwnd && is_fullscreen(); }
-bool exclusive() { return g_exclusive_now; }
+bool exclusive() { return g_window.actual_exclusive(); }
 
 int mouse_buttons() { return g_captured ? g_buttons.load() : 0; }
 
@@ -561,10 +564,12 @@ D3DDISPLAYMODEEX exclusive_mode()
     return best;
 }
 
-// Exclusive fullscreen: exclusive_mode() on the default adapter (if it cannot be read: stays windowed)
-D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp)
+// Exclusive fullscreen: exclusive_mode() on the default adapter. *available says whether a display mode could be
+// read; when false the caller must fall back to a window, not keep a fullscreen style on a windowed device.
+D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp, bool *available)
 {
     D3DDISPLAYMODEEX dm = exclusive_mode();
+    if (available) *available = dm.Width != 0;
     if (!dm.Width) return pp;
     pp.Windowed = FALSE;
     pp.BackBufferWidth = dm.Width;
@@ -574,12 +579,23 @@ D3DPRESENT_PARAMETERS exclusive_params(D3DPRESENT_PARAMETERS pp)
     // With one copied back buffer Present waited for each frame to be shown before the next could start, so on the
     // Iris Xe at 60 Hz the game ran at 78% (r361); two flipped buffers let the next frame start meanwhile. A flipped
     // buffer is shown whole: the frame fills the screen here (frame_layout), and present() gives no rectangle.
+    // Both vsync states use the flip chain; PresentationInterval is the only difference (ONE waits, IMMEDIATE does not).
     pp.PresentationInterval = g_cfg.vsync ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
-    if (g_cfg.vsync) {
-        pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-        pp.BackBufferCount = 2;
-    }
+    pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    pp.BackBufferCount = 2;
     return pp;
+}
+
+// The presentation path is a property of the device that was actually created, not of the Alt+Enter request.
+static const char *presentation_name(bool flip) { return flip ? "flip" : "copy (window)"; }
+
+// Direct3D 9 has no query for the swap effect it actually made. At least say when the accepted parameters are not the
+// exclusive flip chain this code assumes; a silent copy chain would make the state lie.
+static void check_exclusive_present(const D3DPRESENT_PARAMETERS &pp)
+{
+    if (!pp.Windowed && !(pp.SwapEffect == D3DSWAPEFFECT_DISCARD && pp.BackBufferCount >= 2))
+        logf("host: exclusive device accepted %ux%u with swap effect %u / %u buffers, not the flip chain", pp.BackBufferWidth,
+             pp.BackBufferHeight, (unsigned)pp.SwapEffect, pp.BackBufferCount);
 }
 
 
@@ -629,7 +645,14 @@ bool create_device_here()
     // (exclusive_params).
     pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
     g_pp = pp; // the windowed parameters: Reset goes back to them (reset_device)
-    if (g_exclusive_now) pp = exclusive_params(pp);
+    bool exclusive_ok = true;
+    if (g_window.requested_exclusive()) pp = exclusive_params(pp, &exclusive_ok);
+    if (g_window.requested_exclusive() && !exclusive_ok) {
+        // No display mode to switch to: a fullscreen style on a windowed device is the trap this state exists to avoid.
+        logf("host: exclusive display mode not available; starting windowed");
+        g_window.request(WindowMode::Windowed);
+        g_window.restyle_pending = true;
+    }
     // FPU_PRESERVE: the game's x87 math must keep its precision; MULTITHREADED: loader threads may call in.
     // Not NOWINDOWCHANGES: with it the runtime does not minimise the window and bring it back around Alt+Tab in
     // exclusive fullscreen (r279). The window is restyled only while the device is windowed instead.
@@ -658,11 +681,13 @@ bool create_device_here()
     g_dev = g_devex;
     g_bb_w = (int)pp.BackBufferWidth; // exclusive: the display mode's size
     g_bb_h = (int)pp.BackBufferHeight;
-    g_dev_exclusive = !pp.Windowed;
+    g_window.commit(pp);
+    check_exclusive_present(pp);
     if (!pp.Windowed)
-        logf("host: exclusive fullscreen %ux%u at %u Hz, vsync %s", pp.BackBufferWidth, pp.BackBufferHeight, pp.FullScreen_RefreshRateInHz,
-             pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
+        logf("host: exclusive fullscreen %ux%u at %u Hz, vsync %s, present %s", pp.BackBufferWidth, pp.BackBufferHeight, pp.FullScreen_RefreshRateInHz,
+             pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off", presentation_name(g_window.present_flip()));
     else if (g_cfg.vsync) logf("host: windowed: vsync is not used (the desktop compositor shows the frames without tearing)");
+    if (pp.Windowed) logf("host: present %s", presentation_name(g_window.present_flip()));
     if (g_cfg.api_count) apicount::install(g_dev);
     D3DADAPTER_IDENTIFIER9 id = {};
     g_d3d->GetAdapterIdentifier(D3DADAPTER_DEFAULT, 0, &id);
@@ -696,7 +721,7 @@ bool create_device_here()
         }
     }
     logf("host: MSAA sample counts %s", ms.empty() ? "none" : ms.c_str());
-    logf("host: Direct3D 9Ex device, back buffer %dx%d on '%s'; INTZ depth textures %s", g_bb_w, g_bb_h, id.Description,
+    logf("host: Direct3D 9Ex device, back buffer %dx%d on '%s'; INTZ depth textures %s", g_bb_w.load(), g_bb_h.load(), id.Description,
          g_intz ? "supported" : "NOT supported (depth-buffer reads return zero)");
     xd3d::prewarm_shaders(g_dev); // the cached shaders' objects now, not in the frame that first draws with them
     if (g_cfg.compile_port_shaders) xd3d::compile_all_port_shaders(); // tests: for the shader seed (device.cpp)
@@ -704,6 +729,8 @@ bool create_device_here()
     xd3d::texture_pool_start(g_dev); // textures made ahead by shape, not in the frame an area first shows them
     if (g_cfg.ring_rotate) xd3d::draw_ring_prepare(g_dev); // the draw ring sets made and written now (draw.cpp)
     xd3d::drawwarm_replay(g_dev); // the recorded draw states drawn once, for the driver to build them now (drawwarm.cpp)
+    // restyle_windowed clears the flag only once the placement succeeded (exchanged here first, a failure lost it)
+    if (!g_window.actual_exclusive() && g_window.restyle_pending) restyle_windowed();
     return true;
 }
 
@@ -722,7 +749,14 @@ bool recreate_device_here()
 
 bool reset_device_here()
 {
-    D3DPRESENT_PARAMETERS pp = g_exclusive_now ? exclusive_params(g_pp) : g_pp;
+    bool exclusive_ok = true;
+    D3DPRESENT_PARAMETERS pp = g_window.requested_exclusive() ? exclusive_params(g_pp, &exclusive_ok) : g_pp;
+    if (g_window.requested_exclusive() && !exclusive_ok) {
+        logf("host: exclusive display mode not available; falling back to a window");
+        g_window.request(WindowMode::Windowed);
+        g_window.restyle_pending = true;
+        pp = g_pp;
+    }
     D3DDISPLAYMODEEX mode = exclusive_mode();
     HRESULT hr = g_devex->ResetEx(&pp, pp.Windowed ? nullptr : &mode);
     if (FAILED(hr)) {
@@ -735,10 +769,13 @@ bool reset_device_here()
     }
     g_bb_w = (int)pp.BackBufferWidth; // the exclusive mode's size can differ from the largest monitor's
     g_bb_h = (int)pp.BackBufferHeight;
-    g_dev_exclusive = !pp.Windowed;
-    logf("host: device reset, %s %ux%u, vsync %s", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth, pp.BackBufferHeight,
-         pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off");
-    if (pp.Windowed && g_restyle_pending.exchange(false)) restyle_windowed(); // now the window can change
+    const bool was_exclusive = g_window.actual_exclusive();
+    g_window.commit(pp);
+    if (pp.Windowed && was_exclusive) g_window.restyle_pending = true; // leaving exclusive always restores the frame
+    check_exclusive_present(pp);
+    logf("host: device reset, %s %ux%u, vsync %s, present %s", pp.Windowed ? "windowed" : "exclusive fullscreen", pp.BackBufferWidth,
+         pp.BackBufferHeight, pp.PresentationInterval == D3DPRESENT_INTERVAL_ONE ? "on" : "off", presentation_name(g_window.present_flip()));
+    if (pp.Windowed && g_window.restyle_pending) restyle_windowed(); // now the window can change; it clears the flag on success
     return true;
 }
 
@@ -950,7 +987,7 @@ bool present_stretch()
         }
         g_stretch_w = g_frame_w;
         g_stretch_h = g_frame_h;
-        logf("host: exclusive fullscreen at the window size: the %dx%d frame scaled over %dx%d", g_frame_w, g_frame_h, g_bb_w, g_bb_h);
+        logf("host: exclusive fullscreen at the window size: the %dx%d frame scaled over %dx%d", g_frame_w, g_frame_h, g_bb_w.load(), g_bb_h.load());
     }
     RECT fr = {0, 0, g_frame_w, g_frame_h};
     bool ok = SUCCEEDED(g_dev->StretchRect(bb, &fr, g_stretch, nullptr, D3DTEXF_NONE)) &&
@@ -971,8 +1008,9 @@ HRESULT present()
     // they piled up in the driver (32 frames and more, r528) and the first Present after the window came back took
     // 1-10 s, a black window with the game stopped (the user, 2026-10-24, borderless; r514-r518). Under plain Direct3D 9
     // an exclusive device was lost there and its Reset dropped the pile; a 9Ex device is not lost.
-    bool whole = g_dev_exclusive && g_frame_w > 0 && g_frame_h > 0 && (g_frame_w < g_bb_w || g_frame_h < g_bb_h) && present_stretch();
-    if (g_exclusive_now && g_cfg.vsync) return g_dev->Present(nullptr, nullptr, nullptr, nullptr); // flipped (exclusive_params)
+    bool whole = g_window.actual_exclusive() && g_frame_w > 0 && g_frame_h > 0 && (g_frame_w < g_bb_w || g_frame_h < g_bb_h) && present_stretch();
+    // The device decides this, not the Alt+Enter request: until ResetEx succeeds, Present still uses the old device.
+    if (g_window.present_flip()) return g_dev->Present(nullptr, nullptr, nullptr, nullptr);
     RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w, g_frame_h && !whole ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)
 }

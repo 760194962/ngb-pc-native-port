@@ -3,9 +3,54 @@
 
 #include "common.h"
 
+#include <atomic>
+#include <cstdint>
+#include <mutex>
 #include <d3d9.h>
 
 namespace host3d {
+
+// One state machine for the window and the device: what was requested, what actually exists, how it presents,
+// and the Reset queue that changes one into the other. (Focus was recorded here once and never read: the mouse capture
+// follows the foreground window, host.cpp WM_APP_CAPTURE; removed in 2.2.37.9.)
+enum class WindowMode : uint8_t { Windowed, Exclusive };
+enum class PresentationState : uint8_t { WindowedCopy, ExclusiveCopy, ExclusiveFlip };
+
+struct WindowState {
+    std::atomic<WindowMode> requested{WindowMode::Windowed};
+    std::atomic<PresentationState> presentation{PresentationState::WindowedCopy};
+    std::atomic<bool> fullscreen{false}; // the window covers a monitor (borderless or exclusive)
+    std::atomic<bool> restyle_pending{false};
+
+    // Reset lifecycle, shared with d3d/device.cpp (its requests come from several threads; Swap consumes them).
+    std::atomic<uint32_t> reset_requested{0}; // the request number; 0 = none
+    std::atomic<uint32_t> reset_seq{0};       // the last request's number
+    std::atomic<const char *> reset_reason{""};
+    std::atomic<bool> device_lost{false};
+    std::atomic<uint64_t> lost_since{0};
+    mutable std::mutex reset_lock; // makes reset_reason and reset_requested one publication
+
+    bool requested_exclusive() const { return requested.load() == WindowMode::Exclusive; }
+    bool actual_exclusive() const { return presentation.load() != PresentationState::WindowedCopy; }
+    bool present_flip() const { return presentation.load() == PresentationState::ExclusiveFlip; }
+    bool is_fullscreen() const { return fullscreen.load(); }
+    void set_fullscreen(bool on) { fullscreen = on; }
+    void request(WindowMode m) { requested = m; }
+    bool take_reset() { return reset_requested.exchange(0) != 0; }
+    const char *reset_reason_text() const {
+        std::lock_guard<std::mutex> lock(reset_lock);
+        return reset_reason.load();
+    }
+    void request_reset(const char *why);
+    void commit(const D3DPRESENT_PARAMETERS &pp) {
+        // One store: actual_exclusive() and present_flip() must never see two different swapchains.
+        presentation = pp.Windowed ? PresentationState::WindowedCopy
+                       : pp.SwapEffect == D3DSWAPEFFECT_DISCARD && pp.BackBufferCount >= 2 ? PresentationState::ExclusiveFlip
+                                                                                           : PresentationState::ExclusiveCopy;
+    }
+};
+
+WindowState &window_state();
 
 // Starts the UI thread; returns once the window exists. A zero width fits the largest aspect_w:aspect_h client
 // area on the screen; a zero height alone follows from the width and the aspect.
@@ -27,7 +72,7 @@ bool mouse_captured();
 void request_capture(bool on); // from any thread; capturing needs the window in front
 void set_fullscreen(bool on);  // from any thread (PC SETTINGS > VIDEO > FULLSCREEN)
 bool fullscreen();
-bool exclusive(); // exclusive fullscreen is on (or being entered)
+bool exclusive(); // the device that exists now is exclusive fullscreen (not merely requested)
 void mouse_take(int *dx, int *dy, int *wheel);
 int mouse_buttons();
 IDirect3DDevice9 *dev(); // an IDirect3DDevice9Ex (create_device)

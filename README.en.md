@@ -65,29 +65,19 @@ can be install from the launcher's Install page.
 
 ## Smoothness settings
 
-The goal is a smooth experience in every setup; choose the one that matches your display and habits.
+The game's speed is right with any setting (a fixed 59.94 Hz clock; a 60 Hz monitor in a window / borderless follows the
+desktop's composition). The settings below only change how evenly frames are shown and whether the picture tears.
 
-**High refresh display, exclusive fullscreen (recommended)**
+| Monitor | Display mode | V-Sync | 60 Hz with V-Sync | Steady game speed | Low-latency present |
+|---|---|---|---|---|---|
+| G-SYNC / FreeSync on | Exclusive fullscreen | On or off | Off | Off | Off |
+| 60 Hz | Windowed / borderless | No effect | No effect | Off | Off |
+| 120 / 240 Hz | Exclusive fullscreen | On | Off | No effect | Off |
+| 144 / 165 Hz | Exclusive fullscreen | On | On | No effect | Off |
 
-- 120 / 240 Hz: Steady game speed on, V-Sync on, "60 Hz with V-Sync" off, Low-latency present off.
-- 144 / 165 Hz: Steady game speed on, V-Sync on, "60 Hz with V-Sync" on, Low-latency present off.
-
-**60 Hz display, exclusive fullscreen**
-
-- Display: exclusive fullscreen
-- Steady game speed: on
-- V-Sync: on
-- Low-latency present: off
-- "60 Hz with V-Sync": off (it does nothing on a 60 Hz display)
-
-**60 Hz display, windowed / borderless**
-
-- Display: windowed or borderless
-- Steady game speed: off
-- V-Sync: on
-- "60 Hz with V-Sync": off
-
-Windowed / borderless goes through Windows' desktop composition (DWM) and does not switch the display mode.
+Known: exclusive fullscreen with V-Sync shows one frame a refresh longer about every 17 s (about 8 s at 120 Hz, 4 s at
+240 Hz); at 120 Hz and above a window / borderless is clearly uneven: use exclusive fullscreen or set Windows' refresh rate to
+60 Hz. Details in `Smoothness-Settings-EN.md` in the package.
 
 ## Screenshots
 
@@ -316,6 +306,31 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `args = --vsh-record "<game folder>\vsh_record.bin" --hitch-detail`, play, then give the author `cache\shaders\`,
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
+
+### 2.2.37.9: the READMEs back in the package, accurate notes, Alt+Enter remembers exclusive fullscreen
+
+- **`README.md` / `README.en.md` are in the package again**: 2.2.37.4-2.2.37.8 shipped without them (adding the smoothness
+  guides replaced the line that copied them). The packaging script now checks the package's 14 files and stops on any
+  missing or extra one.
+- **The smoothness guides, the READMEs' "Smoothness settings" and the launcher's notes rewritten to match the code**: the game's
+  speed is right with any setting; Steady game speed only affects a 60 Hz monitor in a window / borderless; V-Sync only works
+  in exclusive fullscreen; exclusive fullscreen with V-Sync shows one frame a refresh longer about every 17 s (8 s at 120 Hz,
+  4 s at 240 Hz); a window / borderless at 120 Hz and above is uneven (known). Claims no longer true since 2.2.37.6 are gone
+  (kernel vblank dropping to 47, 120 / 240 Hz showing each frame exactly 2 / 4 refreshes).
+- **Alt+Enter remembers exclusive fullscreen**: leave exclusive fullscreen for a window and close the game, and the next
+  Alt+Enter goes back to exclusive fullscreen (it went borderless). New `fullscreen_kind` in `black.ini`; the launcher writes
+  it with a borderless / exclusive choice.
+- **A setting changed and changed back within one run is saved right**: window -> fullscreen -> window and close used to leave
+  `black.ini` at fullscreen, so the next start was fullscreen.
+- Small fixes: a failed window restyle no longer loses its pending flag; the focus state that was written but never read is gone.
+
+### 2.2.37.8: window / exclusive state cleanup
+
+- window / exclusive / focus / reset live in one `WindowState`;
+- borderless fullscreen is no longer inferred from `WS_CAPTION` only;
+- leaving exclusive with Alt+Enter now saves the windowed choice;
+- an unavailable exclusive display mode falls back to a window; a failed `SetWindowPos` rolls back;
+- exclusive + vsync off also uses `DISCARD / 2 buffers / flip`; window / borderless still use `COPY + DWM`.
 
 ### 2.2.37.7: refresh display-60 immediately on Alt+Enter
 
