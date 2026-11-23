@@ -204,6 +204,10 @@ void settings_save()
             if (file[i][0] != '#' && sscanf_s(file[i].c_str(), " %63[^= ]", key, (unsigned)sizeof key) == 1 && k == key) return (int)i;
         return -1;
     };
+    // The base follows what this run last wrote: a setting changed and changed back within one run (Alt+Enter to
+    // fullscreen and back to a window) was saved at the first change, then matched the value read at the start and was
+    // not written again, so the file kept the in-between value (black.ini said fullscreen while the game closed
+    // windowed; 2026-11-23, the 2.2.37.9 Alt+Enter test).
     for (auto &kv : all_lines()) {
         if (cli(kv.first.c_str())) continue;
         int at = find(kv.first);
@@ -211,6 +215,7 @@ void settings_save()
         bool changed = base == g_base.end() || base->second != kv.second;
         if (at < 0) file.push_back(kv.second);
         else if (changed) file[at] = kv.second;
+        if (at < 0 || changed) g_base[kv.first] = kv.second;
     }
     if (_wfopen_s(&f, ini_file().c_str(), L"w") || !f) return;
     for (const std::string &l : file) fputs(l.c_str(), f);
