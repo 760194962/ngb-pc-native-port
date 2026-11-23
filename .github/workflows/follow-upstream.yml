@@ -2,7 +2,9 @@
 # "-fork1" release for, upstream's release tag is merged into main, the port is built and packed
 # (tools/make_release.ps1), and a release v<version>-fork1 is published with the two zips, the menu patches and the
 # notes carried over from the previous fork release (its version numbers replaced). Older releases are kept.
-# A merge conflict or a failed build stops the run before anything is pushed or published; GitHub mails the failure.
+# The merge lays the fork's own changes onto upstream's tree (see that step), so it fails only where upstream changed
+# a line the fork changed too; then the run's summary lists the conflicts. A failed merge or build stops the run
+# before anything is pushed or published; GitHub mails the failure.
 name: Follow upstream releases
 
 on:
@@ -51,16 +53,45 @@ jobs:
         if: steps.up.outputs.todo == '1'
         shell: bash
         run: |
+          # main is upstream's tree plus the fork's own changes. Those are main against the upstream commit merged last
+          # (the second parent of the latest "Merge upstream" commit), laid onto the new release's tree, so upstream
+          # rewriting its history or moving a tag only matters where it touches a line the fork changed too. The result
+          # is committed as a merge of the release, so the next run starts from it.
           tag='${{ steps.up.outputs.tag }}'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git remote add upstream "https://github.com/$UPSTREAM.git"
           git fetch --no-tags upstream "refs/tags/$tag:refs/tags/upstream-$tag"
-          if ! git merge --no-edit -m "Merge upstream $tag" "upstream-$tag"; then
-            git merge --abort
-            echo "::error::Upstream $tag does not merge cleanly into main: merge it by hand, then run this workflow again"
+          if git merge-base --is-ancestor "upstream-$tag" HEAD; then echo "Upstream $tag is in main already"; exit 0; fi
+          base=$(git log --first-parent --merges -1 --format=%P --grep='^Merge upstream' HEAD | cut -d' ' -f2)
+          if [ -z "$base" ]; then echo "::error::no earlier upstream merge on main"; exit 1; fi
+          echo "The fork's changes: main against $(git log -1 --format='%h %s' "$base")"
+          git diff --binary "$base" HEAD > "$RUNNER_TEMP/fork.diff"
+          git diff --stat "$base" HEAD
+          git merge --no-commit -s ours "upstream-$tag" > /dev/null
+          git read-tree -u --reset "upstream-$tag"
+          if ! git apply -3 --index "$RUNNER_TEMP/fork.diff" > "$RUNNER_TEMP/apply.log" 2>&1; then
+            cat "$RUNNER_TEMP/apply.log"
+            {
+              echo "## Upstream $tag conflicts with the fork's own changes"
+              echo
+              echo "Upstream changed lines the fork changed too. Resolve by hand (upstream's tree plus the fork's"
+              echo "changes, as a merge of upstream-$tag), push main, then run this workflow again."
+              echo
+              echo '### Files'
+              git diff --name-only --diff-filter=U | sed 's/^/- /'
+              echo
+              echo '### Conflicts'
+              echo '```diff'
+              git diff --diff-filter=U | head -c 60000
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Upstream $tag conflicts with the fork's own changes in: $(git diff --name-only --diff-filter=U | paste -sd' ') (see the run's summary)"
             exit 1
           fi
+          git commit -q --no-edit -m "Merge upstream $tag"
+          echo "Merged: the fork's changes against upstream $tag"
+          git diff --stat "upstream-$tag" HEAD
 
       - name: Build
         if: steps.up.outputs.todo == '1'
