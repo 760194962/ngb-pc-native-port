@@ -1,8 +1,8 @@
 # Packs a release zip: dist\ngb-hurricane-pc-<version>-win32.zip with one folder, NGB-Hurricane\, holding the
 # launcher (Ninja Gaiden Black&2004 PC Launcher.exe, the way in: it installs the game from the player's own image and
-# starts it), the game programs Ninja Gaiden Black.exe and Ninja Gaiden.exe (2004), blackrt.dll, the Chinese and English
-# smoothness guides,
-# and LICENSE.txt. The launcher's background art is inside its
+# starts it), the game programs Ninja Gaiden Black.exe and Ninja Gaiden.exe (2004), blackrt.dll, README.md, README.en.md,
+# the Chinese and English smoothness guides and LICENSE.txt (2.2.37.4-2.2.37.8 shipped without the READMEs: the guides'
+# line had replaced theirs; the file list is checked below). The launcher's background art is inside its
 # .exe and both programs carry the Dragon Sword icon (launcher/art: the exceptions to "no game assets", README, Legal).
 # The launcher installs the game into game\ inside that folder by default, where the game program also looks when it
 # is double-clicked; what the programs write stays there too (savedata\, black.ini, cache\). The script checks that
@@ -91,10 +91,22 @@ $sym = "$stage-symbols"
 $out = "$stage\NGB-Hurricane"
 New-Item -ItemType Directory -Force $out, $sym | Out-Null
 Copy-Item -LiteralPath (@($launcher) + $games + @("$Bin\blackrt.dll", $seed, $texseed, $drawseed, $vshseed, $cputexseed)) $out
+Copy-Item "$root\README.md", "$root\README.en.md" $out
 Copy-Item "$root\project\docs\18_Smoothness_Settings_CN.md" "$out\Smoothness-Settings-CN.md"
 Copy-Item "$root\project\docs\18_Smoothness_Settings_EN.md" "$out\Smoothness-Settings-EN.md"
 Copy-Item "$root\LICENSE" "$out\LICENSE.txt"
 Copy-Item "$Bin\blackrt.pdb", "$Bin\blackrt.map" $sym
+
+# The package's file list, checked: a change to the copies above (2.2.37.4 lost the READMEs that way) stops here.
+$expected = @('blackrt.dll', 'cpu_textures.bin', 'draw_states.bin', 'LICENSE.txt', 'Ninja Gaiden Black&2004 PC Launcher.exe',
+    'Ninja Gaiden Black.exe', 'Ninja Gaiden.exe', 'README.en.md', 'README.md', 'shader_seed.bin', 'Smoothness-Settings-CN.md',
+    'Smoothness-Settings-EN.md', 'texture_pool.txt', 'vertex_programs.bin') | Sort-Object
+$staged = @(Get-ChildItem -LiteralPath $out -File | ForEach-Object Name) | Sort-Object
+$diff = Compare-Object $expected $staged
+if ($diff) {
+    Remove-Item -Recurse -Force $stage, $sym
+    throw "the package's files differ from the list: $(($diff | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }) -join ', ')"
+}
 
 Compress-Archive -Path "$stage\*" -DestinationPath "$dist\$name.zip" -Force
 Compress-Archive -Path "$sym\*" -DestinationPath "$dist\$name-symbols.zip" -Force
