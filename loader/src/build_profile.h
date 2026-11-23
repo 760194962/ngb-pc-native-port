@@ -133,13 +133,13 @@ inline const BuildProfile kProfileNgbBasicX2 = ngb_family(
     "NINJA GAIDEN BLACK va-zh-x2 (basic)", "00cef52546618eb0149d7895f9042403e95f361b5483aac38933e799c67a50e1", 41,
     L"Ninja Gaiden Black[\u4E2D\u82F1\u6587\u7248]", true);
 
-// The programs Ninja Gaiden Black x2.1 launches (docs/06 of the port project): the NES trilogy of the original release
+// The programs Ninja Gaiden Black x2.1 launches (docs/06 of the port project): the arcade Ninja Gaiden of the original release
 // (NinjaTomoe.xbe Japanese, NinjaTrilogy.xbe US; XDK 5849) and the SNES trilogy added by x2.1 (NinjaFCJ.xbe Japanese,
 // NinjaFCU.xbe US; XDK 5659). Plain (non-LTCG) D3D8 / DSOUND: the HLE tables come from XbSymbolDatabase names
 // (tools/gen_aux_tables.py). Initializer tables read from each XAPI's _rtinit / _cinit; rdtsc only in QueryPerformanceCounter.
 inline const uint32_t kTomoeQpc[] = {0x0006CD14};
 inline const BuildProfile kProfileNinjaTomoe = {
-    "NINJA GAIDEN BLACK x2.1: NinjaTomoe.xbe (NES trilogy, Japanese)",
+    "NINJA GAIDEN BLACK x2.1: NinjaTomoe.xbe (arcade Ninja Gaiden, Japanese)",
     "2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff",
     0x5443000D, 31, false,
     {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
@@ -147,7 +147,7 @@ inline const BuildProfile kProfileNinjaTomoe = {
     0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTomoe",
 };
 inline const BuildProfile kProfileNinjaTrilogy = {
-    "NINJA GAIDEN BLACK x2.1: NinjaTrilogy.xbe (NES trilogy, US)",
+    "NINJA GAIDEN BLACK x2.1: NinjaTrilogy.xbe (arcade Ninja Gaiden, US)",
     "31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621",
     0x5443000D, 31, false,
     {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
@@ -155,9 +155,9 @@ inline const BuildProfile kProfileNinjaTrilogy = {
     0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTrilogy",
 };
 
-// The US release's two NES programs with the retail certificate (4 bytes at 0x220-0x224, as default.xbe above).
+// The US release's two arcade programs with the retail certificate (4 bytes at 0x220-0x224, as default.xbe above).
 inline const BuildProfile kProfileNinjaTomoeRetail = {
-    "NINJA GAIDEN BLACK NTSC-U: NinjaTomoe.xbe (NES trilogy, Japanese; retail certificate)",
+    "NINJA GAIDEN BLACK NTSC-U: NinjaTomoe.xbe (arcade Ninja Gaiden, Japanese; retail certificate)",
     "8d761be1789bb9d000d561debab5bb6c8d7be376d7dec452f6020043e0b653f8",
     0x5443000D, 31, false,
     {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
@@ -165,7 +165,7 @@ inline const BuildProfile kProfileNinjaTomoeRetail = {
     0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTomoe",
 };
 inline const BuildProfile kProfileNinjaTrilogyRetail = {
-    "NINJA GAIDEN BLACK NTSC-U: NinjaTrilogy.xbe (NES trilogy, US; retail certificate)",
+    "NINJA GAIDEN BLACK NTSC-U: NinjaTrilogy.xbe (arcade Ninja Gaiden, US; retail certificate)",
     "c86ed2baa91f204b176b7329bc087ed499b1ecd4146a62bfc493a161a1b44330",
     0x5443000D, 31, false,
     {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},

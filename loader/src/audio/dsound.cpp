@@ -9,6 +9,7 @@
 #include "audio/hrtf.h"
 #include "audio/reverb.h"
 #include "audio/output.h"
+#include "build_profile.h"
 #include "d3d/dispatch.h"
 #include "kernel/kexports.h"
 #include "xthread.h"
@@ -745,6 +746,7 @@ void mix_report(const float *out, uint32_t samples)
 // rear pair as one band-limited surround channel 90 degrees from the front, + in Lt and - in Rt, the centre to both at
 // -3 dB, no LFE. Before 2.2.21 this was a plain matrix (Lt = L + 0.707 C - 0.707 S, Rt = R + 0.707 C + 0.707 S).
 bool g_mix6;     // 5.1 mix
+float g_makeup = 1.0f; // the output's gain: 1, or the SNES trilogy's (worker)
 uint32_t g_out_ch = 2; // what goes out: 6 for Dolby Digital / DTS
 epds::Encoder g_ds_enc; // Dolby Surround (g_mix6 with two out)
 
@@ -851,7 +853,7 @@ void mix_block(float *out, std::vector<Completion> &done)
     // This was a soft knee above 0.8, which also bent levels the Xbox plays as they are; in chapter 1 0.002% of the
     // samples pass 0.8 and none pass 1 (r237, docs/07 #13). The mixer log keeps the counts.
     for (uint32_t i = 0; i < samples; i++) {
-        float x = out[i], a = fabsf(x);
+        float x = out[i] * g_makeup, a = fabsf(x);
         g_pre_peak = std::max(g_pre_peak, a);
         g_pre_over_knee += a > 0.8f;
         g_pre_over_full += a > 1.0f;
@@ -879,6 +881,18 @@ void __stdcall worker(void *)
     g_ds_enc.reset();
     lagrange_init();
     att_init();
+    // The SNES trilogy (x2.1's NinjaFCJ / NinjaFCU, Ninja Gaiden 2004's NinjaTomoe / NinjaTrilogy; one code, these tables)
+    // never calls SetMixBinHeadroom, so its bins keep the library's 1 (6 dB down, also on the console: the library
+    // writes all 32 to the APU at start, x2.1 0x37EAB4), and it sets its one voice to -443. Measured 2026-11-23 (WASAPI
+    // loopback, first stage, 20 s): xemu -31.9 dBFS RMS, the port -32.5, Black's chapter 1 -20.9 - barely audible next
+    // to the game. By the user's choice it plays 10.5 dB up, the bins' 6 dB and the voice's 4.43 dB given back: about
+    // Black's level, a deliberate change from the console.
+    const char *aux = g_cfg.profile ? g_cfg.profile->aux : nullptr;
+    if (aux && (!strcmp(aux, "NinjaFCJ") || !strcmp(aux, "NinjaFCU"))) {
+        g_makeup = 2.0f * powf(10.0f, 443.0f / 2000.0f);
+        logf("[dsound] SNES trilogy: output %.1f dB up (the bins' headroom and the voice's -443 given back)",
+             20.0f * log10f(g_makeup));
+    }
     logf("[dsound] audio: %s (XC_AUDIO 0x%x)", g_out_ch == 6 ? (g_cfg.audio_dts ? "DTS, 5.1 out" : "Dolby Digital, 5.1 out")
                                      : g_mix6 ? "Dolby Surround (the EP's encoder)" : g_cfg.audio_mode == 1 ? "mono" : "stereo",
          ((uint32_t)g_cfg.audio_mode | (g_cfg.audio_ac3 ? 0x10000u : 0u) | (g_cfg.audio_dts ? 0x20000u : 0u)));

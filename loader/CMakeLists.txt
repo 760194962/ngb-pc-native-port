@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 if(POLICY CMP0184)
   cmake_policy(SET CMP0184 NEW) # MSVC_RUNTIME_CHECKS property
 endif()
-project(black_loader VERSION 2.2.37.9 LANGUAGES C CXX) # the release number (About box, first log line); a 4th part for a fix release
+project(black_loader VERSION 2.2.37.11 LANGUAGES C CXX) # the release number (About box, first log line); a 4th part for a fix release
 if(PROJECT_VERSION_TWEAK STREQUAL "")
   set(NGB_VERSION_TWEAK 0)
 else()
@@ -59,6 +59,7 @@ add_library(blackrt SHARED
   src/input/autoaim.cpp
   src/input/bindings.cpp
   src/input/padkeys.cpp
+  src/input/mouse.cpp
   src/input/movies.cpp
   src/audio/ep_surround.cpp
   src/audio/gp_effects.cpp

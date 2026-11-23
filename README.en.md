@@ -9,7 +9,8 @@ The game program (`Ninja Gaiden Black.exe`; for 2004 `Ninja Gaiden.exe`) loads y
 Direct3D 8, DirectSound and the other system parts are reimplemented on the PC by the loader (HLE). The game code is
 not interpreted instruction by instruction, and it is never modified on disk.
 
-This project is a fork of [black-pc](https://github.com/Spark198rus/black-pc) (the native port of BLACK); it adds
+This project is a fork of [black-pc](https://github.com/Spark198rus/black-pc), the native port of BLACK (Chinese
+name 《黑煞》: Criterion / EA's 2006 first-person shooter, **not Ninja Gaiden Black**); it adds
 support for the Ninja Gaiden main program and the programs it launches to that loader. The original BLACK NTSC-U
 support is kept.
 
@@ -306,6 +307,32 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `args = --vsh-record "<game folder>\vsh_record.bin" --hitch-detail`, play, then give the author `cache\shaders\`,
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
+
+### 2.2.37.11: the mouse hidden from the start, Esc lets go of it
+
+- **The game takes the mouse when it starts**: in a window, borderless or fullscreen alike the cursor goes at once, no
+  click needed first. Also when the game goes into the SNES trilogy, the arcade game or the Xbox dashboard (each a new
+  program).
+- **Esc lets go of the mouse**: in Ninja Gaiden Black, Ninja Gaiden 2004, the SNES trilogy and the dashboard. A click in
+  the picture takes it back; that click does not reach the game.
+- Otherwise as before: Alt+Tab or minimizing lets go, and a click in the picture takes it back; press Esc before moving the
+  window.
+- The mouse code is one module now (`input/mouse`), not spread over the window, the key bindings and the input poll. Mouse
+  buttons held as the game takes the mouse reach the game only once released (it was the left button only).
+- The READMEs say that BLACK, the game upstream black-pc ports, is Criterion / EA's 2006 shooter (Chinese name 《黑煞》), not
+  Ninja Gaiden Black.
+
+### 2.2.37.10: the SNES trilogy louder, no white dots under the main menu's letters
+
+- **The SNES trilogy plays about 10 dB louder** (Black Hurricane's and Ninja Gaiden 2004's): the original SNES programs are
+  this quiet themselves (measured the same in xemu, about -32 dBFS, some 11 dB under the main game); now close to the main
+  game. Music and effects go up together, no clipping. A deliberate change from the console; the main games and the arcade
+  Ninja Gaiden are unchanged.
+- **No row of small white dots under the letters of the main menu and other screens** (since 1.1.10): with 2D quads snapped
+  to pixels (QuadSnap), linear filtering read the top of the next glyph in the font. A read now stays inside each quad's own
+  texture area; all text and icons drawn the same way are covered. The pause menu dagger's thin line stays gone. QuadSnap
+  now moves only the quads it can protect.
+- The log no longer calls Black's bundled arcade Ninja Gaiden "NES trilogy".
 
 ### 2.2.37.9: the READMEs back in the package, accurate notes, Alt+Enter remembers exclusive fullscreen
 
@@ -995,7 +1022,8 @@ See `LICENSE`.
 
 ## Thanks
 
-- [black-pc](https://github.com/Spark198rus/black-pc) (Spark198rus): the loader this project is built on.
+- [black-pc](https://github.com/Spark198rus/black-pc) (Spark198rus): the loader this project is built on, first a
+  native port of BLACK (2006 shooter, not Ninja Gaiden Black).
 - [ngbrecomp](https://github.com/gamboozino/ngbrecomp) (GPL-2.0): the D3D symbol table of the Ninja Gaiden main
   program; these approaches also follow it (each reimplemented in this project's own structure, no code copied; taken
   from its latest version at the time):

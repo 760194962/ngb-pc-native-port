@@ -36,7 +36,7 @@ enum class Edition { None, X21, X21Jp, BasicX2, Us, Ng04, NgbOther, Ng04Other };
 inline bool is_ng04(Edition e) { return e == Edition::Ng04 || e == Edition::Ng04Other; }
 
 // Whether dir holds a supported build: default.xbe and the programs it launches, with their known SHA-256 (the
-// Hurricane editions: four; the basic edition and the US release: the two NES trilogies). *detail: what was found (or
+// Hurricane editions: four; the basic edition and the US release: the two arcade programs). *detail: what was found (or
 // what is missing / different); *edition: which.
 bool check_game(const std::wstring &dir, std::wstring *detail, Edition *edition = nullptr);
 
