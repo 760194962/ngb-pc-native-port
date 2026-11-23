@@ -11,14 +11,14 @@
 namespace host3d {
 
 // One state machine for the window and the device: what was requested, what actually exists, how it presents,
-// whether it has focus, and the Reset queue that changes one into the other.
+// and the Reset queue that changes one into the other. (Focus was recorded here once and never read: the mouse capture
+// follows the foreground window, host.cpp WM_APP_CAPTURE; removed in 2.2.37.9.)
 enum class WindowMode : uint8_t { Windowed, Exclusive };
 enum class PresentationState : uint8_t { WindowedCopy, ExclusiveCopy, ExclusiveFlip };
 
 struct WindowState {
     std::atomic<WindowMode> requested{WindowMode::Windowed};
     std::atomic<PresentationState> presentation{PresentationState::WindowedCopy};
-    std::atomic<bool> focused{false};
     std::atomic<bool> fullscreen{false}; // the window covers a monitor (borderless or exclusive)
     std::atomic<bool> restyle_pending{false};
 
@@ -33,9 +33,7 @@ struct WindowState {
     bool requested_exclusive() const { return requested.load() == WindowMode::Exclusive; }
     bool actual_exclusive() const { return presentation.load() != PresentationState::WindowedCopy; }
     bool present_flip() const { return presentation.load() == PresentationState::ExclusiveFlip; }
-    bool is_focused() const { return focused.load(); }
     bool is_fullscreen() const { return fullscreen.load(); }
-    void focus(bool on) { focused = on; }
     void set_fullscreen(bool on) { fullscreen = on; }
     void request(WindowMode m) { requested = m; }
     bool take_reset() { return reset_requested.exchange(0) != 0; }

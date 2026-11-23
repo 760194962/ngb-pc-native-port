@@ -53,7 +53,7 @@ int g_aspect_w = 4, g_aspect_h = 3; // the picture's shape; the window keeps it 
 std::atomic<int> g_bb_w, g_bb_h; // host back buffer: the largest monitor, so any window size is drawn 1:1
 // Exclusive fullscreen (black.ini fullscreen = 2): the device runs with Windowed = FALSE at the desktop's display mode
 // while the window is fullscreen. Alt+Enter switches by a Reset at the next Swap (d3d/device.cpp recover_device).
-// One state machine owns the window: request, the device that actually exists, its presentation path and focus.
+// One state machine owns the window: request, the device that actually exists and its presentation path.
 // A request may lead the device by one Swap; Present and frame sizing follow the device, never the request.
 int g_frame_w, g_frame_h;           // the part of the back buffer the current frame uses
 std::atomic<int> g_out_w, g_out_h; // the window size as set (open_window): fullscreen's with black.ini fullscreen_res = window
@@ -301,7 +301,6 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         capture_mouse(true);
         return 0;
     case WM_ACTIVATE:
-        g_window.focus(LOWORD(wp) != WA_INACTIVE);
         if (LOWORD(wp) == WA_INACTIVE) capture_mouse(false);
         break;
     case WM_APP_DEVICE: // create_device, reset_device, test_cooperative_level: on this thread
@@ -318,11 +317,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                        : D3D_OK;
         }
     case WM_KILLFOCUS:
-        g_window.focus(false);
         capture_mouse(false);
-        break;
-    case WM_SETFOCUS:
-        g_window.focus(true);
         break;
     case WM_SETCURSOR:
         if (g_captured && LOWORD(lp) == HTCLIENT) {
@@ -377,7 +372,6 @@ DWORD WINAPI ui_thread(void *)
     RAWINPUTDEVICE mouse = {0x01, 0x02, 0, g_hwnd}; // generic desktop / mouse, while the window has focus
     if (!RegisterRawInputDevices(&mouse, 1, sizeof mouse)) logf("host: raw mouse input not available (%lu)", GetLastError());
     ShowWindow(g_hwnd, g_cfg.background ? SW_SHOWMINNOACTIVE : SW_SHOWNORMAL);
-    g_window.focus(!g_cfg.background && GetForegroundWindow() == g_hwnd);
     // In front of the other windows at every start, the bundled programs (SNES, arcade) included (the user,
     // 2026-10-22). Windows lets a program take the front only when the one in front allows it: the launcher and the
     // program that relaunches into another XBE call AllowSetForegroundWindow for the new process (kernel/k_misc.cpp).
@@ -735,7 +729,8 @@ bool create_device_here()
     xd3d::texture_pool_start(g_dev); // textures made ahead by shape, not in the frame an area first shows them
     if (g_cfg.ring_rotate) xd3d::draw_ring_prepare(g_dev); // the draw ring sets made and written now (draw.cpp)
     xd3d::drawwarm_replay(g_dev); // the recorded draw states drawn once, for the driver to build them now (drawwarm.cpp)
-    if (!g_window.actual_exclusive() && g_window.restyle_pending.exchange(false)) restyle_windowed();
+    // restyle_windowed clears the flag only once the placement succeeded (exchanged here first, a failure lost it)
+    if (!g_window.actual_exclusive() && g_window.restyle_pending) restyle_windowed();
     return true;
 }
 

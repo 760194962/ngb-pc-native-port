@@ -260,8 +260,8 @@ const Pair kText[(int)Str::Count] = {
     {L"单核最接近 Xbox，也最稳定。自动分配让游戏线程分到多个性能核上，但游戏的主要计算集中在一个线程，不会更快，实测还略慢一点（第一章约 0.5 毫秒），也可能出现原版没有的问题；遇到异常请改回单核。下次启动游戏时生效。",
      L"One core is closest to the Xbox and the most stable. Automatic spreads the game's threads over the performance cores, but most of its work is on one thread: no faster (about 0.5 ms a frame slower in chapter 1), and it may bring problems the console never had; if so, switch back. Applies from the next start."},
     {L"稳定游戏速度", L"Steady game speed"},
-    {L"CG、过场或战斗明显变快 / 变慢时打开；固定游戏时钟 59.94 Hz，不跟屏幕，不锁帧。下次启动生效。",
-     L"On when CG, cutscenes or combat clearly speed up or slow down. Fixed 59.94 Hz clock; no frame cap. Next start."},
+    {L"只影响 60 Hz 屏幕的窗口 / 无边框：游戏时钟改用固定 59.94 Hz，不跟桌面合成。游戏速度不稳时再开。下次启动生效。",
+     L"Only for a 60 Hz screen in a window / borderless: a fixed 59.94 Hz game clock, not the desktop's. On if the speed wavers. Next start."},
     {L"清理着色器缓存", L"Clear shader cache"},
     {L"删除着色器缓存。下次启动游戏会重新编译，可能需要多等一会儿。", L"Delete the shader cache. The next start will compile the shaders again and may take a little longer."},
     {L"删除启动器目录下的着色器缓存？下次启动游戏会重新编译着色器，可能需要多等一会儿。", L"Delete the shader cache in the launcher folder? The next start will compile the shaders again and may take a little longer."},
@@ -733,7 +733,7 @@ const Pair kText[(int)Str::Count] = {
      L"已知问题：有玩家在 60 Hz 显示器、集成显卡的电脑上反馈窗口模式下画面不如关闭时顺。原因推测是：画完立刻送出时，较重的一帧可能赶不上"
      L"桌面合成的截止时刻，上一帧会多显示一次，接着两帧挤进同一次合成、其中一帧没显示出来。上面的实测只量了游戏节奏和送出时刻，"
      L"没有量到屏幕上实际显示的帧，所以改回默认关闭，查清之前请按自己的感受决定开不开。\n\n"
-     L"如果真全屏或高刷下出现 CG 变速、45/24 帧、Alt+Tab 后卡顿，先关掉这项再测。",
+     L"它只改变画面送出的时刻，不改变游戏速度。",
      L"Experimental, off by default.\n\n"
      L"The game runs on the console's beat, 60 frames a second: each frame reads the pad at its start, is worked out and drawn, then waits for the next beat. "
      L"Before, a finished frame also waited for that beat before it went to the screen, a dozen milliseconds for nothing. On, it goes to the screen as soon as it is drawn "
@@ -744,28 +744,30 @@ const Pair kText[(int)Str::Count] = {
      L"it is drawn, a heavy frame can miss the desktop compositor's deadline, so the last picture is shown twice and then two frames land in one "
      L"composition, one of them never shown. The measurements above covered the game's pacing and when pictures were sent, not what the screen "
      L"showed, so it is off by default again; until this is sorted out, turn it on only if it feels right to you.\n\n"
-     L"If a cutscene's speed changes, you see 45/24 fps, or Alt+Tab is followed by stutter in exclusive fullscreen or at a high refresh rate, turn this off first."},
+     L"It only changes when a picture goes out, never the game's speed."},
     {L"垂直同步时用 60 Hz",
      L"60 Hz with V-Sync"},
-    {L"高刷新率屏幕上独占全屏开垂直同步时切到 60 Hz，画面不抖",
-     L"Exclusive fullscreen with V-Sync on a high-refresh screen switches to 60 Hz: no judder"},
+    {L"独占全屏开垂直同步时把屏幕切到 60 Hz，每帧显示一次（适合 144 / 165 Hz）",
+     L"Exclusive fullscreen with V-Sync switches the screen to 60 Hz, one refresh a frame (for 144 / 165 Hz)"},
     {L"默认开启。只在“独占全屏”并且打开了“垂直同步”时起作用；窗口、无边框全屏和关掉垂直同步时都不受影响。\n\n"
      L"游戏每秒 60 帧。屏幕是 120、144、165 Hz 这类刷新率时，垂直同步只能对齐屏幕的刷新：在 165 Hz 上每帧停 3、3、3、2 次刷新交替，"
-     L"也就是 18 ms 和 12 ms 来回变，画面一顿一顿的。开启后进入独占全屏时把屏幕换成同分辨率的 60 Hz（屏幕要支持），每帧正好显示一次，"
-     L"游戏的节拍也直接跟着屏幕的刷新走。\n\n"
+     L"也就是 18 ms 和 12 ms 来回变，画面一顿一顿的。开启后进入独占全屏时把屏幕换成同分辨率的 60 Hz（屏幕要支持），每帧显示一次。\n\n"
+     L"游戏时钟始终是固定的 59.94 Hz，不跟屏幕刷新；切到 60 Hz 不会改变游戏速度。也因为 59.94 和 60 差一点，大约每 17 秒会有一帧多显示一次"
+     L"（120 Hz 约每 8 秒、240 Hz 约每 4 秒一次）。开了 G-SYNC / FreeSync 时屏幕跟着画面刷新，没有这个问题。\n\n"
      L"代价：进出独占全屏（包括 Alt+Tab）要切换显示模式，会多黑约 1.5 秒；画面要等 60 Hz 的刷新才显示，比 165 Hz 时稍晚几毫秒。\n\n"
-     L"注意：120/180/240 Hz 本来就能整除 60，不需要切；只有 144/165 Hz 这类除不尽的才有均匀度收益。"
-     L"如果切到 60 Hz 后 30fps 过场变慢，或 Alt+Tab 后卡顿/掉帧，先关掉这项。\n\n"
+     L"适合 144 / 165 Hz 这类不能被 60 整除的屏幕。120 / 240 Hz 开不开差别不大：关闭时每帧显示 2 / 4 次刷新，同样有上面那种偶尔多一次的情况。\n\n"
      L"关闭则沿用桌面的刷新率（以前的方式）。",
      L"On by default. It only applies to exclusive fullscreen with V-Sync on; windows, borderless fullscreen and V-Sync off are not affected.\n\n"
      L"The game makes 60 frames a second. On a 120, 144 or 165 Hz screen V-Sync can only line them up with the screen's refreshes: at 165 Hz "
      L"each frame stays for 3, 3, 3, 2 refreshes in turn, 18 ms and 12 ms back and forth, and the picture judders. On, entering exclusive "
-     L"fullscreen switches the screen to 60 Hz at the same size (if the screen has it): each frame is shown exactly once, and the game's "
-     L"beat follows the screen's refresh.\n\n"
+     L"fullscreen switches the screen to 60 Hz at the same size (if the screen has it): each frame is shown once.\n\n"
+     L"The game's clock is always a fixed 59.94 Hz, not the screen's refresh; switching to 60 Hz does not change the game's speed. Because "
+     L"59.94 and 60 differ a little, about every 17 s one frame is shown one refresh longer (at 120 Hz about every 8 s, at 240 Hz every 4 s). "
+     L"With G-SYNC / FreeSync the screen refreshes with the picture and this does not happen.\n\n"
      L"Costs: entering or leaving exclusive fullscreen (Alt+Tab too) changes the display mode, about 1.5 s more of black screen; "
      L"a picture waits for a 60 Hz refresh, a few ms later than at 165 Hz.\n\n"
-     L"Note: 120/180/240 Hz divide 60 exactly and do not need the switch; only 144/165 Hz and similar uneven rates gain evenness. "
-     L"If a 30 fps cutscene gets slower after switching to 60 Hz, or Alt+Tab is followed by stutter, turn this off.\n\n"
+     L"Meant for screens 60 does not divide, such as 144 / 165 Hz. At 120 / 240 Hz it makes little difference: off, each frame stays for 2 / 4 "
+     L"refreshes, with the same occasional longer one.\n\n"
      L"Off keeps the desktop's refresh rate (the old way)."},
     {L"屏幕白光",
      L"Screen flashes"},
