@@ -259,6 +259,18 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.10: the SNES trilogy louder, no white dots under the main menu's letters
+
+- **The SNES trilogy plays about 10 dB louder** (Black Hurricane's and Ninja Gaiden 2004's): the original SNES programs are
+  this quiet themselves (measured the same in xemu, about -32 dBFS, some 11 dB under the main game); now close to the main
+  game. Music and effects go up together, no clipping. A deliberate change from the console; the main games and the arcade
+  Ninja Gaiden are unchanged.
+- **No row of small white dots under the letters of the main menu and other screens** (since 1.1.10): with 2D quads snapped
+  to pixels (QuadSnap), linear filtering read the top of the next glyph in the font. A read now stays inside each quad's own
+  texture area; all text and icons drawn the same way are covered. The pause menu dagger's thin line stays gone. QuadSnap
+  now moves only the quads it can protect.
+- The log no longer calls Black's bundled arcade Ninja Gaiden "NES trilogy".
+
 ### 2.2.37.9: the READMEs back in the package, accurate notes, Alt+Enter remembers exclusive fullscreen
 
 - **`README.md` / `README.en.md` are in the package again**: 2.2.37.4-2.2.37.8 shipped without them (adding the smoothness
