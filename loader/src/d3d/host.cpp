@@ -1011,7 +1011,7 @@ HRESULT present()
     bool whole = g_window.actual_exclusive() && g_frame_w > 0 && g_frame_h > 0 && (g_frame_w < g_bb_w || g_frame_h < g_bb_h) && present_stretch();
     // The device decides this, not the Alt+Enter request: until ResetEx succeeds, Present still uses the old device.
     if (g_window.present_flip()) return g_dev->Present(nullptr, nullptr, nullptr, nullptr);
-    RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w, g_frame_h && !whole ? g_frame_h : g_bb_h};
+    RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w.load(), g_frame_h && !whole ? g_frame_h : g_bb_h.load()};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)
 }
 
