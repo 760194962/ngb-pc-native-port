@@ -53,7 +53,7 @@ std::atomic<int> g_win_w, g_win_h; // client area, follows WM_SIZE
 int g_aspect_w = 4, g_aspect_h = 3; // the picture's shape; the window keeps it when resized
 std::atomic<int> g_bb_w, g_bb_h; // host back buffer: the largest monitor, so any window size is drawn 1:1
 // Exclusive fullscreen (black.ini fullscreen = 2): the device runs with Windowed = FALSE at the desktop's display mode
-// while the window is fullscreen. Alt+Enter switches by a Reset at the next Swap (d3d/device.cpp recover_device).
+// while the window is fullscreen. Entering and leaving it is a Reset at the next Swap (d3d/device.cpp recover_device).
 // One state machine owns the window: request, the device that actually exists and its presentation path.
 // A request may lead the device by one Swap; Present and frame sizing follow the device, never the request.
 int g_frame_w, g_frame_h;           // the part of the back buffer the current frame uses
@@ -77,47 +77,96 @@ bool reset_device_here();
 bool recreate_device_here();
 void release_stretch(); // present_stretch's target
 
-// Borderless window over the whole monitor, or back to the window it was.
-void toggle_fullscreen()
+// Display modes: Alt+Enter and PC SETTINGS > VIDEO > FULLSCREEN switch them, black.ini keeps them.
+// The rule, in alt_enter_target: from a fullscreen back to a window; from a window to g_cfg.next_fullscreen, and
+// entering one fullscreen makes the other next. A window always sits between borderless and exclusive fullscreen:
+// window, borderless, window, fullscreen, window, ... (the user, 2026-11-24). g_cfg.display is the player's mode: set
+// as a switch is asked for, while an exclusive device may still be resetting to it.
+
+const char *mode_log_name(DisplayMode m)
+{
+    return m == DisplayMode::Fullscreen ? "exclusive fullscreen" : m == DisplayMode::Borderless ? "borderless" : "window";
+}
+
+const wchar_t *mode_name(DisplayMode m, bool zh)
+{
+    if (m == DisplayMode::Fullscreen) return zh ? L"全屏" : L"Fullscreen";
+    if (m == DisplayMode::Borderless) return zh ? L"无边框" : L"Borderless";
+    return zh ? L"窗口" : L"Window";
+}
+
+DisplayMode alt_enter_target() { return g_cfg.display == DisplayMode::Window ? g_cfg.next_fullscreen : DisplayMode::Window; }
+
+// At the picture's bottom right for 4 s: the mode now and where Alt+Enter goes next. A new switch replaces it.
+void show_mode(DisplayMode m, bool fullscreen_failed = false)
+{
+    const bool zh = g_cfg.language == 8 || (g_cfg.profile && g_cfg.profile->chinese);
+    std::wstring t = fullscreen_failed ? (zh ? L"全屏不可用。" : L"Fullscreen is not available. ") : L"";
+    t += zh ? L"显示模式：" : L"Display mode: ";
+    t += mode_name(m, zh);
+    t += zh ? L"（Alt+Enter → " : L"  (Alt+Enter: ";
+    t += mode_name(m == DisplayMode::Window ? g_cfg.next_fullscreen : DisplayMode::Window, zh);
+    t += zh ? L"）" : L")";
+    perfhud::notice(t, 4000); // entering or leaving exclusive fullscreen blanks the screen for about 1.5 s of it
+}
+
+// From a window: over the whole monitor without a frame; exclusive fullscreen also asks for an exclusive device (made
+// so at the start, by a Reset later).
+void enter_fullscreen(DisplayMode m)
 {
     DWORD style = GetWindowLongW(g_hwnd, GWL_STYLE);
-    if (!g_window.is_fullscreen()) {
-        MONITORINFO mi = {sizeof mi};
-        if (!GetWindowPlacement(g_hwnd, &g_windowed_place) ||
-            !GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY), &mi))
-            return;
-        // WS_MINIMIZEBOX (no frame without a caption) lets Win+D minimize it: without it Show Desktop only covered the
-        // window, and it came back over the whole screen behind the next program opened (2026-10-25, iconic stayed 0).
-        // Exclusive fullscreen styles the window itself (0x14000000) and minimizes it when it loses the front.
-        SetWindowLongW(g_hwnd, GWL_STYLE, (style & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_MINIMIZEBOX);
-        const BOOL sized = SetWindowPos(g_hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
-                                        mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-        g_cfg.fullscreen = sized != FALSE;
-        g_window.set_fullscreen(sized != FALSE);
-        if (!sized) {
-            logf("host: fullscreen SetWindowPos failed (%lu); going back to a window", GetLastError());
-            restyle_windowed();
-            return;
-        }
-        logf("host: fullscreen %ldx%ld%s", mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
-             g_cfg.exclusive ? " (exclusive)" : "");
-        if (g_cfg.exclusive && sized) {
-            g_window.request(WindowMode::Exclusive);
-            if (g_dev) xd3d::request_device_reset("Alt+Enter: exclusive fullscreen"); // at start: made exclusive (create_device)
-        }
-    } else {
-        if (g_window.actual_exclusive()) {
-            // The device is exclusive now: go back to a windowed device first, then restyle in reset_device_here.
-            g_window.request(WindowMode::Windowed);
-            g_window.restyle_pending = true;
-            g_cfg.fullscreen = false; // the user's choice is windowed now, even though the device resets first
-            xd3d::request_device_reset("Alt+Enter: a window");
-            return;
-        }
-        // The device is still windowed (an exclusive request has not been committed yet): only undo the request.
-        g_window.request(WindowMode::Windowed);
+    MONITORINFO mi = {sizeof mi};
+    if (!GetWindowPlacement(g_hwnd, &g_windowed_place) || !GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY), &mi))
+        return;
+    // WS_MINIMIZEBOX (no frame without a caption) lets Win+D minimize it: without it Show Desktop only covered the
+    // window, and it came back over the whole screen behind the next program opened (2026-10-25, iconic stayed 0).
+    // Exclusive fullscreen styles the window itself (0x14000000) and minimizes it when it loses the front.
+    SetWindowLongW(g_hwnd, GWL_STYLE, (style & ~WS_OVERLAPPEDWINDOW) | WS_POPUP | WS_MINIMIZEBOX);
+    const BOOL sized = SetWindowPos(g_hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
+                                    mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    if (!sized) {
+        logf("host: fullscreen SetWindowPos failed (%lu); going back to a window", GetLastError());
         restyle_windowed();
+        return;
     }
+    g_window.set_fullscreen(true);
+    g_cfg.display = m;
+    g_cfg.next_fullscreen = m == DisplayMode::Fullscreen ? DisplayMode::Borderless : DisplayMode::Fullscreen;
+    logf("host: %s %ldx%ld", mode_log_name(m), mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top);
+    if (m == DisplayMode::Fullscreen) {
+        g_window.request(WindowMode::Exclusive);
+        if (g_dev) xd3d::request_device_reset("exclusive fullscreen");
+    }
+}
+
+// Back to the framed window. An exclusive device goes windowed first (reset_device_here restyles once it is).
+void leave_fullscreen()
+{
+    g_cfg.display = DisplayMode::Window;
+    g_window.request(WindowMode::Windowed);
+    if (g_window.actual_exclusive()) {
+        g_window.restyle_pending = true;
+        xd3d::request_device_reset("a window");
+        return;
+    }
+    restyle_windowed(); // borderless, or an exclusive request whose Reset has not come yet
+}
+
+void switch_display(DisplayMode to, const char *by)
+{
+    const DisplayMode from = g_cfg.display;
+    if (from != DisplayMode::Window && to != DisplayMode::Window) to = DisplayMode::Window; // never fullscreen to fullscreen
+    // An exclusive device not yet where the last switch asked (its Reset comes at the next Swap): one switch at a time.
+    // Borderless entered then would be undone as the Reset restores the frame of the window it leaves exclusive for.
+    if (g_window.requested_exclusive() != g_window.actual_exclusive()) {
+        logf("host: %s while the device still follows the last switch: not taken", by);
+        return;
+    }
+    if (to == from) return;
+    logf("host: %s: %s -> %s", by, mode_log_name(from), mode_log_name(to));
+    if (from != DisplayMode::Window) leave_fullscreen();
+    if (to != DisplayMode::Window) enter_fullscreen(to);
+    show_mode(g_cfg.display);
 }
 
 // The window back to its framed size and place (from fullscreen)
@@ -125,7 +174,7 @@ void restyle_windowed()
 {
     DWORD style = GetWindowLongW(g_hwnd, GWL_STYLE);
     SetWindowLongW(g_hwnd, GWL_STYLE, (style & ~WS_POPUP) | WS_OVERLAPPEDWINDOW);
-    g_cfg.fullscreen = false;
+    g_cfg.display = DisplayMode::Window;
     g_window.set_fullscreen(false);
     const BOOL placed = SetWindowPlacement(g_hwnd, &g_windowed_place);
     const BOOL sized = SetWindowPos(g_hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
@@ -193,10 +242,9 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         settings_save();
         request_exit(0, "window closed");
         return 0;
-    case WM_APP_FULLSCREEN: // PC SETTINGS > VIDEO > FULLSCREEN (fe/pc_settings.cpp)
+    case WM_APP_FULLSCREEN: // PC SETTINGS > VIDEO > FULLSCREEN (fe/pc_settings.cpp): on = where Alt+Enter would go
         if ((wp != 0) != is_fullscreen()) {
-            logf("host: PC SETTINGS fullscreen %d", (int)wp);
-            toggle_fullscreen();
+            switch_display(wp ? g_cfg.next_fullscreen : DisplayMode::Window, "PC SETTINGS fullscreen");
             settings_save();
         }
         return 0;
@@ -222,10 +270,10 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             ((MINMAXINFO *)lp)->ptMinTrackSize = {320 + fw, 320 * g_aspect_h / g_aspect_w + fh};
         }
         return 0;
-    case WM_SYSKEYDOWN: // Alt+Enter: fullscreen <-> window, as PC SETTINGS > VIDEO > FULLSCREEN (first press, not repeats)
+    case WM_SYSKEYDOWN: // Alt+Enter: the next mode in the cycle (first press, not repeats)
         if (wp == VK_RETURN && (lp & (1 << 29)) && !(lp & (1 << 30))) {
             logf("host: Alt+Enter (key data 0x%08lx, style 0x%08lx)", (unsigned long)lp, GetWindowLongW(h, GWL_STYLE));
-            toggle_fullscreen();
+            switch_display(alt_enter_target(), "Alt+Enter");
             settings_save();
             return 0;
         }
@@ -299,7 +347,7 @@ DWORD WINAPI ui_thread(void *)
         SetForegroundWindow(g_hwnd);
         logf("host: window %s", GetForegroundWindow() == g_hwnd ? "in front" : "not given the front by Windows");
     }
-    if (g_cfg.fullscreen) toggle_fullscreen();
+    if (g_cfg.display != DisplayMode::Window) enter_fullscreen(g_cfg.display); // black.ini's mode; no message at the start
     SetEvent(g_window_ready);
     MSG m;
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {
@@ -554,6 +602,7 @@ bool create_device_here()
     if (g_window.requested_exclusive() && !exclusive_ok) {
         // No display mode to switch to: a fullscreen style on a windowed device is the trap this state exists to avoid.
         logf("host: exclusive display mode not available; starting windowed");
+        show_mode(DisplayMode::Window, true);
         g_window.request(WindowMode::Windowed);
         g_window.restyle_pending = true;
     }
@@ -657,6 +706,7 @@ bool reset_device_here()
     D3DPRESENT_PARAMETERS pp = g_window.requested_exclusive() ? exclusive_params(g_pp, &exclusive_ok) : g_pp;
     if (g_window.requested_exclusive() && !exclusive_ok) {
         logf("host: exclusive display mode not available; falling back to a window");
+        show_mode(DisplayMode::Window, true);
         g_window.request(WindowMode::Windowed);
         g_window.restyle_pending = true;
         pp = g_pp;

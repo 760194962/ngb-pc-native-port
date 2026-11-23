@@ -36,6 +36,9 @@ constexpr NTSTATUS XSTATUS_INVALID_DEVICE_REQUEST = (NTSTATUS)0xC0000010;
 
 #define NT_OK(s) ((NTSTATUS)(s) >= 0)
 
+// The game window's display mode; the numbers are black.ini fullscreen's (0 window, 1 borderless, 2 exclusive)
+enum class DisplayMode : uint8_t { Window = 0, Borderless = 1, Fullscreen = 2 };
+
 struct BuildProfile; // build_profile.h: per-build facts (hash, fs patch count, initializer tables, hooked sections)
 
 struct Config {
@@ -78,8 +81,12 @@ struct Config {
     // The widescreen shape (black.ini aspect, Ninja Gaiden Black only): 16:9 as the game has it, or 16:10 / 21:9 by
     // replacing the game's 16:9 constant (ngb_aspect.cpp). 4:3 is widescreen = false.
     int aspect_w = 16, aspect_h = 9;
-    bool fullscreen = false;   // --fullscreen: start borderless fullscreen
-    bool exclusive = false;    // black.ini "fullscreen = 2": fullscreen is exclusive (D3D9 Windowed = FALSE), not borderless
+    // black.ini fullscreen: the mode at the start, then the one the player switched to (d3d/host.cpp switch_display),
+    // saved on quitting. Fullscreen is exclusive (D3D9 Windowed = FALSE). --fullscreen / --windowed: this run only.
+    DisplayMode display = DisplayMode::Window;
+    // black.ini fullscreen_kind (1 borderless, 2 exclusive): where Alt+Enter goes from a window. Each fullscreen entered
+    // makes the other one next, so a window sits between them: window, borderless, window, fullscreen, window, ...
+    DisplayMode next_fullscreen = DisplayMode::Borderless;
     // Mouse look rotates the player directly (input/mouselook.cpp): mouse_sens x 0.022 degrees per count, the
     // scale most PC shooters use.
     float mouse_sens = 2.0f;
