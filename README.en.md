@@ -259,6 +259,23 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.9: the READMEs back in the package, accurate notes, Alt+Enter remembers exclusive fullscreen
+
+- **`README.md` / `README.en.md` are in the package again**: 2.2.37.4-2.2.37.8 shipped without them (adding the smoothness
+  guides replaced the line that copied them). The packaging script now checks the package's 14 files and stops on any
+  missing or extra one.
+- **The smoothness guides, the READMEs' "Smoothness settings" and the launcher's notes rewritten to match the code**: the game's
+  speed is right with any setting; Steady game speed only affects a 60 Hz monitor in a window / borderless; V-Sync only works
+  in exclusive fullscreen; exclusive fullscreen with V-Sync shows one frame a refresh longer about every 17 s (8 s at 120 Hz,
+  4 s at 240 Hz); a window / borderless at 120 Hz and above is uneven (known). Claims no longer true since 2.2.37.6 are gone
+  (kernel vblank dropping to 47, 120 / 240 Hz showing each frame exactly 2 / 4 refreshes).
+- **Alt+Enter remembers exclusive fullscreen**: leave exclusive fullscreen for a window and close the game, and the next
+  Alt+Enter goes back to exclusive fullscreen (it went borderless). New `fullscreen_kind` in `black.ini`; the launcher writes
+  it with a borderless / exclusive choice.
+- **A setting changed and changed back within one run is saved right**: window -> fullscreen -> window and close used to leave
+  `black.ini` at fullscreen, so the next start was fullscreen.
+- Small fixes: a failed window restyle no longer loses its pending flag; the focus state that was written but never read is gone.
+
 ### 2.2.37.8: window / exclusive state cleanup
 
 - window / exclusive / focus / reset live in one `WindowState`;
