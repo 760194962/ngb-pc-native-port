@@ -3133,13 +3133,17 @@ void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, floa
 //   centre is not left of / above the edge (as scale_rhw's border rule).
 // - Each stage's coordinates are clamped to the range the console's pixel centres sample (half a console pixel in from
 //   each edge), and a linearly filtered stage reads its four texels weighted by alpha (ffp_ps.cpp: the generated
-//   stage shader's quad variant). Pixel-shader (combiner) draws keep their coordinates moved but are not clamped.
+//   stage shader's quad variant). Only those draws are moved: a draw with the game's own pixel shader (combiners)
+//   or --host-ffp gets no stage shader, so no clamp, and moved coordinates there read past the box unchecked; they
+//   are drawn as before (until 2.2.37.10 they were moved; in play only the full-screen pass FUN_00315B20 and the
+//   glow's 4-tap reduction FUN_00314430, both reading whole targets: census of a 3-minute run, 2026-11-23).
 // An axis-aligned 4-vertex quad: every corner on its box within a hundredth of a pixel (the dagger's 181.4999), taken as
 // the box's. cfg:quadsnap:0 draws them as before.
 struct QuadSnap {
     int sets = 0;
     uint32_t off[8];       // byte offsets of the 2-float coordinate sets
     float centre[8][4][2]; // per set: the coordinates at the four corner pixels' centres (before rhw_tex_scales)
+    float box[8][4];       // per set: the quad's own texture box as the game gave it, u0 v0 u1 v1 (before rhw_tex_scales)
 };
 
 uint32_t g_quad_snaps, g_quad_snap_frame; // quads snapped in the last 600 frames (logged)
@@ -3190,6 +3194,11 @@ bool quad_snap(uint32_t fvf, uint8_t *verts, uint32_t stride, float ox, float oy
             float dudy = (uv[c01][0] - uv[c00][0]) / h, dvdy = (uv[c01][1] - uv[c00][1]) / h;
             int k = q.sets++;
             q.off[k] = off;
+            q.box[k][0] = q.box[k][1] = 1e30f, q.box[k][2] = q.box[k][3] = -1e30f;
+            for (int v = 0; v < 4; v++) {
+                q.box[k][0] = std::min(q.box[k][0], uv[v][0]), q.box[k][1] = std::min(q.box[k][1], uv[v][1]);
+                q.box[k][2] = std::max(q.box[k][2], uv[v][0]), q.box[k][3] = std::max(q.box[k][3], uv[v][1]);
+            }
             for (int v = 0; v < 4; v++) {
                 bool left = xy[v][0] == x0, top = xy[v][1] == y0;
                 float dx = (left ? sx0 : sx1) - (xy[v][0] + ox), dy = (top ? sy0 : sy1) - (xy[v][1] + oy);
@@ -3248,23 +3257,45 @@ void quad_snap_shader(const QuadSnap &q, const RhwTexScale *ts, int nts)
         }
         const D3DSURFACE_DESC &desc = desc_of[s];
         if (!desc.Width || !desc.Height) continue;
-        float u0 = 1e30f, u1 = -1e30f, v0 = 1e30f, v1 = -1e30f;
-        for (int v = 0; v < 4; v++) {
-            float u = q.centre[k][v][0], t = q.centre[k][v][1];
+        auto xf = [&](float &u, float &t) {
             for (int i = 0; i < nts; i++)
                 if (ts[i].off == off) {
                     float a = u * ts[i].m[0] + t * ts[i].m[1] + ts[i].m[2], b = u * ts[i].m[3] + t * ts[i].m[4] + ts[i].m[5];
                     u = a, t = b;
                 }
+        };
+        float u0 = 1e30f, u1 = -1e30f, v0 = 1e30f, v1 = -1e30f;
+        for (int v = 0; v < 4; v++) {
+            float u = q.centre[k][v][0], t = q.centre[k][v][1];
+            xf(u, t);
             u0 = std::min(u0, u), u1 = std::max(u1, u), v0 = std::min(v0, t), v1 = std::max(v1, t);
+        }
+        // linear filtering as apply_texture_stages sets it from the Xbox stage (MAGFILTER 3, MINFILTER 4: 2 or over 3)
+        bool linear = tss[3] == 2 || tss[3] > 3 || tss[4] == 2 || tss[4] > 3;
+        if (linear) {
+            // A linear read also takes the texel beyond the one at its coordinate: at the range's edge it reached the
+            // texel past the quad's own box, in an atlas a neighbour's (a font cell's last row 1200 of 1185.5-1201.0
+            // in the main menu's 256x2048 font: the next glyph's top read at 44%, a white dot under each letter that the
+            // alpha weighting kept white; since 1.1.10, the player's report, 2026-11-23). So the range also stops at
+            // the centres of the box's outermost texels, when that is nearer: the filter then reads the box's own.
+            float bu0 = q.box[k][0], bv0 = q.box[k][1], bu1 = q.box[k][2], bv1 = q.box[k][3];
+            xf(bu0, bv0), xf(bu1, bv1);
+            auto inner = [](float a, float b, float n, float &lo, float &hi) {
+                if (a > b) std::swap(a, b);
+                float k0 = ceilf(a * n - 0.5f - 1e-3f), k1 = floorf(b * n - 0.5f + 1e-3f); // texels whose centre is inside
+                if (k1 < k0) return; // less than a texel: as it is
+                lo = std::max(lo, (k0 + 0.5f) / n), hi = std::min(hi, (k1 + 0.5f) / n);
+                if (lo > hi) lo = hi = 0.5f * (lo + hi);
+            };
+            inner(bu0, bu1, (float)desc.Width, u0, u1);
+            inner(bv0, bv1, (float)desc.Height, v0, v1);
         }
         clamp[s][0] = u0, clamp[s][1] = v0, clamp[s][2] = u1, clamp[s][3] = v1;
         size[s][0] = (float)desc.Width, size[s][1] = (float)desc.Height, size[s][2] = 1.0f / desc.Width, size[s][3] = 1.0f / desc.Height;
         stages |= 1u << s;
-        // linear filtering as apply_texture_stages sets it from the Xbox stage (MAGFILTER 3, MINFILTER 4: 2 or over 3)
-        if (g_cfg.quad_weight && (tss[3] == 2 || tss[3] > 3 || tss[4] == 2 || tss[4] > 3)) weighted |= 1u << s;
+        if (g_cfg.quad_weight && linear) weighted |= 1u << s;
     }
-    if (!stages || g_st.pixel_shader || g_cfg.host_ffp) return;
+    if (!stages) return;
     g_ffp_quad_stages = stages;
     g_ffp_quad_weighted = weighted;
     if (IDirect3DPixelShader9 *ps = ffp_reselect()) {
@@ -3346,8 +3377,9 @@ const uint8_t *scale_rhw(const DrawCtx &ctx, const void *data, uint32_t first, u
         }
     }
     QuadSnap qs;
-    bool snapped = quad && count == 4 && edges && g_cfg.quad_snap && (sx > 1.0f || sy > 1.0f) &&
-                   quad_snap(ctx.fvf, g_rhw.data(), stride, ox, oy, qs);
+    // (moved only where quad_snap_shader's clamp can follow: fixed-function stages through the generated stage shader)
+    bool snapped = quad && count == 4 && edges && g_cfg.quad_snap && (sx > 1.0f || sy > 1.0f) && !g_st.pixel_shader &&
+                   !g_cfg.host_ffp && quad_snap(ctx.fvf, g_rhw.data(), stride, ox, oy, qs);
     squeeze_169(g_rhw.data(), count, stride, sx, sy, ctx.fvf);
     for (uint32_t v = 0; v < count; v++) {
         float *p = (float *)&g_rhw[(size_t)v * stride];
