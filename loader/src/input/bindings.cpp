@@ -19,7 +19,7 @@
 #include "input/bindings.h"
 
 #include "common.h"
-#include "d3d/host.h"
+#include "input/mouse.h"
 #include "input/mouselook.h"
 #include "settings.h"
 
@@ -122,7 +122,6 @@ uint16_t parse_key(const std::string &s)
 std::bitset<0x102> g_stale;      // held across a play/menu switch: ignored until released
 std::bitset<0x102> g_script;     // --press k:Name, this poll only
 bool g_was_play;
-bool g_freed_by_esc; // the pause key (or Esc in a menu) let go of the mouse: take it again when play starts
 bool g_release_was_down;
 
 // Menu keys -> the menus' input ids (FEInputId); held arrows repeat like the game's own pad input.
@@ -331,7 +330,7 @@ void apply(uint16_t &buttons, uint8_t analog[8], int16_t &lx, int16_t &ly, int16
 {
     ensure_defaults();
     bool play = in_play();
-    int mouse = mouse_live ? host3d::mouse_buttons() : 0;
+    int mouse = mouse_live ? mouse::buttons() : 0;
     uint16_t wkey = wheel_key(mouse_live ? wheel : 0);
 
     if (play != g_was_play) { // keys held now belong to the other mode: ignore them until released
@@ -342,8 +341,7 @@ void apply(uint16_t &buttons, uint8_t analog[8], int16_t &lx, int16_t &ly, int16
                 if (raw_held(g_keys[i][s], focus, mouse)) g_stale[g_keys[i][s]] = true;
         for (uint16_t k : {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_BACK, VK_ESCAPE})
             if (raw_held(k, focus, 0)) g_stale[k] = true;
-        if (play && g_freed_by_esc && focus) host3d::request_capture(true);
-        if (play) g_freed_by_esc = false;
+        if (play && focus) mouse::play_resumed(); // the pause key let go of the mouse: play takes it back
         g_was_play = play;
     }
     auto held = [&](uint16_t k) {
@@ -408,13 +406,9 @@ void apply(uint16_t &buttons, uint8_t analog[8], int16_t &lx, int16_t &ly, int16
     if (g_menu_select && enter_as == kA) p.analog[0] = 255;
     if (g_menu_select && enter_as == kStart) p.buttons |= 0x10;
     if (!play) menu_esc = held(VK_ESCAPE);
-    // The pause key in play and Esc in menus also let go of the mouse; play starting or
-    // resuming takes it again.
+    // The pause key in play and Esc in menus also let go of the mouse (input/mouse.h)
     bool release = play ? pause_down : menu_esc;
-    if (release && !g_release_was_down && host3d::mouse_captured()) {
-        host3d::request_capture(false);
-        g_freed_by_esc = true;
-    }
+    if (release && !g_release_was_down && focus) mouse::let_go();
     g_release_was_down = release;
     g_script.reset();
 

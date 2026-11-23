@@ -15,6 +15,7 @@
 #include "d3d/perfhud.h"
 #include "input/bindings.h"
 #include "input/padkeys.h"
+#include "input/mouse.h"
 #include "input/mouselook.h"
 #include "input/movies.h"
 #include "input/sdlpad.h"
@@ -485,8 +486,8 @@ void merge_stick(int16_t &x, int16_t &y, int16_t px, int16_t py)
 int mouse_look(bool live, int *raw_wheel)
 {
     int dx, dy, wheel;
-    host3d::mouse_take(&dx, &dy, &wheel);
-    *raw_wheel = wheel; // the key bindings page takes the wheel without the mouse captured
+    mouse::take(&dx, &dy, &wheel);
+    *raw_wheel = wheel; // the key bindings page takes the wheel with the mouse let go too
     if (!live) dx = dy = wheel = 0;
     dx += g_script_mx; // scripted moves work without focus
     dy += g_script_my;
@@ -553,7 +554,15 @@ void read_pad(uint32_t port, XGamepad &g)
     if (!g_cfg.profile || !g_cfg.profile->black) {
         padkeys::Pad p = {g.wButtons, {}, g.sThumbLX, g.sThumbLY, g.sThumbRX, g.sThumbRY};
         memcpy(p.analog, g.bAnalogButtons, 8);
-        padkeys::apply(p, GetForegroundWindow() == host3d::window());
+        const bool front = GetForegroundWindow() == host3d::window();
+        padkeys::apply(p, front);
+        // Esc lets go of the mouse here too (a click in the window takes it back; input/mouse.h)
+        static bool esc_was;
+        const bool esc = front && (GetAsyncKeyState(VK_ESCAPE) & 0x8000);
+        if (esc && !esc_was) mouse::let_go();
+        esc_was = esc;
+        int dx, dy, wheel; // the mouse is not these programs' input: drop its counts (they only added up before)
+        mouse::take(&dx, &dy, &wheel);
         g.wButtons = p.buttons;
         memcpy(g.bAnalogButtons, p.analog, 8);
         g.sThumbLX = p.lx, g.sThumbLY = p.ly, g.sThumbRX = p.rx, g.sThumbRY = p.ry;
@@ -561,7 +570,7 @@ void read_pad(uint32_t port, XGamepad &g)
         return;
     }
     bool focus = GetForegroundWindow() == host3d::window();
-    bool live = focus && host3d::mouse_captured();
+    bool live = focus && mouse::held();
     int raw_wheel;
     int wheel = mouse_look(live, &raw_wheel);
     if (!bindings::capture_poll(focus, raw_wheel)) // while the key bindings page waits for a key, keys bind instead

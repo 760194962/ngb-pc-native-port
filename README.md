@@ -7,8 +7,9 @@
 游戏程序（`Ninja Gaiden Black.exe`，2004 是 `Ninja Gaiden.exe`）读取你自己的 `default.xbe`，把原版 x86 游戏代码直接放在 PC 上运行；Xbox 内核、Direct3D 8、DirectSound
 等系统部分由加载器在 PC 上重新实现（HLE）。游戏代码不经模拟器逐条解释，也不在磁盘上修改。
 
-本项目从 [black-pc](https://github.com/Spark198rus/black-pc)（BLACK 的原生移植）分支而来，在它的加载器上加入了
-忍龙主程序与附带程序的支持。原有的 BLACK NTSC-U 支持仍然保留。
+本项目从 [black-pc](https://github.com/Spark198rus/black-pc) 分支而来。black-pc 是 BLACK 的原生移植：BLACK 中文名
+《黑煞》，是 Criterion / EA 2006 年的第一人称射击游戏，**不是《忍者龙剑传 黑之章》**。本项目在它的加载器上加入了忍龙主程序与
+附带程序的支持，原有的《黑煞》（BLACK）NTSC-U 支持仍然保留。
 
 **需要自备游戏。** 本仓库不含任何游戏代码、数据或 Microsoft XDK 代码。
 
@@ -232,6 +233,16 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 `args = --vsh-record "<游戏文件夹>\vsh_record.bin" --hitch-detail`，正常玩，然后把 `cache\shaders\`、`cache\draw_states.bin`、
 `cache\texture_pool.txt`、`cache\cpu_textures.bin`、`vsh_record.bin` 和 `logs\black.log` 交给作者。**要在更新到新版本之前交**：
 换版本时本地学到的绘制状态会被清掉。
+
+### 2.2.37.11：启动即隐藏鼠标，Esc 放开鼠标
+
+- **游戏启动时直接抓住鼠标**：窗口、无边框、全屏都一样，光标立即消失，不用再先点一下画面。从游戏里进入 SFC 三部曲、
+  街机版或 Xbox 仪表盘（各是一个新程序）时也一样。
+- **按 Esc 放开鼠标**：黑之章、NG2004、SFC 三部曲和仪表盘都可以用。放开后点一下画面重新抓住，这一下点击不会传给游戏。
+- 其他行为不变：Alt+Tab 或最小化时放开，回来后点一下画面抓住；拖动窗口前先按 Esc。
+- 鼠标相关代码集中到一个模块（`input/mouse`），原来分散在窗口、按键绑定和输入轮询三处。抓住鼠标那一刻正按着的鼠标键，
+  松开后才会传给游戏（以前只处理左键）。
+- README 注明上游 black-pc 移植的 BLACK 中文名《黑煞》（2006 年的射击游戏），不是《忍者龙剑传 黑之章》。
 
 ### 2.2.37.10：SFC 三部曲音量提高，主菜单文字下的白点修复
 
@@ -579,7 +590,7 @@ O 为左扳机、Q 为右扳机、B 为 Start……），在启动器的「控�
 ```
 
 - `--shot-every 100000000` 让定时截图实际上不发生，只在你用 `shot:` 要求时才截。默认值 60 是每秒截一张，会造成卡顿。
-- `"Ninja Gaiden Black.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是 BLACK 专用的，对忍龙不起作用。
+- `"Ninja Gaiden Black.exe" --help` 列出全部选项。其中一部分（视野、自动瞄准、PC SETTINGS 菜单等）是《黑煞》（BLACK）专用的，对忍龙不起作用。
 
 **联网（Insignia 排行榜，可选）**
 
@@ -803,7 +814,7 @@ cmake --build build --config RelWithDebInfo
 | `project/docs/` | 过程文档：输入清单、工具链、静态分析、加载器与内核、图形、音频输入存档、功能验证矩阵、证据盘点 |
 | `project/tools/` | 分析与比对脚本：XBE 普查、函数表、图像比对、xemu 存档导出等 |
 | `launcher/` | 启动器（开发中，见 `project/docs/08_PC启动器计划.md`）：从镜像安装、选择游戏安装路径、启动游戏；`art/` 为界面背景图 |
-| `notes/` | 上游 BLACK 的分析结果 |
+| `notes/` | 上游对《黑煞》（BLACK）的分析结果 |
 
 反编译与反汇编输出、游戏文件、测试运行目录都只留在本地，不进仓库。
 
@@ -832,7 +843,8 @@ Microsoft 的商标。仓库不含游戏代码或数据，也不含 Microsoft Xb
 
 ## 致谢
 
-- [black-pc](https://github.com/Spark198rus/black-pc)（Spark198rus）：本项目所基于的加载器。
+- [black-pc](https://github.com/Spark198rus/black-pc)（Spark198rus）：本项目所基于的加载器，原本是《黑煞》（BLACK，
+  2006 年的射击游戏，并非《忍者龙剑传 黑之章》）的原生移植。
 - [ngbrecomp](https://github.com/gamboozino/ngbrecomp)（GPL-2.0）：忍龙主程序的 D3D 符号表；另有下面这些做法参照了它
   （都按本项目自己的结构重新实现，没有复制代码；参照的是它当时最新的版本）：
   - 着色器种子随包发布（`packaging/d3d-seed.bin`、`docs/renderer.md`），2.2.31。

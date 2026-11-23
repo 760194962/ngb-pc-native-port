@@ -5,6 +5,7 @@
 #include "d3d/perfhud.h"
 #include "d3d/shader_cache.h"
 #include "d3d/vshader.h"
+#include "input/mouse.h"
 
 #include "build_profile.h"
 #include "settings.h"
@@ -59,12 +60,7 @@ int g_frame_w, g_frame_h;           // the part of the back buffer the current f
 std::atomic<int> g_out_w, g_out_h; // the window size as set (open_window): fullscreen's with black.ini fullscreen_res = window
 WINDOWPLACEMENT g_windowed_place = {sizeof(WINDOWPLACEMENT)};
 
-// Mouse: raw input counts and buttons, used only while the cursor is captured (click the window; focus loss
-// releases it). The click that captures is not passed to the game.
-std::atomic<bool> g_captured{false};
-std::atomic<int> g_mouse_dx, g_mouse_dy, g_wheel, g_buttons;
-bool g_hold_left; // the capturing click: masked until released
-constexpr UINT WM_APP_CAPTURE = WM_APP + 0x52; // wParam: 1 = capture, 0 = release (request_capture)
+// WM_APP + 0x52 is the mouse's (input/mouse.cpp)
 constexpr UINT WM_APP_FULLSCREEN = WM_APP + 0x53; // wParam: 1 = fullscreen, 0 = windowed (set_fullscreen)
 
 void restyle_windowed();
@@ -167,56 +163,6 @@ void keep_aspect(WPARAM edge, RECT *r)
     else r->bottom = r->top + ch + fh;
 }
 
-void clip_to_client()
-{
-    RECT r;
-    GetClientRect(g_hwnd, &r);
-    MapWindowPoints(g_hwnd, nullptr, (POINT *)&r, 2);
-    ClipCursor(&r);
-}
-
-void capture_mouse(bool on)
-{
-    if (on == g_captured) return;
-    g_captured = on;
-    if (on) {
-        clip_to_client();
-        SetCursor(nullptr);
-        g_hold_left = true;
-    } else {
-        ClipCursor(nullptr);
-        g_buttons = 0;
-    }
-    g_mouse_dx = g_mouse_dy = g_wheel = 0;
-}
-
-void raw_input(HRAWINPUT h)
-{
-    alignas(8) BYTE buf[sizeof(RAWINPUT) + 16];
-    UINT size = sizeof buf;
-    if (GetRawInputData(h, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) == (UINT)-1) return;
-    const RAWINPUT *ri = (const RAWINPUT *)buf;
-    if (ri->header.dwType != RIM_TYPEMOUSE || !g_captured) return;
-    const RAWMOUSE &m = ri->data.mouse;
-    if (!(m.usFlags & MOUSE_MOVE_ABSOLUTE)) {
-        g_mouse_dx += m.lLastX;
-        g_mouse_dy += m.lLastY;
-    }
-    USHORT f = m.usButtonFlags;
-    int b = g_buttons;
-    for (int i = 0; i < 5; i++) { // left, right, middle, X1, X2: down/up flag pairs
-        if (f & (1 << (2 * i))) b |= 1 << i;
-        if (f & (2 << (2 * i))) b &= ~(1 << i);
-    }
-    if (f & RI_MOUSE_LEFT_BUTTON_UP) g_hold_left = false;
-    if (g_hold_left) b &= ~1;
-    g_buttons = b;
-    if (f & RI_MOUSE_WHEEL) { // notches (smooth-scrolling wheels send fractions: count each burst as one)
-        SHORT d = (SHORT)m.usButtonData;
-        g_wheel += d / WHEEL_DELTA ? d / WHEEL_DELTA : (d > 0 ? 1 : -1);
-    }
-}
-
 // Fullscreen = no caption: in exclusive fullscreen the runtime sets the style itself (0x14000000, no WS_POPUP), so
 // WS_POPUP alone took that for a window and Alt+Enter went into fullscreen again (2026-10-25)
 bool is_fullscreen() { return g_window.is_fullscreen(); }
@@ -235,6 +181,8 @@ void perf_report(HWND hwnd)
 
 LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
+    LRESULT mouse_result;
+    if (mouse::on_message(h, msg, wp, lp, &mouse_result)) return mouse_result;
     switch (msg) {
     case WM_POWERBROADCAST: // sleep: the Xbox never sleeps, so the game's clock skips the time asleep (hooks.cpp)
         if (wp == PBT_APMSUSPEND) tsc_host_sleep(false);
@@ -252,8 +200,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             settings_save();
         }
         return 0;
-    case perf::WM_APP_PERF:
-        capture_mouse(false);
+    case perf::WM_APP_PERF: // the message box takes the front, and the mouse is let go with it (input/mouse.cpp)
         perf_report(h);
         return 0;
     case WM_DESTROY:
@@ -264,11 +211,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             g_win_w = LOWORD(lp);
             g_win_h = HIWORD(lp);
         }
-        if (g_captured) clip_to_client();
         return 0;
-    case WM_MOVE:
-        if (g_captured) clip_to_client();
-        break;
     case WM_SIZING:
         keep_aspect(wp, (RECT *)lp);
         return TRUE;
@@ -278,10 +221,6 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             frame_extra(&fw, &fh);
             ((MINMAXINFO *)lp)->ptMinTrackSize = {320 + fw, 320 * g_aspect_h / g_aspect_w + fh};
         }
-        return 0;
-    case WM_APP_CAPTURE: // from the input poll: pause frees the mouse, resuming play takes it again
-        if (!wp) capture_mouse(false);
-        else if (GetForegroundWindow() == h && !IsIconic(h)) capture_mouse(true);
         return 0;
     case WM_SYSKEYDOWN: // Alt+Enter: fullscreen <-> window, as PC SETTINGS > VIDEO > FULLSCREEN (first press, not repeats)
         if (wp == VK_RETURN && (lp & (1 << 29)) && !(lp & (1 << 30))) {
@@ -297,12 +236,6 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SYSCOMMAND:
         if ((wp & 0xFFF0) == SC_KEYMENU) return 0; // Alt / F10 must not open the system menu by keyboard and stall input
         break;
-    case WM_LBUTTONDOWN:
-        capture_mouse(true);
-        return 0;
-    case WM_ACTIVATE:
-        if (LOWORD(wp) == WA_INACTIVE) capture_mouse(false);
-        break;
     case WM_APP_DEVICE: // create_device, reset_device, test_cooperative_level: on this thread
         if (wp == kDeviceCreate) return create_device_here();
         if (wp == kDeviceReset) return reset_device_here();
@@ -316,18 +249,6 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                        ? st
                        : D3D_OK;
         }
-    case WM_KILLFOCUS:
-        capture_mouse(false);
-        break;
-    case WM_SETCURSOR:
-        if (g_captured && LOWORD(lp) == HTCLIENT) {
-            SetCursor(nullptr);
-            return TRUE;
-        }
-        break;
-    case WM_INPUT:
-        raw_input((HRAWINPUT)lp);
-        break;
     }
     return DefWindowProcW(h, msg, wp, lp);
 }
@@ -369,8 +290,7 @@ DWORD WINAPI ui_thread(void *)
     int wx = work.left + std::max(0, (int)(work.right - work.left - ww) / 2);
     int wy = work.top + std::max(0, (int)(work.bottom - work.top - wh) / 2);
     g_hwnd = CreateWindowExW(0, wc.lpszClassName, game_title(), style, wx, wy, ww, wh, nullptr, nullptr, wc.hInstance, nullptr);
-    RAWINPUTDEVICE mouse = {0x01, 0x02, 0, g_hwnd}; // generic desktop / mouse, while the window has focus
-    if (!RegisterRawInputDevices(&mouse, 1, sizeof mouse)) logf("host: raw mouse input not available (%lu)", GetLastError());
+    mouse::attach(g_hwnd);
     ShowWindow(g_hwnd, g_cfg.background ? SW_SHOWMINNOACTIVE : SW_SHOWNORMAL);
     // In front of the other windows at every start, the bundled programs (SNES, arcade) included (the user,
     // 2026-10-22). Windows lets a program take the front only when the one in front allows it: the launcher and the
@@ -507,13 +427,6 @@ void frame_layout(RECT *frame, RECT *picture)
     *picture = {x, y, x + pw, y + ph};
 }
 
-bool mouse_captured() { return g_captured; }
-
-void request_capture(bool on)
-{
-    if (g_hwnd) PostMessageW(g_hwnd, WM_APP_CAPTURE, on ? 1 : 0, 0);
-}
-
 void set_fullscreen(bool on)
 {
     if (g_hwnd) PostMessageW(g_hwnd, WM_APP_FULLSCREEN, on ? 1 : 0, 0);
@@ -521,15 +434,6 @@ void set_fullscreen(bool on)
 
 bool fullscreen() { return g_hwnd && is_fullscreen(); }
 bool exclusive() { return g_window.actual_exclusive(); }
-
-int mouse_buttons() { return g_captured ? g_buttons.load() : 0; }
-
-void mouse_take(int *dx, int *dy, int *wheel)
-{
-    *dx = g_mouse_dx.exchange(0);
-    *dy = g_mouse_dy.exchange(0);
-    *wheel = g_wheel.exchange(0);
-}
 
 D3DPRESENT_PARAMETERS g_pp; // as created; Reset uses the same
 
