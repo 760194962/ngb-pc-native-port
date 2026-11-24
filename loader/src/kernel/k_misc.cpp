@@ -9,6 +9,7 @@
 #include "usb_ohci.h"
 #include "net/online.h"
 #include "dashboard.h"
+#include "input/mouse.h"
 #include "sha1.h"
 
 #include <atomic>
@@ -339,11 +340,15 @@ static bool relaunch(const std::wstring &xbe, bool with_data = true, const XLAUN
     for (const std::wstring &a : args) cmd += L" \"" + a + L"\"";
     STARTUPINFOW si = {sizeof si};
     PROCESS_INFORMATION pi = {};
-    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+    // Made suspended: this process lets go of the mouse before the next one can take it (input/mouse.h hand_over),
+    // and a failed start leaves this one as it was.
+    if (!CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, CREATE_SUSPENDED, nullptr, nullptr, &si, &pi)) {
         logf("[k] relaunch failed (error %lu): %s", GetLastError(), narrow(cmd).c_str());
         return false;
     }
+    mouse::hand_over();
     AllowSetForegroundWindow(pi.dwProcessId); // this window is in front: the next program's may come to the front too
+    ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     logf("[k] relaunched as process %lu on %s (log %s)", pi.dwProcessId, narrow(xbe).c_str(), narrow(new_log).c_str());

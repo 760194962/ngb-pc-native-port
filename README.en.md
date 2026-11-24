@@ -272,6 +272,11 @@ updating to a new version**: a new version drops the draw states learned locally
   settings were read, and one function did every way in and out. Now the mode is one enum, the rule is in one place, and
   entering and leaving are a function each. Alt+Enter within the frame an exclusive fullscreen takes to go back to a window
   is no longer taken (the mode recorded and the real one could differ).
+- **The cursor also goes at once when the game starts the SNES trilogy, the arcade game or the dashboard (and back)**:
+  from 2.2.37.11 the game takes the mouse at the start, but on this way the new program's window had the keyboard focus
+  before it was in front, so it never did. Now the window says when its start is done, and its first time in front does too.
+- **Handing over between two programs no longer loses the cursor clip**: the old program lets go of the mouse before the
+  new one runs; the old one quitting could clear the clip the new one had just set. (Added as 2.2.37.12 was replaced.)
 
 ### 2.2.37.11: the mouse hidden from the start, Esc lets go of it
 

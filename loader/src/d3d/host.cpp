@@ -348,6 +348,7 @@ DWORD WINAPI ui_thread(void *)
         logf("host: window %s", GetForegroundWindow() == g_hwnd ? "in front" : "not given the front by Windows");
     }
     if (g_cfg.display != DisplayMode::Window) enter_fullscreen(g_cfg.display); // black.ini's mode; no message at the start
+    mouse::start(); // shown, asked for the front, in its mode: the game takes the mouse (input/mouse.h)
     SetEvent(g_window_ready);
     MSG m;
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {

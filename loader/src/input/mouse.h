@@ -17,6 +17,7 @@ namespace mouse {
 
 // Window thread
 void attach(HWND hwnd); // raw mouse input for this window; call once it exists, before it is shown
+void start();           // the window is shown, asked for the front and in its start mode: the start's hold
 // The window's messages the mouse needs; true when handled, with *result to return
 bool on_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT *result);
 
@@ -27,5 +28,10 @@ void take(int *dx, int *dy, int *wheel); // counts since the last call: movement
 int buttons();                           // held: bit 0-4 = left, right, middle, X1, X2; 0 otherwise
 void let_go();                           // the player pressed Esc (or Black's pause key)
 void play_resumed();                     // play started: take the mouse back if Esc let it go
+// Before this process starts the next program (the SNES / arcade games, the dashboard and back: kernel/k_misc.cpp
+// relaunch): let go now and never take it again. The clip is one for the whole system; released later, as this
+// window leaves the front, it would clear the clip the next program has just set. Waits for the window's thread
+// (0.5 s at most).
+void hand_over();
 
 } // namespace mouse
