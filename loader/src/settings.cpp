@@ -23,13 +23,6 @@ std::mutex g_lock;           // the menu (window thread) and the exit path may b
 
 bool cli(const char *key) { return g_cli.count(key) != 0; }
 
-// fullscreen (0 window, 1 borderless, 2 exclusive) is the state now; fullscreen_kind (1 borderless, 2 exclusive) the
-// fullscreen Alt+Enter goes to. Leaving exclusive fullscreen by Alt+Enter and closing saved fullscreen = 0, and the next
-// Alt+Enter went borderless: the choice of exclusive was lost (the user, 2026-11-23). A fullscreen value wins; with a
-// window the kind decides. Kept apart so the lines' order in black.ini does not matter.
-int g_fs_value = -1, g_fs_kind = 0;
-void resolve_fullscreen_kind() { g_cfg.exclusive = g_fs_value > 0 ? g_fs_value == 2 : g_fs_kind == 2; }
-
 } // namespace
 
 void settings_mark_cli(const char *key) { g_cli.insert(key); }
@@ -119,14 +112,11 @@ bool apply_line(const char *line, bool from_cli)
             if (sscanf_s(val, "%d:%d", &w, &h) == 2 && w > 0 && h > 0 && w * 10 >= h * 15 && w * 10 <= h * 25)
                 g_cfg.aspect_w = w, g_cfg.aspect_h = h;
         }
-        else if (k == "fullscreen") { // 0 window, 1 borderless, 2 exclusive
-            g_cfg.fullscreen = v != 0;
-            g_fs_value = (int)v;
-            resolve_fullscreen_kind();
-        } else if (k == "fullscreen_kind") { // the fullscreen Alt+Enter goes to: 1 borderless, 2 exclusive
-            g_fs_kind = (int)v;
-            resolve_fullscreen_kind();
-        } else if (k == "window") { // the window's client size: "auto" (fit the screen) or WxH
+        else if (k == "fullscreen") // 0 window, 1 borderless, 2 exclusive
+            g_cfg.display = v == 2 ? DisplayMode::Fullscreen : v == 1 ? DisplayMode::Borderless : DisplayMode::Window;
+        else if (k == "fullscreen_kind") // where Alt+Enter goes from a window: 1 borderless, 2 exclusive
+            g_cfg.next_fullscreen = v == 2 ? DisplayMode::Fullscreen : DisplayMode::Borderless;
+        else if (k == "window") { // the window's client size: "auto" (fit the screen) or WxH
             int w = 0, h = 0;
             if (sscanf_s(val, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 240) g_cfg.window_w = w, g_cfg.window_h = h;
             else g_cfg.window_w = g_cfg.window_h = 0;
@@ -231,7 +221,7 @@ void write_all(FILE *f)
     int fps = g_cfg.fps_next ? g_cfg.fps_next : g_cfg.fps; // a menu choice for the next run wins
     bool wide = g_cfg.widescreen_next >= 0 ? g_cfg.widescreen_next != 0 : g_cfg.widescreen;
     fprintf(f, "aa = %d\nfps = %d\nwidescreen = %d\nfullscreen = %d\nfullscreen_kind = %d\n", g_cfg.aa ? 1 : 0, fps, wide ? 1 : 0,
-            g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0, g_cfg.exclusive ? 2 : 1);
+            (int)g_cfg.display, (int)g_cfg.next_fullscreen);
     fprintf(f, "aspect = %d:%d\n", g_cfg.aspect_w, g_cfg.aspect_h);
     if (g_cfg.window_w > 0 && g_cfg.window_h > 0) fprintf(f, "window = %dx%d\n", g_cfg.window_w, g_cfg.window_h);
     else fprintf(f, "window = auto\n");

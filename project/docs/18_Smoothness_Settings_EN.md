@@ -65,8 +65,8 @@ shown and whether the picture tears**.
   unsteady in that case. Anywhere else it does nothing.
 - **Low-latency present** (experimental): a frame goes out as soon as it is drawn, less delay from a key press to the
   picture; windowed it may look less even than off. It does not change the game's speed.
-- **Alt+Enter**: switches between a window and fullscreen. From 2.2.37.9 it remembers whether you used borderless or
-  exclusive fullscreen, and goes back to that one.
+- **Alt+Enter**: goes round window -> borderless -> window -> exclusive fullscreen -> window ..., showing the mode at the
+  picture's bottom right. Quitting keeps the last mode and where the round is.
 
 ## Where the settings are
 

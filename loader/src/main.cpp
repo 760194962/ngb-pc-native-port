@@ -282,9 +282,9 @@ bool parse_args()
             if (swscanf_s(v.c_str(), L"%d:%d", &w, &h) == 2 && w > 0 && h > 0) g_cfg.aspect_w = w, g_cfg.aspect_h = h;
             settings_mark_cli("aspect");
         }
-        // borderless as before: black.ini's fullscreen_kind (the fullscreen Alt+Enter goes to) does not apply either
-        else if (a == L"--fullscreen") { g_cfg.fullscreen = true; settings_mark_cli("fullscreen"); settings_mark_cli("fullscreen_kind"); }
-        else if (a == L"--windowed") { g_cfg.fullscreen = false; settings_mark_cli("fullscreen"); settings_mark_cli("fullscreen_kind"); }
+        // this run only: neither black.ini's mode nor where its Alt+Enter goes is saved from it
+        else if (a == L"--fullscreen") { g_cfg.display = DisplayMode::Borderless; settings_mark_cli("fullscreen"); settings_mark_cli("fullscreen_kind"); }
+        else if (a == L"--windowed") { g_cfg.display = DisplayMode::Window; settings_mark_cli("fullscreen"); settings_mark_cli("fullscreen_kind"); }
         else if (a == L"--fullscreen-res") {
             settings_mark_cli("fullscreen_res");
             std::wstring v;
@@ -831,7 +831,7 @@ int run(void *reserve, unsigned reserve_size)
          "timer_vblank %d, move_flash %d",
          g_cfg.render_native ? "native" : g_cfg.render_h ? std::to_string(g_cfg.render_h).c_str() : "scale", g_cfg.scale,
          g_cfg.aa, g_cfg.seam_fill, g_cfg.effects_native, g_cfg.shadow_scale, g_cfg.vsync, g_cfg.perfhud, g_cfg.aniso, g_cfg.widescreen,
-         g_cfg.fullscreen ? (g_cfg.exclusive ? 2 : 1) : 0, g_cfg.exclusive ? 2 : 1,
+         (int)g_cfg.display, (int)g_cfg.next_fullscreen,
          g_cfg.window_w, g_cfg.window_h, g_cfg.fs_window_res ? "window" : "screen", g_cfg.gain, g_cfg.gamma, g_cfg.shadow_pcf, g_cfg.msaa,
          g_cfg.present_early ? 1 : 0, g_cfg.exclusive_60hz ? 1 : 0, g_cfg.timer_vblank ? 1 : 0, g_cfg.move_flash ? 1 : 0);
 

@@ -3348,7 +3348,7 @@ void reset_page(Page p)
 {
     if (p == kDisplay) {
         black_ini_set("fullscreen", "0");
-        black_ini_set("fullscreen_kind", "1"); // Alt+Enter: borderless, as with no black.ini
+        black_ini_set("fullscreen_kind", "1"); // from a window Alt+Enter goes borderless first, as with no black.ini
         black_ini_set("widescreen", "1");
         black_ini_set("aspect", "16:9");
         black_ini_set("window", "auto");
@@ -3540,8 +3540,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 set_gpu_preference(gpu_choices()[row].pref);
             if (g.list_open == kHitMode && row >= 0 && row < 3) {
                 black_ini_set("fullscreen", row == 0 ? "0" : row == 1 ? "2" : "1");
-                // a fullscreen choice is also the one Alt+Enter goes to from a window; Window keeps the last one
-                if (row != 0) black_ini_set("fullscreen_kind", row == 1 ? "2" : "1");
+                // fullscreen_kind (where Alt+Enter goes from a window) is the game's: entering a fullscreen makes the
+                // other one next (loader d3d/host.cpp switch_display)
             }
             if (g.list_open == kHitAspect && row >= 0 && row < kAspectCount) row = kAspectShown[row]; // the list's order
             if (g.list_open == kHitAspect && row >= 0 && row < kAspectCount && row != aspect_index() && (row != kAspectMonitor || g_monitor_aspect_ok)) {

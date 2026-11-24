@@ -308,6 +308,19 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.12: Alt+Enter goes round window, borderless, window, fullscreen
+
+- **Alt+Enter goes round**: window -> borderless -> window -> fullscreen -> window ..., always a window between borderless
+  and fullscreen. From a window it used to go only to the fullscreen chosen in the launcher.
+- **Each switch says so**: about 4 s at the picture's bottom right, e.g. "Display mode: Window  (Alt+Enter: Fullscreen)":
+  the mode now and where the next Alt+Enter goes. Falling back to a window when fullscreen is not available says so too.
+- **Kept on quitting**: the last mode (`fullscreen`) and which fullscreen Alt+Enter goes to from a window (`fullscreen_kind`):
+  the next start carries on round. The in-game PC SETTINGS fullscreen switch follows the same rule.
+- Code cleanup: one variable meant both "exclusive now" and "where Alt+Enter goes", pieced together by a function as the
+  settings were read, and one function did every way in and out. Now the mode is one enum, the rule is in one place, and
+  entering and leaving are a function each. Alt+Enter within the frame an exclusive fullscreen takes to go back to a window
+  is no longer taken (the mode recorded and the real one could differ).
+
 ### 2.2.37.11: the mouse hidden from the start, Esc lets go of it
 
 - **The game takes the mouse when it starts**: in a window, borderless or fullscreen alike the cursor goes at once, no
@@ -668,8 +681,11 @@ ngb-pc-native-port\
 Check that the hash of `default.xbe` matches the table above: `Get-FileHash game\x21\default.xbe -Algorithm SHA256`.
 If the program or the game is missing, `run.bat`'s window says what is missing.
 
-In the game, **Alt+Enter** switches between window and fullscreen, and the setting is saved. Fullscreen is either
-exclusive (`fullscreen = 2` in `black.ini`) or borderless (`fullscreen = 1`); the launcher's Display page chooses.
+There are three display modes: window (`fullscreen = 0` in `black.ini`), borderless (`fullscreen = 1`) and exclusive
+fullscreen (`fullscreen = 2`); the launcher's Display page chooses the one to start in. In the game **Alt+Enter** goes
+round: window -> borderless -> window -> fullscreen -> window ..., always a window between borderless and fullscreen;
+each switch shows the mode and where the next one goes at the picture's bottom right. Quitting keeps the last mode and
+which fullscreen Alt+Enter goes to from a window next (`fullscreen_kind`: 1 borderless, 2 fullscreen).
 
 On a slow machine, set **Fullscreen size** on the Display page to "Window size" (`fullscreen_res = window`, default
 `screen`): fullscreen and borderless then show the picture at the window size (the screen's shape, shrunk to fit it)
