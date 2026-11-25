@@ -2611,13 +2611,17 @@ void apply_rhw_tex_scales(uint8_t *verts, uint32_t count, uint32_t stride, const
 }
 
 // The HUD in play on a screen wider than 16:9 (players' request, 2026-11-09; 16:10 too up to 2.2.37.12; the idea from
-// ngbrecomp's renderer, docs/TECHNICAL "HudPlace"/"HudGroup", written anew here). The game draws one 16:9 layout; squeeze_169 keeps its shape. Menus,
-// the title, chapter cards and movies stay whole about the middle, as before. In play (a frame with 3D drawn into the
-// back buffer before its 2D) each HUD element instead keeps to its own side: the health bar and karma to the top-left
-// corner, prompts and the right-hand gauges to the right, what is about the middle to the middle. An element is a
-// group of pieces drawn within a few pixels of each other (a gauge, its caps and the words under it; a line of text),
-// found at each frame's end and used for the next frame's pieces; a piece no element of the frame before holds goes by
-// its own box (along the top) or to the middle until then. Positions: Xbox pixels of the 720x480 buffer.
+// ngbrecomp's renderer, docs/TECHNICAL "HudPlace"/"HudGroup", written anew here). The game draws one 16:9 layout;
+// squeeze_169 keeps its shape. Menus, the title, chapter cards and movies stay whole about the middle, as before. In play
+// (a frame with 3D drawn into the back buffer before its 2D) each HUD element instead keeps to its own side: the health
+// bar and karma to the top-left corner, prompts and the right-hand gauges to the right, what is about the middle to the
+// middle. An element is a group of pieces of one kind (HudPiece) drawn within a few pixels of each other (a gauge, its
+// caps and the words under it; a line of text), found at each frame's end and used for the next frame's pieces; a piece
+// no element of the frame before holds goes by its own box (along the top) or to the middle until then. Positions: Xbox
+// pixels of the 720x480 buffer.
+// A piece's kind, grouped only with its own: the HUD's own small pieces; a tall narrow gauge and what is in its column;
+// a screen effect, a picture larger than any piece of the HUD, always about the middle as the 16:9 picture has it.
+enum class HudPiece : uint8_t { Hud, Gauge, Effect };
 struct WideHud {
     struct Box {
         float x0, x1, y0, y1;
@@ -2626,7 +2630,7 @@ struct WideHud {
     struct Elem {
         float x0, x1, y0, y1, ax, ay; // its box and the point it is squeezed about (0, w/2, w; 0, h/2, h)
         uint32_t seen;
-        bool gauge;
+        HudPiece kind;
     };
     uint32_t draws = 0, threed = 0, last3d = 0; // this frame's draws into the back buffer; the 3D ones; the last 3D one
     bool covered = false;                       // this frame drew an opaque colour over the whole screen (an item's screen)
@@ -2737,14 +2741,18 @@ bool hud_gauge(float x0, float x1, float y0, float y1, float w, float h, const W
     return g && x0 >= g->x0 - 4 && x1 <= g->x1 + 4 && y0 >= g->y0 - 14 && y1 <= g->y1 + 14;
 }
 
+// A picture larger than any piece of the HUD: a screen effect. The Talisman of Rebirth's revival draws its glow as
+// pictures 200-290 x 170-260 (of 720 x 480) about the health bar; joined with it into one element whose middle moved
+// as the glow grew, the health bar jumped between the side and the middle (the user, 2026-11-25, 21:9). The HUD's
+// largest pieces: the health bar 174 x 67, the prompts 144 x 76.
+bool hud_effect(float x0, float x1, float y0, float y1, float w, float h) { return y1 - y0 > h * 0.3f && x1 - x0 > w * 0.15f; }
+
 void wide_hud_place(float x0, float x1, float y0, float y1, float w, float h, float &ax, float &ay)
 {
     ax = w * 0.5f, ay = h * 0.5f;
     float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
     if (g_wh.covered) return; // over an opaque cover: the screen's own art, whole about the middle
-    if (g_wh.panel && cx >= g_wh.panel_box.x0 - 8 && cx <= g_wh.panel_box.x1 + 8 && cy >= g_wh.panel_box.y0 - 8 &&
-        cy <= g_wh.panel_box.y1 + 8)
-        return; // inside a chapter clear's panel: with the panel
+    if (hud_effect(x0, x1, y0, y1, w, h)) return;
     bool gauge = hud_gauge(x0, x1, y0, y1, w, h);
     for (const WideHud::Box &b : g_wh.gauge_boxes)
         if (!gauge && fabsf(b.x0 - x0) <= 3 && fabsf(b.x1 - x1) <= 3 && fabsf(b.y0 - y0) <= 3 && fabsf(b.y1 - y1) <= 3)
@@ -2752,21 +2760,34 @@ void wide_hud_place(float x0, float x1, float y0, float y1, float w, float h, fl
     if (!gauge) {
         bool in_column = false, in_other = false;
         for (const WideHud::Elem &e : g_wh.elems) {
-            if (e.gauge && hud_gauge(x0, x1, y0, y1, w, h, &e)) in_column = true;
-            if (!e.gauge && cx >= e.x0 - 2 && cx <= e.x1 + 2 && cy >= e.y0 - 2 && cy <= e.y1 + 2) in_other = true;
+            if (e.kind == HudPiece::Gauge && hud_gauge(x0, x1, y0, y1, w, h, &e)) in_column = true;
+            if (e.kind == HudPiece::Hud && cx >= e.x0 - 2 && cx <= e.x1 + 2 && cy >= e.y0 - 2 && cy <= e.y1 + 2) in_other = true;
         }
         gauge = in_column && !in_other;
     }
-    const WideHud::Elem *hit = nullptr;
-    float best = 1e30f;
-    for (const auto *list : {&g_wh.elems, &g_wh.memory}) {
-        for (const WideHud::Elem &e : *list) {
-            if (e.gauge != gauge || cx < e.x0 - 2 || cx > e.x1 + 2 || cy < e.y0 - 2 || cy > e.y1 + 2) continue;
+    const HudPiece kind = gauge ? HudPiece::Gauge : HudPiece::Hud;
+    // the smallest element of the piece's kind holding its middle, or (whole) the whole piece
+    auto holding = [&](const std::vector<WideHud::Elem> &list, bool whole) {
+        const WideHud::Elem *hit = nullptr;
+        float best = 1e30f;
+        for (const WideHud::Elem &e : list) {
+            if (e.kind != kind || cx < e.x0 - 2 || cx > e.x1 + 2 || cy < e.y0 - 2 || cy > e.y1 + 2) continue;
+            if (whole && (x0 < e.x0 - 2 || x1 > e.x1 + 2 || y0 < e.y0 - 2 || y1 > e.y1 + 2)) continue;
             float area = (e.x1 - e.x0) * (e.y1 - e.y0);
             if (area < best) best = area, hit = &e;
         }
-        if (hit) break; // the frame before's elements first; one seen again within the last half minute after
+        return hit;
+    };
+    if (g_wh.panel && cx >= g_wh.panel_box.x0 - 8 && cx <= g_wh.panel_box.x1 + 8 && cy >= g_wh.panel_box.y0 - 8 &&
+        cy <= g_wh.panel_box.y1 + 8) {
+        // Inside a chapter clear's panel: what is new on it goes with the panel; a piece wholly within an element of the
+        // HUD from before the panel came (the memory is not changed while it is up) keeps that element's side
+        if (const WideHud::Elem *m = holding(g_wh.memory, true)) ax = m->ax, ay = m->ay;
+        return;
     }
+    // the frame before's elements first; one seen again within the last half minute after
+    const WideHud::Elem *hit = holding(g_wh.elems, false);
+    if (!hit) hit = holding(g_wh.memory, false);
     if (hit) {
         ax = hit->ax, ay = hit->ay;
         return;
@@ -2800,25 +2821,28 @@ void wide_hud_frame_end()
         while (up[i] != i) i = up[i] = up[up[i]];
         return i;
     };
-    std::vector<char> gauge(n, 0);
-    for (size_t i = 0; i < n; i++) gauge[i] = hud_gauge(b[i].x0, b[i].x1, b[i].y0, b[i].y1, w, h);
+    std::vector<HudPiece> kind(n, HudPiece::Hud);
+    for (size_t i = 0; i < n; i++)
+        kind[i] = hud_effect(b[i].x0, b[i].x1, b[i].y0, b[i].y1, w, h)  ? HudPiece::Effect
+                  : hud_gauge(b[i].x0, b[i].x1, b[i].y0, b[i].y1, w, h) ? HudPiece::Gauge
+                                                                         : HudPiece::Hud;
     for (size_t i = 0; i < n; i++) // pieces in a tall gauge's column, drawn a few draws from it, are the gauge's
-        for (size_t j = 0; j < n && !gauge[i]; j++) {
+        for (size_t j = 0; j < n && kind[i] == HudPiece::Hud; j++) {
             const WideHud::Box &g = b[j];
-            WideHud::Elem col = {g.x0, g.x1, g.y0, g.y1, 0, 0, 0, true};
+            WideHud::Elem col = {g.x0, g.x1, g.y0, g.y1, 0, 0, 0, HudPiece::Gauge};
             if (j != i && g.y1 - g.y0 > h * 0.15f && g.x1 - g.x0 < w * 0.1f && b[i].at + 6 >= g.at && g.at + 6 >= b[i].at &&
                 hud_gauge(b[i].x0, b[i].x1, b[i].y0, b[i].y1, w, h, &col))
-                gauge[i] = 1;
+                kind[i] = HudPiece::Gauge;
         }
     s.gauge_boxes.clear();
     for (size_t i = 0; i < n; i++)
-        if (gauge[i]) s.gauge_boxes.push_back(b[i]);
+        if (kind[i] == HudPiece::Gauge) s.gauge_boxes.push_back(b[i]);
     for (size_t i = 0; i < n; i++)
         for (size_t j = i + 1; j < n; j++) {
             const WideHud::Box &p = b[i], &q = b[j];
             // a line of text: words of one height join across a gap of up to 0.6 letter heights
             float gx = fabsf(p.y0 - q.y0) <= 2 && fabsf(p.y1 - q.y1) <= 2 ? std::max(10.0f, (p.y1 - p.y0) * 0.6f) : 10.0f;
-            if (gauge[i] == gauge[j] && p.x0 - gx <= q.x1 && q.x0 - gx <= p.x1 && p.y0 - 14 <= q.y1 && q.y0 - 14 <= p.y1)
+            if (kind[i] == kind[j] && p.x0 - gx <= q.x1 && q.x0 - gx <= p.x1 && p.y0 - 14 <= q.y1 && q.y0 - 14 <= p.y1)
                 up[root((int)i)] = root((int)j);
         }
     std::vector<WideHud::Elem> elems;
@@ -2827,7 +2851,7 @@ void wide_hud_frame_end()
         int r = root((int)i);
         if (slot[r] < 0) {
             slot[r] = (int)elems.size();
-            elems.push_back({b[i].x0, b[i].x1, b[i].y0, b[i].y1, 0, 0, s.frame, gauge[i] != 0});
+            elems.push_back({b[i].x0, b[i].x1, b[i].y0, b[i].y1, 0, 0, s.frame, kind[i]});
         } else {
             WideHud::Elem &e = elems[slot[r]];
             e.x0 = std::min(e.x0, b[i].x0), e.x1 = std::max(e.x1, b[i].x1);
@@ -2837,7 +2861,8 @@ void wide_hud_frame_end()
     bool panel = false;
     WideHud::Box pb = {1e30f, -1e30f, 1e30f, -1e30f, 0};
     for (WideHud::Elem &e : elems) {
-        hud_side(e.x0, e.x1, e.y0, e.y1, w, h, e.ax, e.ay);
+        if (e.kind == HudPiece::Effect) e.ax = w * 0.5f, e.ay = h * 0.5f; // as wide_hud_place puts each of its pieces
+        else hud_side(e.x0, e.x1, e.y0, e.y1, w, h, e.ax, e.ay);
         // a panel: wide, tall, across the middle (a chapter clear); an area's name in a band is not one
         float ew = std::min(e.x1, w) - std::max(e.x0, 0.0f), eh = std::min(e.y1, h) - std::max(e.y0, 0.0f);
         if (ew > w * 0.35f && eh > h * 0.45f && e.y0 < h * 0.35f && e.y1 > h * 0.65f &&
@@ -2859,7 +2884,7 @@ void wide_hud_frame_end()
     if (!s.panel) {
         for (const WideHud::Elem &e : elems) {
             s.memory.erase(std::remove_if(s.memory.begin(), s.memory.end(), [&](const WideHud::Elem &m) {
-                               return m.gauge == e.gauge && m.x0 < e.x1 && e.x0 < m.x1 && m.y0 < e.y1 && e.y0 < m.y1;
+                               return m.kind == e.kind && m.x0 < e.x1 && e.x0 < m.x1 && m.y0 < e.y1 && e.y0 < m.y1;
                            }),
                            s.memory.end());
             s.memory.push_back(e);
@@ -2876,7 +2901,7 @@ void wide_hud_frame_end()
         for (const WideHud::Elem &e : elems) {
             char t[64];
             snprintf(t, sizeof t, " [%.0f-%.0f,%.0f-%.0f %c%c%s]", e.x0, e.x1, e.y0, e.y1, e.ax == 0 ? 'L' : e.ax == w ? 'R' : 'M',
-                     e.ay == 0 ? 'T' : e.ay == h ? 'B' : 'C', e.gauge ? "g" : "");
+                     e.ay == 0 ? 'T' : e.ay == h ? 'B' : 'C', e.kind == HudPiece::Gauge ? "g" : e.kind == HudPiece::Effect ? "e" : "");
             sig += t;
         }
         if (s.panel) sig += " PANEL";
