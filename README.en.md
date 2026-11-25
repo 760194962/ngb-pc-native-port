@@ -260,6 +260,19 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.13: the health bar steady through the Talisman of Rebirth, 16:10 back to the centred HUD
+
+- **The health bar no longer jumps when the Talisman of Rebirth revives Ryu** (21:9 and the ultrawides): its glow is drawn
+  as large 2D pictures, which were grouped with the health bar into one HUD element whose middle moved as the glow grew.
+  The 2D pieces are now of three kinds, the HUD, gauges and screen effects (over 30% of the screen tall and 15% wide),
+  grouped only with their own kind; a screen effect stays in the middle as the 16:9 picture has it. On a chapter clear's
+  panel what is new goes with the panel, and the HUD that was there before keeps its side.
+- **16:10 shows the HUD centred again**: the whole 16:9 layout in the middle with a little room above and below, as before
+  2.2.6; 21:9 and the ultrawides keep the HUD at the sides.
+- Code cleanup (no change in behaviour): the 2D on a wide screen is split into the shape, what each draw is and the squeeze,
+  no longer one 200-line function; every program names its game and role (main, arcade, SNES, downloader, updater,
+  dashboard) and one table decides what each gets installed. The 28 local programs install the same, line for line.
+
 ### 2.2.37.12: Alt+Enter goes round window, borderless, window, fullscreen
 
 - **Alt+Enter goes round**: window -> borderless -> window -> fullscreen -> window ..., always a window between borderless
