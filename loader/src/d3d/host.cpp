@@ -1,4 +1,5 @@
 #include "d3d/apicount.h"
+#include "game_features.h"
 #include "d3d/draw.h"
 #include "d3d/drawwarm.h"
 #include "d3d/host.h"
@@ -348,6 +349,7 @@ DWORD WINAPI ui_thread(void *)
         logf("host: window %s", GetForegroundWindow() == g_hwnd ? "in front" : "not given the front by Windows");
     }
     if (g_cfg.display != DisplayMode::Window) enter_fullscreen(g_cfg.display); // black.ini's mode; no message at the start
+    mouse::start(); // shown, asked for the front, in its mode: the game takes the mouse (input/mouse.h)
     SetEvent(g_window_ready);
     MSG m;
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {
@@ -435,7 +437,7 @@ const wchar_t *game_title()
 {
     // each Ninja Gaiden Black build has its own (build_profile.h); its bundled programs keep x2.1's
     if (g_cfg.profile && g_cfg.profile->window_title) return g_cfg.profile->window_title;
-    if (g_cfg.profile && !g_cfg.profile->black) return kProfileNgbHurricaneX21.window_title;
+    if (!running_unknown() && !running_game(Game::Black)) return kProfileNgbHurricaneX21.window_title;
     return L"BLACK";
 }
 

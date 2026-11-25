@@ -101,9 +101,9 @@ bool apply_line(const char *line, bool from_cli)
         else if (k == "vsync") g_cfg.vsync = v != 0;
         else if (k == "timer_vblank") g_cfg.timer_vblank = v != 0; // the launcher's fixed 60 Hz game clock
         else if (k == "perfhud") g_cfg.perfhud = v != 0;
-        else if (k == "multicore") g_cfg.multicore = v != 0;
+        else if (k == "multicore") g_cfg.multicore = v != 0; // the launcher's CPU cores: automatic (experimental)
         else if (k == "msaa") g_cfg.msaa = std::clamp(atoi(val), 0, 16); // MSAA samples (0 off)
-        else if (k == "hud_centre") g_cfg.hud_centre = v != 0; // 21:9 / 16:10: the HUD about the middle, as before // the launcher's CPU cores: automatic (experimental)
+        else if (k == "hud_centre") g_cfg.hud_centre = v != 0; // wider than 16:9: the HUD about the middle, as before
         else if (k == "aniso") g_cfg.aniso = std::clamp(atoi(val), 1, 16);
         else if (k == "fps") g_cfg.fps = atoi(val) == 60 ? 60 : 30;
         else if (k == "widescreen") g_cfg.widescreen = v != 0;

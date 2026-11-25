@@ -4,6 +4,7 @@
 // the window captures the mouse),
 // keys and mouse buttons are bound to the game's actions (input/bindings.cpp, PC SETTINGS > CONTROLS > KEY BINDINGS).
 #include "audio/output.h"
+#include "game_features.h"
 #include "build_profile.h"
 #include "d3d/dispatch.h"
 #include "d3d/xd3d.h"
@@ -551,7 +552,7 @@ void read_pad(uint32_t port, XGamepad &g)
     // Mouse look, the key bindings and the movie skip read BLACK's game objects (binding table 0x2F3BD4, the
     // movie player at *0x2D45F0): BLACK only. Ninja Gaiden Black and its bundled programs: keys pressed into the pad
     // and the PC pad's buttons remapped (input/padkeys.cpp).
-    if (!g_cfg.profile || !g_cfg.profile->black) {
+    if (!running_game(Game::Black)) {
         padkeys::Pad p = {g.wButtons, {}, g.sThumbLX, g.sThumbLY, g.sThumbRX, g.sThumbRY};
         memcpy(p.analog, g.bAnalogButtons, 8);
         const bool front = GetForegroundWindow() == host3d::window();

@@ -102,7 +102,7 @@ Ninja Gaiden Black, Hurricane vb-zh-x2.1 · Ninja Gaiden Black, original US rele
 <img src="docs/screenshots/black_railyard.jpg" alt="The military base rail yard" width="32.3%">
 </p>
 
-**Screen shapes** (Ninja Gaiden Black, the same moment): 4:3, 16:9, 16:10, 21:9. At 16:10 and 21:9 the picture is wider and the HUD sits at the sides.
+**Screen shapes** (Ninja Gaiden Black, the same moment): 4:3, 16:9, 16:10, 21:9. At 21:9 the picture is wider and the HUD sits at the sides; 16:10 keeps the 16:9 layout.
 
 4:3 · 16:9
 
@@ -308,6 +308,19 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.2.37.13: the health bar steady through the Talisman of Rebirth, 16:10 back to the centred HUD
+
+- **The health bar no longer jumps when the Talisman of Rebirth revives Ryu** (21:9 and the ultrawides): its glow is drawn
+  as large 2D pictures, which were grouped with the health bar into one HUD element whose middle moved as the glow grew.
+  The 2D pieces are now of three kinds, the HUD, gauges and screen effects (over 30% of the screen tall and 15% wide),
+  grouped only with their own kind; a screen effect stays in the middle as the 16:9 picture has it. On a chapter clear's
+  panel what is new goes with the panel, and the HUD that was there before keeps its side.
+- **16:10 shows the HUD centred again**: the whole 16:9 layout in the middle with a little room above and below, as before
+  2.2.6; 21:9 and the ultrawides keep the HUD at the sides.
+- Code cleanup (no change in behaviour): the 2D on a wide screen is split into the shape, what each draw is and the squeeze,
+  no longer one 200-line function; every program names its game and role (main, arcade, SNES, downloader, updater,
+  dashboard) and one table decides what each gets installed. The 28 local programs install the same, line for line.
+
 ### 2.2.37.12: Alt+Enter goes round window, borderless, window, fullscreen
 
 - **Alt+Enter goes round**: window -> borderless -> window -> fullscreen -> window ..., always a window between borderless
@@ -320,6 +333,11 @@ updating to a new version**: a new version drops the draw states learned locally
   settings were read, and one function did every way in and out. Now the mode is one enum, the rule is in one place, and
   entering and leaving are a function each. Alt+Enter within the frame an exclusive fullscreen takes to go back to a window
   is no longer taken (the mode recorded and the real one could differ).
+- **The cursor also goes at once when the game starts the SNES trilogy, the arcade game or the dashboard (and back)**:
+  from 2.2.37.11 the game takes the mouse at the start, but on this way the new program's window had the keyboard focus
+  before it was in front, so it never did. Now the window says when its start is done, and its first time in front does too.
+- **Handing over between two programs no longer loses the cursor clip**: the old program lets go of the mouse before the
+  new one runs; the old one quitting could clear the clip the new one had just set. (Added as 2.2.37.12 was replaced.)
 
 ### 2.2.37.11: the mouse hidden from the start, Esc lets go of it
 

@@ -1,7 +1,7 @@
 // Per-build facts the loader needs before it can run an XBE: which build it is (SHA-256 of default.xbe), how many
 // fs:[KPCR] accesses the fs patcher should find, where the CRT initializer tables are (their entries are library
-// code that must run natively), which XBE sections hold the libraries replaced by HLE, and whether the BLACK-only
-// game patches apply. Everything else (section layout, kernel imports, entry point) is read from the XBE itself.
+// code that must run natively), which XBE sections hold the libraries replaced by HLE, and which game and program it is
+// (what the port does for it: game_features.h). Everything else (section layout, kernel imports, entry point) is read from the XBE itself.
 //
 // Builds: BLACK NTSC-U (the original black-pc target) and NINJA GAIDEN BLACK "Hurricane" vb-zh-x2.1 (this fork).
 #pragma once
@@ -36,12 +36,30 @@ inline constexpr Wide2D kWide2DNgb = {0x0031DB8C, 0x0013A8E6, 0x00222730, 0x0022
 // 0x212410), each return address after the same call of DrawVerticesUP (0x3B0540), checked in the disassembly.
 inline constexpr Wide2D kWide2DNg04Tu = {0x0030F0EC, 0x00137B26, 0x00212410, 0x002124FA};
 
+// The game a build belongs to
+enum class Game : uint8_t {
+    Black,            // BLACK (Criterion / EA, 2006; 黑煞), the game black-pc -- this loader's origin -- was written for
+    NinjaGaidenBlack, // Ninja Gaiden Black (忍者龙剑传 黑之章) and the builds patched from it
+    NinjaGaiden2004,  // Ninja Gaiden (2004)
+    XboxDashboard,    // the console's Xbox Live dashboard
+};
+// Which of its game's programs a build is: the game itself or a program it launches
+enum class Program : uint8_t {
+    Main,       // the game itself (default.xbe)
+    Arcade,     // Ninja Gaiden Black's arcade Ninja Gaiden (NinjaTomoe, NinjaTrilogy)
+    Snes,       // the SNES trilogy (Ninja Gaiden Black Hurricane's NinjaFCJ / NinjaFCU; Ninja Gaiden 2004's Tomoe / Trilogy)
+    Downloader, // Ninja Gaiden 2004's Xbox Live content downloader
+    Updater,    // Ninja Gaiden 2004's Xbox Live title updater
+    Dashboard,  // the Xbox Live dashboard
+};
+
 struct BuildProfile {
     const char *name;          // shown in the log and in the "wrong build" message
     const char *sha256;        // of default.xbe, lower-case hex
     uint32_t title_id;
     int fs_patch_count;        // expected fs:[0x04/0x20/0x24/0x28/0x58] rewrites (xthread.cpp)
-    bool black;                // the BLACK-specific game patches, HLE tables and front-end work apply
+    Game game;
+    Program program;
     InitTableRange init_tables[3]; // _rtinit, _cinit C and C++ tables (XAPI 5849 layout); unused = {0, 0}
     const char *hooked_sections[8]; // library sections whose every function is HLE or stop-on-first-call; nullptr-terminated
     uint32_t xdevice_type_gamepad; // XAPI's g_DeviceType_Gamepad descriptor (XbSymbolDatabase), the XDEVICE_TYPE_GAMEPAD value
@@ -50,8 +68,8 @@ struct BuildProfile {
     const uint32_t *rdtsc_sites;   // rdtsc instructions in game / XAPI code, trapped to a 733.33 MHz counter (hooks.cpp)
     int rdtsc_site_count;
     uint32_t rdtsc_qpc_site;       // the one inside XAPI's QueryPerformanceCounter: full rate; the engine's timer sites get --tsc-divisor
-    const char *aux;               // a bundled program of Ninja Gaiden Black (loader/src/aux, tools/gen_aux_tables.py): its tables'
-                                   // name; nullptr for BLACK and Ninja Gaiden Black itself
+    const char *tables;            // its HLE tables' name (loader/src/aux, tools/gen_aux_tables.py); nullptr: the main tables
+                                   // (BLACK, Ninja Gaiden Black). Builds of the same code share one (NG2004's SNES: NinjaFCJ / FCU)
     const wchar_t *window_title = nullptr; // Ninja Gaiden Black builds: the game window's title (nullptr: BLACK)
     bool chinese = false;                  // its menus have Chinese text (x2.1's language switch, [0xDB9890] = 0)
     const LoadMeter *load_meter = nullptr; // the engine's load meter (game_load.cpp); nullptr: none
@@ -65,7 +83,7 @@ inline const BuildProfile kProfileBlack = {
     "df2739c372d254a90aeeccf5971d12097f22d89fbb90db021fda96dd4deb68f6",
     0x45410083,
     34,
-    true,
+    Game::Black, Program::Main,
     {{0x2964F0, 0x296B6C}, {0x296B70, 0x296B84}, {0, 0}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x0027CF4C,
@@ -93,7 +111,7 @@ inline const uint32_t kNgbRdtscSites[] = {0x0030CA3F, 0x0030CAA1, 0x0030E060, 0x
 // added HANZI section is code too), the window title and whether it has Chinese is the US release's.
 constexpr BuildProfile ngb_family(const char *name, const char *sha256, int fs_patch_count, const wchar_t *title, bool chinese)
 {
-    return {name, sha256, 0x5443000D, fs_patch_count, false,
+    return {name, sha256, 0x5443000D, fs_patch_count, Game::NinjaGaidenBlack, Program::Main,
             {{0x4162C0, 0x4162CC}, {0x4162D0, 0x41634C}, {0x416350, 0x416368}},
             {"D3D", "DSOUND", "XPP", nullptr},
             0x003D9694, 0x0032A293, 0x0045E84C, kNgbRdtscSites, 6, 0x00376E44, nullptr, title, chinese, &kLoadMeterNgb,
@@ -141,7 +159,7 @@ inline const uint32_t kTomoeQpc[] = {0x0006CD14};
 inline const BuildProfile kProfileNinjaTomoe = {
     "NINJA GAIDEN BLACK x2.1: NinjaTomoe.xbe (arcade Ninja Gaiden, Japanese)",
     "2aff93ad098b3b5762d294d9c17a44c36d04bfa31843e413cf5e2963f14282ff",
-    0x5443000D, 31, false,
+    0x5443000D, 31, Game::NinjaGaidenBlack, Program::Arcade,
     {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTomoe",
@@ -149,7 +167,7 @@ inline const BuildProfile kProfileNinjaTomoe = {
 inline const BuildProfile kProfileNinjaTrilogy = {
     "NINJA GAIDEN BLACK x2.1: NinjaTrilogy.xbe (arcade Ninja Gaiden, US)",
     "31f8efd073abba2ac339ee44f4b13011844afc470b166f826dc12f6b79ff5621",
-    0x5443000D, 31, false,
+    0x5443000D, 31, Game::NinjaGaidenBlack, Program::Arcade,
     {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTrilogy",
@@ -159,7 +177,7 @@ inline const BuildProfile kProfileNinjaTrilogy = {
 inline const BuildProfile kProfileNinjaTomoeRetail = {
     "NINJA GAIDEN BLACK NTSC-U: NinjaTomoe.xbe (arcade Ninja Gaiden, Japanese; retail certificate)",
     "8d761be1789bb9d000d561debab5bb6c8d7be376d7dec452f6020043e0b653f8",
-    0x5443000D, 31, false,
+    0x5443000D, 31, Game::NinjaGaidenBlack, Program::Arcade,
     {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTomoe",
@@ -167,7 +185,7 @@ inline const BuildProfile kProfileNinjaTomoeRetail = {
 inline const BuildProfile kProfileNinjaTrilogyRetail = {
     "NINJA GAIDEN BLACK NTSC-U: NinjaTrilogy.xbe (arcade Ninja Gaiden, US; retail certificate)",
     "c86ed2baa91f204b176b7329bc087ed499b1ecd4146a62bfc493a161a1b44330",
-    0x5443000D, 31, false,
+    0x5443000D, 31, Game::NinjaGaidenBlack, Program::Arcade,
     {{0x90440, 0x9044C}, {0x90450, 0x90468}, {0x9046C, 0x9047C}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x0008798C, 0, 0, kTomoeQpc, 1, 0x0006CD14, "NinjaTrilogy",
@@ -177,7 +195,7 @@ inline const uint32_t kFcjQpc[] = {0x0033B5D4};
 inline const BuildProfile kProfileNinjaFCJ = {
     "NINJA GAIDEN BLACK x2.1: NinjaFCJ.xbe (SNES trilogy, Japanese)",
     "b5b8754e6008f3b2e773c1eb9afe50ee9decebf0eadb945a9953369b1b9f4f31",
-    0x5443000D, -1, false,
+    0x5443000D, -1, Game::NinjaGaidenBlack, Program::Snes,
     {{0x35C3C0, 0x35C3CC}, {0x35C3D0, 0x35C3E8}, {0x35C3EC, 0x35C3FC}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x003547AC, 0, 0, kFcjQpc, 1, 0x0033B5D4, "NinjaFCJ",
@@ -186,7 +204,7 @@ inline const uint32_t kFcuQpc[] = {0x001D5E94};
 inline const BuildProfile kProfileNinjaFCU = {
     "NINJA GAIDEN BLACK x2.1: NinjaFCU.xbe (SNES trilogy, US)",
     "9fac4bb5162b8a99c65c0fbb6289ee81db4c42bdbd253807e74261a68e3399b1",
-    0x5443000D, -1, false,
+    0x5443000D, -1, Game::NinjaGaidenBlack, Program::Snes,
     {{0x1F6C00, 0x1F6C0C}, {0x1F6C10, 0x1F6C28}, {0x1F6C2C, 0x1F6C3C}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x001EF06C, 0, 0, kFcuQpc, 1, 0x001D5E94, "NinjaFCU",
@@ -202,7 +220,7 @@ inline const uint32_t kNg04TuRdtscSites[] = {0x002FE53F, 0x002FE5A1, 0x002FFAC0,
 inline const BuildProfile kProfileNg04Tu = {
     "NINJA GAIDEN (2004) title update 1.06.04",
     "86475ba502c0e7f147334b167041c3fd310f8fb34f9e77b0ee6e6866e0764ee3",
-    0x54430003, 42, false,
+    0x54430003, 42, Game::NinjaGaiden2004, Program::Main,
     {{0x3F6C00, 0x3F6C0C}, {0x3F6C10, 0x3F6C5C}, {0x3F6C60, 0x3F6C78}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x003C0234, 0x0031AF77, 0x0043EF3C, kNg04TuRdtscSites, 6, 0x00361474, "NG04TU", L"Ninja Gaiden", false, &kLoadMeterNg04Tu,
@@ -223,7 +241,7 @@ inline constexpr Wide2D kWide2DNg04Disc = {0x002FB15C, 0x00129A26, 0x002007A0, 0
 inline const BuildProfile kProfileNg04Disc = {
     "NINJA GAIDEN (2004) disc 1.02.04",
     "bea2a85eea7e6e0ba6c3e201966a46b24b27e25b3307a29bc3de5b4254791308",
-    0x54430003, 42, false,
+    0x54430003, 42, Game::NinjaGaiden2004, Program::Main,
     {{0x3E00E0, 0x3E00EC}, {0x3E00F0, 0x3E013C}, {0x3E0140, 0x3E0158}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x003AC674, 0x0030700B, 0x00422A7C, kNg04DiscRdtscSites, 6, 0x0034D554, "NG04DISC", L"Ninja Gaiden", false,
@@ -235,7 +253,7 @@ inline const BuildProfile kProfileNg04Disc = {
 inline const BuildProfile kProfileNg04Tomoe = {
     "NINJA GAIDEN (2004): NinjaTomoe.xbe (SNES trilogy, Japanese)",
     "d2aeab806769813bdf8a57449beb5725c02269b83e0a50f72768794f62986b1e",
-    0x54430003, -1, false,
+    0x54430003, -1, Game::NinjaGaiden2004, Program::Snes,
     {{0x35C3C0, 0x35C3CC}, {0x35C3D0, 0x35C3E8}, {0x35C3EC, 0x35C3FC}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x003547AC, 0, 0, kFcjQpc, 1, 0x0033B5D4, "NinjaFCJ", L"Ninja Gaiden",
@@ -243,7 +261,7 @@ inline const BuildProfile kProfileNg04Tomoe = {
 inline const BuildProfile kProfileNg04Trilogy = {
     "NINJA GAIDEN (2004): NinjaTrilogy.xbe (SNES trilogy, US)",
     "18eaadc569f31dd239545444ba27fc7b9956177f344e9b421d440a1bc6786ca4",
-    0x54430003, -1, false,
+    0x54430003, -1, Game::NinjaGaiden2004, Program::Snes,
     {{0x1F6C00, 0x1F6C0C}, {0x1F6C10, 0x1F6C28}, {0x1F6C2C, 0x1F6C3C}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x001EF06C, 0, 0, kFcuQpc, 1, 0x001D5E94, "NinjaFCU", L"Ninja Gaiden",
@@ -259,7 +277,7 @@ inline const uint32_t kNg04DlRdtsc[] = {0x14FC0, 0x15004, 0x15033, 0x15067, 0x15
 inline const BuildProfile kProfileNg04Downloader = {
     "NINJA GAIDEN (2004): downloader.xbe (Xbox Live content downloader)",
     "fcce4a17781b5a84483b821e0e8e39f4b4ea97e6b386cbb206f2b6df887f04ce",
-    0x54430003, -1, false,
+    0x54430003, -1, Game::NinjaGaiden2004, Program::Downloader,
     {{0xB6440, 0xB644C}, {0xB6450, 0xB6468}, {0xB646C, 0xB647C}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x000AEB14, 0, 0, kNg04DlRdtsc, sizeof kNg04DlRdtsc / sizeof kNg04DlRdtsc[0], 0x0003FBF1, "NG04DL", L"Ninja Gaiden",
@@ -269,7 +287,7 @@ inline const BuildProfile kProfileNg04Downloader = {
 inline const BuildProfile kProfileNg04DownloaderTu = {
     "NINJA GAIDEN (2004) title update 1.06.04: downloader.xbe (Xbox Live content downloader)",
     "a99574a8ac0d17702b20e4e5821372ab964cfdbecdaee6d4863f296d924b2e92",
-    0x54430003, -1, false,
+    0x54430003, -1, Game::NinjaGaiden2004, Program::Downloader,
     {{0xB6440, 0xB644C}, {0xB6450, 0xB6468}, {0xB646C, 0xB647C}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x000AEB14, 0, 0, kNg04DlRdtsc, sizeof kNg04DlRdtsc / sizeof kNg04DlRdtsc[0], 0x0003FBF1, "NG04DL", L"Ninja Gaiden",
@@ -283,7 +301,7 @@ inline const uint32_t kNg04UpQpc[] = {0x17F5A};
 inline const BuildProfile kProfileNg04Updater = {
     "NINJA GAIDEN (2004): update.xbe (Xbox Live title updater)",
     "ca827a33c4b82e41f6eb3c10f78277ca4c01a329aa8c5ab49981bad4eb9097c3",
-    0x54430003, -1, false,
+    0x54430003, -1, Game::NinjaGaiden2004, Program::Updater,
     {{0x93CE0, 0x93CEC}, {0x93CF0, 0x93D30}, {0x93D34, 0x93D4C}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x0008C5B4, 0, 0, kNg04UpQpc, 1, 0x00017F5A, "NG04UP", L"Ninja Gaiden",
@@ -297,7 +315,7 @@ inline const uint32_t kXodQpc[] = {0x7BA16};
 inline const BuildProfile kProfileXod = {
     "Xbox Dashboard 5971: xonlinedash.xbe (Xbox Live)",
     "ffe013d6067025281bc3c9bc9f9b62c99107baafdfb1005c2e98ae6dbc74714d",
-    0xFFFE0000, 43, false,
+    0xFFFE0000, 43, Game::XboxDashboard, Program::Dashboard,
     {{0x14CF60, 0x14CF6C}, {0x14CF70, 0x14CFE0}, {0x14CFE4, 0x14CFFC}},
     {"D3D", "DSOUND", "XPP", nullptr},
     0x001439FC, 0, 0, kXodQpc, 1, 0x0007BA16, "XOD", L"Xbox Live",

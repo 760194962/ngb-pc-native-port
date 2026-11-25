@@ -8,14 +8,15 @@ namespace mouse {
 
 namespace {
 
-constexpr UINT WM_APP_MOUSE = WM_APP + 0x52; // wParam: kLetGo / kPlayResumed (from the game's input poll)
-enum { kLetGo, kPlayResumed };
+constexpr UINT WM_APP_MOUSE = WM_APP + 0x52; // wParam: kLetGo / kPlayResumed / kHandOver (from the game's threads)
+enum { kLetGo, kPlayResumed, kHandOver };
 
 // Window thread only
 HWND g_hwnd;
-bool g_started;  // the window has been in front once: the start's hold is done
-bool g_let_go;   // Esc let go of the mouse: play starting again takes it back
-int g_ignore;    // buttons down when the game took the mouse: not the game's until released
+bool g_start_pending; // started (start()) but not yet in front: the first time it is, the start's hold
+bool g_let_go;        // Esc let go of the mouse: play starting again takes it back
+bool g_handed_over;   // the next program is starting: this one never holds the mouse again
+int g_ignore;         // buttons down when the game took the mouse: not the game's until released
 
 // Read by the game's thread
 std::atomic<bool> g_held{false};
@@ -40,7 +41,7 @@ int buttons_down_now()
 
 void hold(bool on, const char *why)
 {
-    if (on && (GetForegroundWindow() != g_hwnd || IsIconic(g_hwnd))) return; // only a window in front holds it
+    if (on && (g_handed_over || GetForegroundWindow() != g_hwnd || IsIconic(g_hwnd))) return; // only a window in front
     if (on == g_held) return;
     g_held = on;
     g_dx = g_dy = g_buttons = 0;
@@ -56,6 +57,21 @@ void hold(bool on, const char *why)
         if (GetForegroundWindow() == g_hwnd) SetCursor(LoadCursorW(nullptr, (LPCWSTR)IDC_ARROW));
     }
     logf("[mouse] %s (%s)", on ? "held" : "free", why);
+}
+
+// The start's hold, once the window is really in front. Which message says so first differs: a window shown while
+// another program has the front gets the keyboard focus inside its own thread at once (WM_SETFOCUS, not yet in front),
+// and SetForegroundWindow then brings it to the front without a second WM_SETFOCUS (the SNES game started from Ninja
+// Gaiden Black after its window closed, 2026-11-24). So every activation message asks, and start() too.
+void start_hold_if_in_front()
+{
+    if (!g_start_pending || GetForegroundWindow() != g_hwnd || IsIconic(g_hwnd)) return;
+    g_start_pending = false;
+    // Brought to the front by a click (Windows did not give it the front at the start): on the title bar, holding now
+    // would pull the cursor into the picture in the middle of a move, so a click in the picture takes it, as before.
+    // GetAsyncKeyState reads the physical buttons: the primary one is the right with the buttons swapped.
+    const int primary = GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON;
+    if (!(GetAsyncKeyState(primary) & 0x8000)) hold(true, "the game started");
 }
 
 void raw_input(HRAWINPUT h)
@@ -101,18 +117,13 @@ bool on_message(HWND, UINT msg, WPARAM wp, LPARAM lp, LRESULT *result)
     case WM_INPUT:
         raw_input((HRAWINPUT)lp);
         return false; // DefWindowProc cleans up after WM_INPUT
-    case WM_SETFOCUS: // the window in front for the first time: the game starts holding the mouse
-        if (!g_started && GetForegroundWindow() == g_hwnd) {
-            g_started = true;
-            // Windows did not give it the front at the start and a click brought it there: on the title bar it would
-            // pull the cursor into the picture in the middle of a move, so a click in the picture takes it as before
-            // (GetAsyncKeyState reads the physical buttons: the primary one is the right with the buttons swapped)
-            const int primary = GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON;
-            if (!(GetAsyncKeyState(primary) & 0x8000)) hold(true, "the game started");
-        }
+    case WM_SETFOCUS:
+    case WM_ACTIVATEAPP:
+        start_hold_if_in_front();
         return false;
     case WM_ACTIVATE:
         if (LOWORD(wp) == WA_INACTIVE) hold(false, "the window left the front");
+        else start_hold_if_in_front();
         return false;
     case WM_KILLFOCUS:
         hold(false, "the window lost the keyboard");
@@ -138,11 +149,21 @@ bool on_message(HWND, UINT msg, WPARAM wp, LPARAM lp, LRESULT *result)
             g_let_go = true;
         } else if (wp == kPlayResumed && g_let_go) {
             hold(true, "play resumed");
+        } else if (wp == kHandOver) {
+            hold(false, "the next program starts");
+            g_handed_over = true;
         }
         *result = 0;
         return true;
     }
     return false;
+}
+
+void start()
+{
+    g_start_pending = true;
+    start_hold_if_in_front();
+    if (g_start_pending) logf("[mouse] not in front at the start: held when it first comes to the front");
 }
 
 bool held() { return g_held; }
@@ -164,6 +185,13 @@ void let_go()
 void play_resumed()
 {
     if (g_hwnd) PostMessageW(g_hwnd, WM_APP_MOUSE, kPlayResumed, 0);
+}
+
+void hand_over()
+{
+    DWORD_PTR r = 0;
+    if (g_hwnd && !SendMessageTimeoutW(g_hwnd, WM_APP_MOUSE, kHandOver, 0, SMTO_NORMAL, 500, &r))
+        logf("[mouse] the window did not answer the hand-over within 0.5 s (%lu)", GetLastError());
 }
 
 } // namespace mouse

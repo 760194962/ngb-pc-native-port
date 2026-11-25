@@ -8,6 +8,7 @@
 // driver's service routine at its IRQL from the frame thread. Behaviour per the OHCI 1.0a specification; the XID
 // descriptors and report as xemu's hw/xbox/xid.c (LGPL 2+) and the console's controller.
 #include "usb_ohci.h"
+#include "game_features.h"
 
 #include "common.h"
 #include "kernel/xboxkrnl.h"
@@ -409,7 +410,7 @@ void __stdcall usb_thread(void *)
 
 void usb_ohci_install()
 {
-    if (g_cfg.profile) return;
+    if (!running_unknown()) return;
     void *p = VirtualAlloc((void *)(uintptr_t)REG_BASE, REG_PAGE, MEM_RESERVE, PAGE_NOACCESS);
     if (p != (void *)(uintptr_t)REG_BASE) {
         logc("[usb] cannot reserve the USB controller's registers at 0x%08x (error %lu)", REG_BASE, GetLastError());

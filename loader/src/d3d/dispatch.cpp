@@ -296,21 +296,21 @@ namespace xd3d {
 
 bool install_d3d_hooks(const BuildProfile &profile)
 {
-    g_layout = profile.black ? kLayoutBlack : kLayoutNgb;
-    if (profile.aux)
+    g_layout = profile.game == Game::Black ? kLayoutBlack : kLayoutNgb;
+    if (profile.tables)
         for (const AuxLayout &l : kAuxLayouts)
-            if (!strcmp(l.xbe, profile.aux)) g_layout = l.layout;
+            if (!strcmp(l.xbe, profile.tables)) g_layout = l.layout;
     // Addresses a build does not fix (the bundled programs keep these in their device object): the loader's own memory.
     static float s_vs_constants[192][4];
     static uint32_t s_push_segment;
     if (!g_layout.vs_constants) g_layout.vs_constants = (uint32_t)(uintptr_t)s_vs_constants;
     if (!g_layout.push_segment) g_layout.push_segment = (uint32_t)(uintptr_t)&s_push_segment;
     g_st.vs_constants = (float (*)[4])(uintptr_t)g_layout.vs_constants;
-    if (profile.aux) {
+    if (profile.tables) {
         g_funcs.clear();
         for (const AuxFuncs &a : kAuxFuncs)
-            if (!strcmp(a.xbe, profile.aux)) g_funcs.assign(a.funcs, a.funcs + a.count);
-    } else if (profile.black) {
+            if (!strcmp(a.xbe, profile.tables)) g_funcs.assign(a.funcs, a.funcs + a.count);
+    } else if (profile.game == Game::Black) {
         g_funcs.assign(std::begin(kD3D), std::end(kD3D));
         g_funcs.insert(g_funcs.end(), std::begin(kDSound), std::end(kDSound));
         g_funcs.insert(g_funcs.end(), std::begin(kXpp), std::end(kXpp));
@@ -344,15 +344,15 @@ bool install_d3d_hooks(const BuildProfile &profile)
     // The HLE tables hold BLACK's addresses; for another build nothing matches and every library function stops on
     // its first call, which is the state the port is brought up from (one function at a time, from the log).
     std::vector<Hle> all;
-    if (profile.aux) {
+    if (profile.tables) {
         for (auto table : {hle_device_table_aux, hle_resource_table_aux, hle_draw_table_aux, hle_dsound_table_aux, hle_input_table_aux,
                            hle_ngb_extra_table_aux}) {
             size_t n = 0;
-            const Hle *t = table(profile.aux, &n);
+            const Hle *t = table(profile.tables, &n);
             all.insert(all.end(), t, t + n);
         }
         logf("hooks: %s: %zu HLE entries; every other function in the hooked sections stops on first call", profile.name, all.size());
-    } else if (profile.black) {
+    } else if (profile.game == Game::Black) {
         for (auto table : {hle_device_table, hle_resource_table, hle_draw_table, hle_dsound_table, hle_input_table}) {
             size_t n = 0;
             const Hle *t = table(&n);
