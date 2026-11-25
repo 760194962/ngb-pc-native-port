@@ -2,6 +2,7 @@
 // Most hardware calls only matter to the statically linked D3D/DSound code, which is being replaced; they
 // log and return values that keep XAPI going.
 #include "hooks.h"
+#include "game_features.h"
 #include "kernel/kexports.h"
 #include "net/nvnet.h"
 #include "d3d/draw.h"
@@ -128,7 +129,7 @@ uint32_t __cdecl DbgPrint(const char *Format, ...)
         } else i = j > i ? j : i + 1;
     }
     logf("[DbgPrint] %s", msg);
-    if (!g_cfg.profile) online_setup_print(msg); // the Insignia Setup Assistant's answer to Register Xbox
+    if (running_unknown()) online_setup_print(msg); // the Insignia Setup Assistant's answer to Register Xbox
     return 0;
 }
 
@@ -140,7 +141,7 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
     // The whole EEPROM for a program without a build profile (the Insignia Setup Assistant) online: the console's own,
     // whose section checksums it checks before registering (it offers to rewrite them otherwise; 0x11E87). The games and
     // the dashboard keep the port's zeros: their settings come from black.ini, one by one (below).
-    if (ValueIndex == 0xFFFF && !g_cfg.profile && ValueLength >= 256 && online_whole_eeprom((uint8_t *)Value)) {
+    if (ValueIndex == 0xFFFF && running_unknown() && ValueLength >= 256 && online_whole_eeprom((uint8_t *)Value)) {
         if (Type) *Type = 3;
         if (ResultLength) *ResultLength = 256;
         logf("[k] ExQueryNonVolatileSetting(0xffff): the console's EEPROM (256 bytes)");
@@ -149,7 +150,7 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
     // XC_ENCRYPTED_SECTION, the EEPROM's first 0x30 bytes as stored: the Setup Assistant built 2025-01-19 decrypts the
     // HDD key from it with each kernel family's EEPROM key it carries and refuses to register unless one matches
     // XboxHDKey ("HDD key mismatch", 0x13F97; the port's zeros failed all three)
-    if (ValueIndex == 0xFFFE && !g_cfg.profile && ValueLength >= 0x30) {
+    if (ValueIndex == 0xFFFE && running_unknown() && ValueLength >= 0x30) {
         uint8_t e[256];
         if (online_whole_eeprom(e)) {
             memcpy(Value, e, 0x30);
@@ -179,7 +180,7 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
         // The Xbox Live dashboard run from the hard disk stays only with bit 3 set (xonlinedash 0x4D2CE; without it it
         // starts the main dashboard at once, which the port answers by going back to the game): the main dashboard's mark
         // that it sent it there, which the port gives it in its place (k_misc.cpp dashboard_open)
-        dword = g_cfg.profile == &kProfileXod ? 0x8 : 0;
+        dword = running_program(Program::Dashboard) ? 0x8 : 0;
         break;
     case 0x012: dword = 1; break;                  // XC_DVD_REGION
     case 0x103: dword = 0x00400100; break;         // XC_FACTORY_AV_REGION: NTSC-M, 60 Hz
@@ -205,7 +206,7 @@ NTSTATUS __stdcall ExQueryNonVolatileSetting(uint32_t ValueIndex, uint32_t *Type
     if (n <= 4 || n % 10000 == 0)
         logf("[k] ExQueryNonVolatileSetting(0x%x, len %u) -> %s 0x%x%s", ValueIndex, ValueLength, known ? "" : "UNKNOWN, ", dword,
              n == 4 ? " (later queries of it: every 10000th logged)" : "");
-    if (!known && !g_cfg.profile && ValueIndex >= 0x100 && ValueIndex <= 0x102) {
+    if (!known && running_unknown() && ValueIndex >= 0x100 && ValueIndex <= 0x102) {
         // A program without a build profile (the Insignia Setup Assistant) offline: placeholder factory values, so it gets
         // past its start (it reboots without a MAC address). Online, the registered console's come from above.
         static const uint8_t serial[12] = {'0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'};
@@ -368,7 +369,7 @@ static bool system_program(const std::wstring &xbe);
 
 static bool dashboard_open()
 {
-    if (g_cfg.profile == &kProfileXod || !dashboard_available()) return false;
+    if (running_program(Program::Dashboard) || !dashboard_available()) return false;
     std::wstring back = host_full_path(g_cfg.game_dir) + L"\\default.xbe";
     std::string asked = LaunchDataPage ? std::string((const char *)LaunchDataPage->Header + 8, strnlen((const char *)LaunchDataPage->Header + 8, 520)) : "";
     for (char &c : asked) c = (char)tolower((unsigned char)c);
@@ -395,7 +396,7 @@ static bool dashboard_open()
 bool dashboard_back(const char *why) // dashboard.h dashboard_back_to_game
 {
     static std::atomic<bool> once{false};
-    if (g_cfg.profile != &kProfileXod || g_cfg.return_xbe.empty() || once.exchange(true)) return false;
+    if (!running_program(Program::Dashboard) || g_cfg.return_xbe.empty() || once.exchange(true)) return false;
     // It starting a title (the one that sent it here, done): the game gets that page, as on the console. Anything else
     // (the main dashboard, a crash): the game afresh.
     const char *path = LaunchDataPage ? (const char *)LaunchDataPage->Header + 8 : "";
@@ -429,7 +430,7 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
     if (dashboard_back("it asked to leave")) Sleep(INFINITE); // the port's Xbox Live dashboard: back to the game
     // a program without a build profile (the Insignia Setup Assistant's Quit), or the Xbox Live dashboard opened on its own
     // (the launcher's; from a game it went back above): it ends, as a tool does
-    if (!g_cfg.profile || g_cfg.profile == &kProfileXod) {
+    if (running_unknown() || running_program(Program::Dashboard)) {
         request_exit(0, "the program quit");
         Sleep(INFINITE);
     }
@@ -446,7 +447,7 @@ void __stdcall HalReturnToFirmware(uint32_t Routine)
         // Ninja Gaiden 2004's title updater installs in a few hundred frames at several hundred a second and reboots at
         // once: the bar seemed never to move or finish (the user, 2026-11-01). Its last frame (the bar full) stays on
         // the screen a moment before the game comes back.
-        if (g_cfg.profile == &kProfileNg04Updater && !g_cfg.background) {
+        if (running_program(Program::Updater) && !g_cfg.background) {
             logf("    the title updater is done: its last frame stays 1.5 s");
             Sleep(1500);
         }

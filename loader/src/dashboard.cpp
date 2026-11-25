@@ -3,6 +3,7 @@
 // only) into the port's hard disk, and never shipped. Only the build the port has tables for runs (kProfileXod); any
 // other leaves the games' Live boxes answering Ⓐ as Ⓑ (ngb_livedash.cpp), as before.
 #include "dashboard.h"
+#include "game_features.h"
 
 #include "build_profile.h"
 #include "common.h"
@@ -39,7 +40,7 @@ bool dashboard_available()
     static int state = -1; // -1 not decided yet
     if (state >= 0) return state == 1;
     state = 0;
-    if (g_cfg.profile == &kProfileXod) return false;
+    if (running_program(Program::Dashboard)) return false;
     if (!online_enabled()) return false; // without online play the dashboard has nothing to do (and stops at once)
     std::wstring p2 = host_full_path(g_cfg.hdd_dir) + L"\\Partition2";
     // xboxdash.xbe too: run from the hard disk, xonlinedash stays only when C:\xboxdash.xbe is there with its own

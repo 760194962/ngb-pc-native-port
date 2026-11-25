@@ -5,6 +5,7 @@
 // large-address-aware, so 32-bit code on 64-bit Windows has 4 GB) and hands out contiguous memory from it;
 // physical address = virtual - 0x80000000.
 #include "kernel/kexports.h"
+#include "game_features.h"
 #include "kernel/nt.h"
 #include "net/online.h"
 
@@ -241,7 +242,7 @@ uint32_t __stdcall MmGetPhysicalAddress(void *BaseAddress)
     uint32_t caller = (uint32_t)(uintptr_t)_ReturnAddress();
     if (online_enabled() && caller >= g_xnet_lo && caller < g_xnet_hi) return (uint32_t)(uintptr_t)p | 0x80000000u;
     // A program without a build profile (nxdk: its own NIC and USB drivers hand these to the device models): the same
-    if (!g_cfg.profile) return (uint32_t)(uintptr_t)p | 0x80000000u;
+    if (running_unknown()) return (uint32_t)(uintptr_t)p | 0x80000000u;
     KNOTE_ONCE("MmGetPhysicalAddress(%p) on non-contiguous memory; returning address & 0x7FFFFFFF", BaseAddress);
     return (uint32_t)(uintptr_t)p & 0x7FFFFFFF;
 }

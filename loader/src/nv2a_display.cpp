@@ -8,6 +8,7 @@
 // framebuffer, its format and pitch. A 60 Hz thread copies the framebuffer to the window and raises the vertical blank:
 // the program's service routine (KeConnectInterrupt, bus level 3) runs at its IRQL, as the NIC's does (net/nvnet.cpp).
 #include "nv2a_display.h"
+#include "game_features.h"
 
 #include "common.h"
 #include "d3d/draw.h"
@@ -167,7 +168,7 @@ void __stdcall vblank_thread(void *)
 
 void nv2a_display_install()
 {
-    if (g_cfg.profile) return;
+    if (!running_unknown()) return;
     void *p = VirtualAlloc((void *)(uintptr_t)REG_BASE, REG_SIZE, MEM_RESERVE, PAGE_NOACCESS);
     if (p != (void *)(uintptr_t)REG_BASE) {
         logc("[nv2a] cannot reserve the display registers at 0x%08x (error %lu)", REG_BASE, GetLastError());

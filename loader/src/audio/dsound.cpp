@@ -5,6 +5,7 @@
 // play positions and stream packet completion, so the game's audio/music/video code runs as on the Xbox.
 // Without a host audio device the same mixer runs on a timer and the result is discarded.
 #include "audio/ep_surround.h"
+#include "game_features.h"
 #include "audio/gp_effects.h"
 #include "audio/hrtf.h"
 #include "audio/reverb.h"
@@ -887,8 +888,7 @@ void __stdcall worker(void *)
     // loopback, first stage, 20 s): xemu -31.9 dBFS RMS, the port -32.5, Black's chapter 1 -20.9 - barely audible next
     // to the game. By the user's choice it plays 10.5 dB up, the bins' 6 dB and the voice's 4.43 dB given back: about
     // Black's level, a deliberate change from the console.
-    const char *aux = g_cfg.profile ? g_cfg.profile->aux : nullptr;
-    if (aux && (!strcmp(aux, "NinjaFCJ") || !strcmp(aux, "NinjaFCU"))) {
+    if (running_program(Program::Snes)) {
         g_makeup = 2.0f * powf(10.0f, 443.0f / 2000.0f);
         logf("[dsound] SNES trilogy: output %.1f dB up (the bins' headroom and the voice's -443 given back)",
              20.0f * log10f(g_makeup));

@@ -1,5 +1,6 @@
 // Kernel export table: ordinal -> implementation, and the logging stub used for anything not implemented.
 #include "kernel/ktable.h"
+#include "game_features.h"
 
 #include "kernel/kexports.h"
 #include "xbe.h"
@@ -378,7 +379,7 @@ bool kernel_resolve_thunks(const Xbe &xbe)
     }
     // The games only: a program without a build profile has no saves of the port's and reads the console's own key (the
     // Insignia Setup Assistant registers with it: it read the saves' zeros, "All-zero HDD keys are not supported", r969)
-    if (hdkey_slot && g_cfg.profile) point_xapi_at_console_key(xbe, hdkey_slot);
+    if (hdkey_slot && !running_unknown()) point_xapi_at_console_key(xbe, hdkey_slot);
     logf("kernel: %d imports implemented, %d data exports, %d logging stubs%s%s", implemented, vars, stubbed,
          stubbed ? ": " : "", stubs.c_str());
     return true;

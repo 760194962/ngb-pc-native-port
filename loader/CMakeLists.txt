@@ -66,6 +66,7 @@ add_library(blackrt SHARED
   src/audio/hrtf.cpp
   src/audio/reverb.cpp
   src/settings.cpp
+  src/game_features.cpp
   src/perf.cpp
   src/sha1.cpp
   src/kernel/ktable.cpp

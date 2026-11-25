@@ -6,6 +6,7 @@
 //   \Device\Harddisk0\PartitionN   -> <hdd>\PartitionN   (1 = E: with TDATA/UDATA, 2 = C:, 3-5 = X/Y/Z caches)
 // File handles are real Windows handles opened through ntdll, so read/write/APC/event semantics carry over.
 #include "kernel/kexports.h"
+#include "game_features.h"
 #include "kernel/nt.h"
 #include "net/online.h"
 #include "perf.h"
@@ -509,7 +510,7 @@ NTSTATUS __stdcall NtWriteFile(HANDLE FileHandle, HANDLE Event, void *ApcRoutine
     KTRACE("%p '%s', ev %p, apc %p, %p, len 0x%x, off %lld) -> 0x%08x (", FileHandle, handle_desc(FileHandle).c_str(), Event,
            ApcRoutine, Buffer, Length, ByteOffset ? ByteOffset->QuadPart : -1LL, s);
     if (!NT_OK(s) && s != XSTATUS_PENDING) logf("[k] NtWriteFile('%s') failed 0x%08x", handle_desc(FileHandle).c_str(), s);
-    if (!NT_OK(s) && !g_cfg.profile && Buffer && Length && Length < 1024) // a program without a profile: its console text
+    if (!NT_OK(s) && running_unknown() && Buffer && Length && Length < 1024) // a program without a profile: its console text
         logf("[k]   text: %.*s", (int)Length, (const char *)Buffer);
     return s;
 }

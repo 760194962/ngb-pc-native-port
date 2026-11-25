@@ -2,6 +2,7 @@
 // the game reads directly (device object fields, render/texture state arrays) up to date and drives the
 // host Direct3D 9 device.
 #include "d3d/apicount.h"
+#include "game_features.h"
 #include "d3d/device.h"
 #include "build_profile.h"
 #include "hooks.h"
@@ -1624,7 +1625,7 @@ IDirect3DSurface9 *cpu_rt_sys(uint32_t w, uint32_t h)
 bool cpu_rt_enabled()
 {
     static int on = -1;
-    if (on < 0) on = g_cfg.profile && g_cfg.profile->aux && !strcmp(g_cfg.profile->aux, "NG04DL");
+    if (on < 0) on = running_program(Program::Downloader);
     return on != 0;
 }
 } // namespace
@@ -1934,7 +1935,7 @@ void pace_swap()
     // BLACK asks for TWO_OR_IMMEDIATE (30 fps) and its update uses frame time, so --fps 60 runs it at one vblank.
     // Ninja Gaiden Black asks for TWO through its frame-rate mode 1 / 5 (FUN_0030CDB0, table 0x44B76C: modes 0-6 ->
     // ONE, TWO, THREE, IMMEDIATE, ONE_OR_IMMEDIATE, TWO_OR_IMMEDIATE, THREE_OR_IMMEDIATE) and means it.
-    case 2: n = (g_cfg.profile && g_cfg.profile->black && g_cfg.fps == 60) ? 1 : 2; break;
+    case 2: n = (running_game(Game::Black) && g_cfg.fps == 60) ? 1 : 2; break;
     case 4: n = 3; break;
     case 8: n = 4; break;
     default: n = 1; break;
@@ -3332,7 +3333,7 @@ void __stdcall D3DDevice_GetViewportOffsetAndScale(float *pOffset, float *pScale
     viewport_transform(pScale, pOffset);
 }
 
-float screen_offset_base() { return g_cfg.profile && g_cfg.profile->black ? 0.0f : 0.53125f; }
+float screen_offset_base() { return running_game(Game::Black) ? 0.0f : 0.53125f; }
 
 void __stdcall D3DDevice_SetScreenSpaceOffset(float x, float y)
 {

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "build_profile.h"
+#include "game_features.h"
 #include "d3d/dispatch.h"
 #include "d3d/host.h"
 #include "fe/calls.h"
@@ -894,7 +895,7 @@ int run(void *reserve, unsigned reserve_size)
     online_init(); // before the hooks: online play keeps the game's own XNetStartup (d3d/dispatch.cpp)
     // Ninja Gaiden 2004's title updater draws with the dashboard's fonts (C:\fonts): from the registered xemu disk, once;
     // and it patches the disc's programs as they were signed (net/dashfonts.h)
-    if (profile == &kProfileNg04Updater) {
+    if (running_program(Program::Updater)) {
         dash_fonts_ensure(g_cfg.online_hdd, host_full_path(g_cfg.hdd_dir) + L"\\Partition2");
         updater_signed_sources(host_full_path(g_cfg.game_dir), g_cfg.port_dir + L"\\cache\\ng04_signed");
     }
@@ -905,45 +906,46 @@ int run(void *reserve, unsigned reserve_size)
     if (profile && !xd3d::install_d3d_hooks(*profile)) return 1;
     if (profile && !install_fiber_switch(*profile)) return 1;
     if (profile && !g_cfg.no_rdtsc && !install_rdtsc_emulation(*profile)) return 1;
-    bool black = profile && profile->black; // BLACK's own game patches and front-end work; nothing of it applies elsewhere
+    // What this program gets: one table for every program (game_features.cpp)
+    const Patches pt = patches_for(profile);
     // The 1/8-pixel vertex snap (d3d/nv2a_vsh.cpp) came with BLACK's port for its destructible walls (163c55e); in
     // Ninja Gaiden it moved only the vertex-program path, and the shadow pass over fixed-function ground flickered
-    g_cfg.vs_snap = black;
-    if (black) install_timing_patches();
-    if (black) install_mouselook_patches();
-    if (black) install_autoaim_patch();
-    if (black) install_fov_patch();
-    if (black) install_fe_calls();
-    if (black && g_cfg.pc_menus) { // the in-game PC SETTINGS pages, from the user's own front-end file
-        std::wstring cache = g_cfg.port_dir + L"\\cache\\menus";
-        if (fe_build_pages(host_full_path(g_cfg.game_dir), cache)) g_cfg.menu_cache = cache;
+    g_cfg.vs_snap = pt.black;
+    if (pt.black) {
+        install_timing_patches();
+        install_mouselook_patches();
+        install_autoaim_patch();
+        install_fov_patch();
+        install_fe_calls();
+        if (g_cfg.pc_menus) { // the in-game PC SETTINGS pages, from the user's own front-end file
+            std::wstring cache = g_cfg.port_dir + L"\\cache\\menus";
+            if (fe_build_pages(host_full_path(g_cfg.game_dir), cache)) g_cfg.menu_cache = cache;
+        }
+        // BLACK runs at 30 fps and needs patches for 60; Ninja Gaiden Black is a 60 fps game as it is.
+        if (g_cfg.fps == 60 && !install_60fps_patches()) g_cfg.fps = 30;
     }
-    // BLACK runs at 30 fps and needs patches for 60; Ninja Gaiden Black is a 60 fps game as it is.
-    if (black && g_cfg.fps == 60 && !install_60fps_patches()) g_cfg.fps = 30;
-    // A widescreen shape other than 16:9: the builds whose 16/9 constant is known (the bundled programs and BLACK keep 16:9)
-    if (profile && profile->aspect_const) install_ngb_aspect(); // Ninja Gaiden Black's builds and Ninja Gaiden 2004
+    // A widescreen shape other than 16:9 where the build's 16/9 constant is known; the others keep 16:9
+    if (pt.aspect) install_ngb_aspect();
     else g_cfg.aspect_w = 16, g_cfg.aspect_h = 9;
-    if (profile && !black && !profile->aux) install_ngb_exitmenu(); // the main menu's EXIT GAME row
-    install_ng04_exitmenu(); // Ninja Gaiden (2004)'s title menu: the same, its own way
-    if (profile && !black && !profile->aux) install_music51_fix(); // the music player's six channels at -96 dB
-    if (profile && !black) // the ripple textures the game makes on the CPU, kept (ngb_cpu_textures.cpp)
-        if (const XbeSection *t = g_xbe.section_named(".text")) install_cpu_textures(t->vaddr, t->vsize);
-    // the saved sound volumes at a cold start: Black and Ninja Gaiden (2004), not the bundled programs (ngb_sound_boot.cpp)
-    if (profile && !black && (!profile->aux || !strcmp(profile->aux, "NG04TU") || !strcmp(profile->aux, "NG04DISC")))
-        if (const XbeSection *t = g_xbe.section_named(".text")) install_saved_volumes(t->vaddr, t->vsize);
-    if (profile && profile->wide2d) // the HUD's sides on a screen not 16:9: in play as the game's HUD routine says
-        if (const XbeSection *t = g_xbe.section_named(".text")) xd3d::install_hud_probe((uint8_t *)(uintptr_t)t->vaddr, t->vsize);
+    if (pt.exit_menu == ExitMenu::Ngb) install_ngb_exitmenu(); // the main menu's EXIT GAME row
+    if (pt.exit_menu == ExitMenu::Ng04) install_ng04_exitmenu(); // Ninja Gaiden (2004)'s title menu: the same, its own way
+    if (pt.music51) install_music51_fix(); // the music player's six channels at -96 dB
+    const XbeSection *text = g_xbe.section_named(".text");
+    if (pt.cpu_textures && text) install_cpu_textures(text->vaddr, text->vsize); // (ngb_cpu_textures.cpp)
+    if (pt.saved_volumes && text) install_saved_volumes(text->vaddr, text->vsize); // at a cold start (ngb_sound_boot.cpp)
+    if (pt.hud_probe && text) xd3d::install_hud_probe((uint8_t *)(uintptr_t)text->vaddr, text->vsize); // in play, as the game says
     // Ⓐ in Ranking's Live boxes (and Ninja Gaiden (2004)'s Master Ninja Tournament): the port's Xbox Live dashboard when it
     // can run (dashboard.cpp), else cancel as Ⓑ
-    const bool live_dash = profile && profile != &kProfileXod && dashboard_available();
-    if (profile && !black && !profile->aux && !live_dash) install_ngb_livedash();
-    if (!live_dash) install_ng04_livedash();
+    const bool live_dash = !running_unknown() && !running_program(Program::Dashboard) && dashboard_available();
+    if (!live_dash && pt.live_boxes == LiveBoxes::Ngb) install_ngb_livedash();
+    if (!live_dash && pt.live_boxes == LiveBoxes::Ng04) install_ng04_livedash();
     if (live_dash) logf("live boxes: Ⓐ on their dashboard choices opens the port's Xbox Live dashboard (dashboard.cpp)");
-    if (!profile && !online_enabled()) nvnet_install_unplugged(); // a program driving the NIC itself, its cable out
+    // A program the port does not know drives the hardware itself: the NIC with its cable out, the display, USB
+    if (running_unknown() && !online_enabled()) nvnet_install_unplugged();
     nvnet_install_trap(); // online play: the NIC's registers (net/nvnet.cpp), after every other exception handler
-    nv2a_display_install(); // a program without a build profile that drives the display itself (nv2a_display.cpp)
+    nv2a_display_install(); // (nv2a_display.cpp: only for a program without a profile)
     usb_ohci_install();     // ... and USB, with an Xbox controller on it (usb_ohci.cpp)
-    if (!profile) g_cfg.fps = 30;
+    if (running_unknown()) g_cfg.fps = 30;
     if (!kdpc_init()) {
         logf("could not start the kernel DPC/timer thread");
         return 1;

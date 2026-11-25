@@ -6,6 +6,7 @@
 // the game or the dashboard writes to the config area (an account made in the port's Xbox Live dashboard) goes to
 // online_accounts.bin. Nothing of these files is logged.
 #include "net/online.h"
+#include "game_features.h"
 
 #include "build_profile.h"
 #include "common.h"
@@ -832,7 +833,7 @@ bool online_init()
     // No machine account yet: only the Insignia Setup Assistant (a program without a build profile: it registers the
     // console with Insignia) and the Xbox Live dashboard (its network test makes the machine account, written to config
     // sector 9: online_partition0_write) go online
-    if (!sector_signed(g_config, 9) && g_cfg.profile && g_cfg.profile != &kProfileXod) {
+    if (!sector_signed(g_config, 9) && !running_unknown() && !running_program(Program::Dashboard)) {
         SecureZeroMemory(dec, sizeof dec);
         return fail("no machine account in config sector 9 (console not registered?)",
                     L"本机主机还没注册 Insignia（启动器「联网」页「注册主机」）");

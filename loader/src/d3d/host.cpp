@@ -1,4 +1,5 @@
 #include "d3d/apicount.h"
+#include "game_features.h"
 #include "d3d/draw.h"
 #include "d3d/drawwarm.h"
 #include "d3d/host.h"
@@ -436,7 +437,7 @@ const wchar_t *game_title()
 {
     // each Ninja Gaiden Black build has its own (build_profile.h); its bundled programs keep x2.1's
     if (g_cfg.profile && g_cfg.profile->window_title) return g_cfg.profile->window_title;
-    if (g_cfg.profile && !g_cfg.profile->black) return kProfileNgbHurricaneX21.window_title;
+    if (!running_unknown() && !running_game(Game::Black)) return kProfileNgbHurricaneX21.window_title;
     return L"BLACK";
 }
 

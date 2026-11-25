@@ -9,6 +9,7 @@
 // Here a press of A, START or Enter during a movie that does not loop stops it, unless the game reacted to the press
 // itself within 10 frames (a movie it already lets you skip moves on to the next one, which is not stopped again).
 #include "input/movies.h"
+#include "game_features.h"
 
 #include "build_profile.h"
 #include "common.h"
@@ -42,7 +43,7 @@ void movies_poll(uint16_t buttons, const uint8_t analog[8], bool enter)
     g_was_down = down;
     // BLACK's player object (kGameObject): in any other build that address holds unrelated bytes, and a press would
     // write kStop into whatever they point at.
-    if (!g_cfg.skip_movies || !g_cfg.profile || !g_cfg.profile->black) return;
+    if (!g_cfg.skip_movies || !running_game(Game::Black)) return;
     uint8_t *p = player();
     if (!p) return;
     static bool told;
