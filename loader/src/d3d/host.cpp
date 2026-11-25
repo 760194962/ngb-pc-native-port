@@ -487,16 +487,25 @@ bool exclusive() { return g_window.actual_exclusive(); }
 
 D3DPRESENT_PARAMETERS g_pp; // as created; Reset uses the same
 
+// A refresh rate the game's clock can follow (d3d/frame_clock.h): a whole multiple of ~60 Hz as Direct3D 9 counts it
+// (59/60/61, 119/120/121, 239/240/241...: 59.94 Hz modes are listed as 59 or 60)
+static bool followable_refresh(UINT hz)
+{
+    int k = (int)((hz + 30) / 60);
+    return k >= 1 && k <= 8 && abs((int)hz - 60 * k) <= k;
+}
+
 // The display mode of an exclusive device (9Ex takes it besides the parameters): the desktop's. With vsync on and a desktop
-// refreshing outside 59-61 Hz (a 144 or 165 Hz panel), a mode of the same size at 59-61 Hz when the display has one: the
-// game makes 60 frames a second, and at 165 Hz vsync showed them for 3, 3, 3, 2 refreshes (18.2 / 12.1 ms, judder); at
-// 60 Hz each is shown for one. black.ini exclusive_60hz = 0 (the launcher's Graphics page) or --keep-refresh keeps the
-// desktop's.
+// refreshing at a rate the game's clock cannot follow (a 144 or 165 Hz panel), a mode of the same size at 59-61 Hz when the
+// display has one: the game makes 60 frames a second, and at 165 Hz vsync showed them for 3, 3, 3, 2 refreshes (18.2 /
+// 12.1 ms, judder); at 60 Hz each is shown for one. A 120 or 240 Hz desktop is kept since 2.3: the clock follows every
+// second or fourth refresh there, and a mode change costs ~1.5 s of black screen each way. black.ini exclusive_60hz = 0
+// (the launcher's Graphics page) or --keep-refresh keeps the desktop's.
 D3DDISPLAYMODEEX exclusive_mode()
 {
     D3DDISPLAYMODEEX m = {sizeof m};
     if (FAILED(g_d3d->GetAdapterDisplayModeEx(D3DADAPTER_DEFAULT, &m, nullptr))) m.Width = 0;
-    if (!m.Width || !g_cfg.vsync || !g_cfg.exclusive_60hz || (m.RefreshRate >= 59 && m.RefreshRate <= 61)) return m;
+    if (!m.Width || !g_cfg.vsync || !g_cfg.exclusive_60hz || followable_refresh(m.RefreshRate)) return m;
     D3DDISPLAYMODEFILTER f = {sizeof f, m.Format, D3DSCANLINEORDERING_PROGRESSIVE};
     UINT n = g_d3d->GetAdapterModeCountEx(D3DADAPTER_DEFAULT, &f);
     D3DDISPLAYMODEEX best = m;
@@ -513,7 +522,8 @@ D3DDISPLAYMODEEX exclusive_mode()
             logf("host: exclusive fullscreen with vsync: %ux%u at %u Hz instead of the desktop's %u Hz (60 frames a second shown evenly)",
                  best.Width, best.Height, best.RefreshRate, m.RefreshRate);
         else
-            logf("host: exclusive fullscreen with vsync: no 60 Hz mode at %ux%u, the desktop's %u Hz kept", m.Width, m.Height, m.RefreshRate);
+            logf("host: exclusive fullscreen with vsync: no 60 Hz mode at %ux%u, the desktop's %u Hz kept (the game's clock runs free)", m.Width,
+                 m.Height, m.RefreshRate);
     }
     return best;
 }
@@ -954,6 +964,54 @@ bool present_stretch()
 }
 } // namespace
 
+// Tests (--frame-marker): the Present's number in the top-left corner, for a capture tool to read back from the screen
+// (tools/frame_dup.cpp): 14 squares of 8x8, white, black (references), then bits 0-11 of the number, white = 1
+static void draw_frame_marker()
+{
+    static uint32_t presents;
+    uint32_t n = ++presents;
+    IDirect3DSurface9 *bb = nullptr;
+    if (FAILED(g_dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) return;
+    for (int i = 0; i < 14; i++) {
+        bool on = i == 0 ? true : i == 1 ? false : ((n >> (i - 2)) & 1) != 0;
+        RECT r = {i * 8, 0, i * 8 + 8, 8};
+        g_dev->ColorFill(bb, &r, on ? D3DCOLOR_XRGB(255, 255, 255) : D3DCOLOR_XRGB(0, 0, 0));
+    }
+    bb->Release();
+}
+
+// Tests (--present-stats): how many refreshes each frame stayed on screen, from the swap chain's statistics (an exclusive
+// device has them; a windowed copy chain does not). Each Present notes which presented frame the screen took last and at
+// which refresh; consecutive frames' refreshes give each one's stay. A minute's histogram goes to the log.
+static void note_present_stats()
+{
+    static uint32_t last_count, last_refresh, stays[6], unknown, since;
+    IDirect3DSwapChain9 *sc = nullptr;
+    IDirect3DSwapChain9Ex *scx = nullptr;
+    if (FAILED(g_dev->GetSwapChain(0, &sc)) || !sc) return;
+    HRESULT q = sc->QueryInterface(__uuidof(IDirect3DSwapChain9Ex), (void **)&scx);
+    sc->Release();
+    if (FAILED(q) || !scx) return;
+    D3DPRESENTSTATS st = {};
+    if (SUCCEEDED(scx->GetPresentStats(&st)) && st.PresentCount != last_count) {
+        if (last_count && st.PresentCount == last_count + 1) {
+            uint32_t d = st.PresentRefreshCount - last_refresh;
+            stays[d < 5 ? d : 5]++;
+        } else if (last_count) {
+            unknown++;
+        }
+        last_count = st.PresentCount;
+        last_refresh = st.PresentRefreshCount;
+    }
+    scx->Release();
+    if (++since >= 3600) {
+        logf("[present] last %u presents, frames on screen for 0/1/2/3/4/5+ refreshes: %u %u %u %u %u %u, %u not seen one by one",
+             since, stays[0], stays[1], stays[2], stays[3], stays[4], stays[5], unknown);
+        since = unknown = 0;
+        for (uint32_t &s : stays) s = 0;
+    }
+}
+
 HRESULT present()
 {
     if (!g_dev) return D3D_OK;
@@ -965,8 +1023,13 @@ HRESULT present()
     // 1-10 s, a black window with the game stopped (the user, 2026-10-24, borderless; r514-r518). Under plain Direct3D 9
     // an exclusive device was lost there and its Reset dropped the pile; a 9Ex device is not lost.
     bool whole = g_window.actual_exclusive() && g_frame_w > 0 && g_frame_h > 0 && (g_frame_w < g_bb_w || g_frame_h < g_bb_h) && present_stretch();
+    if (g_cfg.frame_marker) draw_frame_marker();
     // The device decides this, not the Alt+Enter request: until ResetEx succeeds, Present still uses the old device.
-    if (g_window.present_flip()) return g_dev->Present(nullptr, nullptr, nullptr, nullptr);
+    if (g_window.present_flip()) {
+        HRESULT hr = g_dev->Present(nullptr, nullptr, nullptr, nullptr);
+        if (g_cfg.present_stats) note_present_stats();
+        return hr;
+    }
     RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w, g_frame_h && !whole ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)
 }

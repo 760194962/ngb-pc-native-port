@@ -399,6 +399,14 @@ bool parse_args()
         else if (a == L"--no-pc-menus") g_cfg.pc_menus = false;
         else if (a == L"--timer-vblank") { g_cfg.timer_vblank = true; settings_mark_cli("timer_vblank"); }
         else if (a == L"--display-vblank") g_cfg.display_vblank = true;
+        else if (a == L"--frame-marker") g_cfg.frame_marker = true;
+        else if (a == L"--no-scanline") g_cfg.no_scanline = true;
+        else if (a == L"--present-stats") g_cfg.present_stats = true;
+        else if (a == L"--tick-phase") {
+            std::wstring v;
+            if (!next(v)) return false;
+            g_cfg.tick_phase_ms = (float)_wtof(v.c_str());
+        }
         else if (a == L"--perf-at") {
             if (!next(g_cfg.perf_at)) return false;
         }
