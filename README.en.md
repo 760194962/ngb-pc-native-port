@@ -54,7 +54,7 @@ Ninja Gaiden Black, Hurricane vb-zh-x2.1 · Ninja Gaiden Black, original US rele
 <img src="docs/screenshots/black_railyard.jpg" alt="The military base rail yard" width="32.3%">
 </p>
 
-**Screen shapes** (Ninja Gaiden Black, the same moment): 4:3, 16:9, 16:10, 21:9. At 16:10 and 21:9 the picture is wider and the HUD sits at the sides.
+**Screen shapes** (Ninja Gaiden Black, the same moment): 4:3, 16:9, 16:10, 21:9. At 21:9 the picture is wider and the HUD sits at the sides; 16:10 keeps the 16:9 layout.
 
 4:3 · 16:9
 

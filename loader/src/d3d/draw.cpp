@@ -2610,8 +2610,8 @@ void apply_rhw_tex_scales(uint8_t *verts, uint32_t count, uint32_t stride, const
         }
 }
 
-// The HUD in play on a screen not 16:9 (players' request, 2026-11-09; the idea from ngbrecomp's renderer, docs/TECHNICAL
-// "HudPlace"/"HudGroup", written anew here). The game draws one 16:9 layout; squeeze_169 keeps its shape. Menus,
+// The HUD in play on a screen wider than 16:9 (players' request, 2026-11-09; 16:10 too up to 2.2.37.12; the idea from
+// ngbrecomp's renderer, docs/TECHNICAL "HudPlace"/"HudGroup", written anew here). The game draws one 16:9 layout; squeeze_169 keeps its shape. Menus,
 // the title, chapter cards and movies stay whole about the middle, as before. In play (a frame with 3D drawn into the
 // back buffer before its 2D) each HUD element instead keeps to its own side: the health bar and karma to the top-left
 // corner, prompts and the right-hand gauges to the right, what is about the middle to the middle. An element is a
@@ -2920,11 +2920,11 @@ void wide_hud_frame_end()
     s.covered = false;
 }
 
-// 16:10 / 21:9 (ngb_aspect.cpp): the game lays its 2D out for 16:9 over the 720-wide buffer, so a wider picture
-// stretched its HUD, text and menus. Screen-space draws on the back buffer are squeezed back to 16:9 about the
-// centre. All of them come from one sprite routine (FUN_00325810).
-//  - The game's own pictures (swizzled textures: HUD, text, menus, the title screen, backgrounds) always, and they
-//    are clipped to the 16:9 part (g_rhw_clip, draw_up): a menu's pieces that reach or pass the sides (the title's
+// The game's 2D on a screen that is not 16:9 (ngb_aspect.cpp widens only its 3D view). The game lays its 2D out for
+// 16:9 over the 720-wide buffer; drawn as it is, a wider picture stretched its HUD, text and menus. Each screen-space
+// draw on the back buffer is fitted back (fit_2d), all of them from one sprite routine (FUN_00325810):
+//  - The game's own pictures (swizzled textures: HUD, text, menus, the title screen, backgrounds) are squeezed to 16:9
+//    and clipped to the 16:9 part (g_rhw_clip, draw_up): a menu's pieces that reach or pass the sides (the title's
 //    background runs -32..751 at full height, its credits quad out to 744, r368; the main menu's bands and
 //    scrolling patterns out to -1153 and 1920, r371) then end at its edges, with black or the game on either side,
 //    rather than some stretched and some not (r369).
@@ -2932,194 +2932,249 @@ void wide_hud_frame_end()
 //    their full width when they reach a side or are nearly full height; smaller ones are squeezed.
 //  - A movie frame (linear, the Sofdec player's blit FUN_0031DA50 + 0x13C, the full-screen quad of r346) keeps its
 //    16:9 shape, with black on either side.
-// 16:10 is narrower than 16:9: there the same 16:9 shape is kept by lowering the 2D instead (see the end).
-// Works on Xbox-pixel positions (x, y at the start of each vertex), before the render scale (sx, sy) is applied.
-void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, float sy, uint32_t fvf)
+//  - In play, wider than 16:9, each HUD element keeps to its own side (wide_hud_place).
+// Wider than 16:9 the 2D is squeezed across; 16:10 is narrower: widening it would cut its sides off (r392: the title's
+// credits), so it is lowered about the middle instead, the whole 16:9 layout shown with black or the game above and
+// below. Works on Xbox-pixel positions (x, y at the start of each vertex), before the render scale (sx, sy).
+
+// The screen's shape against the game's 16:9 layout: the axis the 2D is squeezed along (x wider, y narrower) and the
+// 16:9 part's share of it
+struct Shape169 {
+    bool active = false; // widescreen, and not 16:9
+    bool wider = false;  // 21:9 and the ultrawides; else 16:10
+    float k = 1.0f;      // < 1
+};
+
+Shape169 shape169()
 {
-    g_rhw_clip = {}; // none left from a draw that was not made
-    if (!g_cfg.widescreen || g_cfg.aspect_w * 9 == g_cfg.aspect_h * 16 || !g_st.render_target || !is_backbuffer(g_st.render_target)) return;
-    float mnx = 1e30f, mxx = -1e30f, mny = 1e30f, mxy = -1e30f;
+    Shape169 s;
+    if (!g_cfg.widescreen || g_cfg.aspect_w * 9 == g_cfg.aspect_h * 16) return s;
+    const float r = (16.0f / 9.0f) * g_cfg.aspect_h / g_cfg.aspect_w; // under 1 when wider
+    s.active = true;
+    s.wider = r < 1.0f;
+    s.k = s.wider ? r : 1.0f / r;
+    return s;
+}
+
+// The host rectangle of the 16:9 part about the middle (w, h: Xbox pixels; sx, sy: the render scale)
+RECT part169(const Shape169 &s, float w, float h, float sx, float sy)
+{
+    const float c = (s.wider ? w : h) * 0.5f, lo = c - c * s.k, hi = c + c * s.k;
+    return s.wider ? RECT{(LONG)(lo * sx + 0.5f), 0, (LONG)(hi * sx + 0.5f), (LONG)(h * sy + 0.5f)}
+                   : RECT{0, (LONG)(lo * sy + 0.5f), (LONG)(w * sx + 0.5f), (LONG)(hi * sy + 0.5f)};
+}
+
+struct Box2D {
+    float x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f;
+};
+
+Box2D bounds(const uint8_t *verts, uint32_t count, uint32_t stride)
+{
+    Box2D b;
     for (uint32_t v = 0; v < count; v++) {
         const float *p = (const float *)&verts[(size_t)v * stride];
-        mnx = std::min(mnx, p[0]), mxx = std::max(mxx, p[0]), mny = std::min(mny, p[1]), mxy = std::max(mxy, p[1]);
+        b.x0 = std::min(b.x0, p[0]), b.x1 = std::max(b.x1, p[0]), b.y0 = std::min(b.y0, p[1]), b.y1 = std::max(b.y1, p[1]);
     }
-    float w = (float)backbuffer_width(), h = (float)backbuffer_height();
+    return b;
+}
+
+// The game code that made the draw: the return addresses on the stack from sp, the first n. Older ones left on the
+// stack can come first (NG2004 TU's prologue: 18C241 18C2E5 30F0EC, frames 369-370), so a routine is looked for among
+// the first three.
+struct Callers {
+    uint32_t at[8] = {};
+    int n = 0;
+    Callers(const uint32_t *sp, int max) { n = first_game_callers(sp, at, std::min(max, 8)); }
+    bool among_first3(uint32_t ret) const { return ret && (at[0] == ret || at[1] == ret || at[2] == ret); }
+    std::string text() const
+    {
+        std::string s;
+        char t[16];
+        for (int i = 0; i < n; i++) snprintf(t, sizeof t, " %06X", at[i]), s += t;
+        return s;
+    }
+};
+
+// (--hud-trace) true the first time a key is seen, up to `limit` keys
+bool trace_first(std::set<std::string> &seen, size_t limit, const std::string &key)
+{
+    return seen.size() < limit && seen.insert(key).second;
+}
+
+// What one 2D draw on the back buffer gets
+struct Fit2D {
+    enum Kind { AsDrawn, AsDrawnMiddle, Squeezed } kind = AsDrawn; // AsDrawnMiddle: as drawn, only its 16:9 part shown
+    bool clip = false;  // squeezed: cut to the 16:9 part
+    bool sides = false; // squeezed: may keep to its side as a HUD element in play
+    bool art = false;   // the game's own picture (hud trace)
+};
+
+// The HUD word, the third test of the game's in-play HUD routine (0: not found)
+uint16_t hud_word() { return g_hud_vars[2] ? *(volatile uint16_t *)(uintptr_t)g_hud_vars[2] : 0; }
+
+Fit2D fit_2d(const uint8_t *verts, uint32_t count, uint32_t stride, uint32_t fvf, const Box2D &b, float w, float h,
+             const uint32_t *sp)
+{
+    Fit2D f;
     Resource *t0 = g_st.textures[0];
-    bool art = t0 && (resource_type(t0) == RTYPE_TEXTURE || resource_type(t0) == RTYPE_SURFACE) && !((PixelContainer *)t0)->Size &&
-               !g_stage0_rendered;
-    bool full_h = mxy - mny >= 0.9f * h, squeeze = art || !(mnx <= 0.5f || mxx >= w - 2.0f || full_h), clip = art;
-    if (!t0 && full_h && mnx <= 1.0f && mxx >= w - 1.0f && (fvf & D3DFVF_DIFFUSE) && stride >= 20) {
+    f.art = t0 && (resource_type(t0) == RTYPE_TEXTURE || resource_type(t0) == RTYPE_SURFACE) && !((PixelContainer *)t0)->Size &&
+            !g_stage0_rendered;
+    const bool full_h = b.y1 - b.y0 >= 0.9f * h, full_w = b.x0 <= 0.5f && b.x1 >= w - 2.0f;
+
+    // A plain full-screen quad: opaque, an item's screen (its art then stays about the middle: wide_hud_place)
+    if (!t0 && full_h && b.x0 <= 1.0f && b.x1 >= w - 1.0f && (fvf & D3DFVF_DIFFUSE) && stride >= 20) {
         uint32_t c;
         memcpy(&c, verts + 16, 4); // XYZRHW, then the colour
-        if (c >> 24 == 0xFF || !render_state()[XRS_ALPHABLENDENABLE]) g_wh.covered = true; // an item's screen: art about the middle
-        if (g_cfg.hud_trace && g_wh.threed) { // a plain full-screen quad over the 3D (a fade or a flash): colour, blend, chain
-            static std::set<std::string> seen_fq;
-            uint32_t by[6] = {};
-            int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 6);
+        if (c >> 24 == 0xFF || !render_state()[XRS_ALPHABLENDENABLE]) g_wh.covered = true;
+        if (g_cfg.hud_trace && g_wh.threed) { // over the 3D (a fade or a flash): colour, blend, chain
+            static std::set<std::string> seen;
             const uint32_t *rs = render_state();
             char t[64];
             snprintf(t, sizeof t, "%s blend %u 0x%x/0x%x", (c & 0xFFFFFF) >= 0xC0C0C0 ? "light" : "dark", rs[XRS_ALPHABLENDENABLE],
                      rs[XRS_SRCBLEND], rs[XRS_DESTBLEND]);
-            std::string key = t;
-            for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
-            if (g_hud_vars[2]) snprintf(t, sizeof t, " (HUD word 0x%04x)", *(volatile uint16_t *)(uintptr_t)g_hud_vars[2]), key += t;
-            if (seen_fq.size() < 200 && seen_fq.insert(key).second)
+            std::string key = t + Callers(sp, 6).text();
+            if (g_hud_vars[2]) snprintf(t, sizeof t, " (HUD word 0x%04x)", hud_word()), key += t;
+            if (trace_first(seen, 200, key))
                 logf("[hudtrace] frame %u 3d %u plain full-screen quad, colour 0x%08x, %s", g_frame_count.load(), g_wh.threed, c, key.c_str());
         }
     }
-    bool centre_only = false; // a menu's piece or a movie: always about the middle
+
+    // A screen copy (the picture sampled back)
     if (g_stage0_rendered && (fvf >> 8 & 0xF) && !(fvf & 0x30000)) {
-        // A piece of the picture put back where it was: every vertex samples the screen copy at its own place (u, v =
-        // x / 720, y / 480). The underwater wobble (FUN_0031B460) draws the screen as 12 x 8 tiles of 60 x 60; the ones
-        // in the middle, reaching neither side, were each squeezed (two seams down the screen at x 60 and 660, the
-        // user, 2026-10-24). The game's 2D never samples the picture so.
-        uint32_t uv = 16 + (fvf & D3DFVF_DIFFUSE ? 4 : 0) + (fvf & D3DFVF_SPECULAR ? 4 : 0);
+        // Put back where it was: every vertex samples the copy at its own place (u, v = x / 720, y / 480). The
+        // underwater wobble (FUN_0031B460) draws the screen as 12 x 8 tiles of 60 x 60; the ones in the middle,
+        // reaching neither side, were each squeezed (two seams down the screen at x 60 and 660, the user, 2026-10-24).
+        // The game's 2D never samples the picture so.
+        const uint32_t uv = 16 + (fvf & D3DFVF_DIFFUSE ? 4 : 0) + (fvf & D3DFVF_SPECULAR ? 4 : 0);
         bool in_place = uv + 8 <= stride;
         for (uint32_t v = 0; v < count && in_place; v++) {
             const float *p = (const float *)&verts[(size_t)v * stride], *t = (const float *)&verts[(size_t)v * stride + uv];
             in_place = fabsf(t[0] - (p[0] + 0.5f) / w) < 0.01f && fabsf(t[1] - (p[1] + 0.5f) / h) < 0.01f;
         }
-        // Only when the HUD is off for a menu, as the game's HUD routine tells it: its third test, the word at
-        // [0xDB9C6E] (Black; read from the routine in each build), is 0xFFFF unless a move or an event hides the HUD. A
-        // wall run's slash and some techniques do (0x007C, 0x007E, 0x0086 measured) and add a glow of the scene this way
-        // (FUN_00315420, a 128x128 blur at ONE/ONE over -0.5..719.5); it was cut to the 16:9 middle (the user,
-        // 2026-11-17, 21:9; trace frame 4546). The shop and the menus: 0xFFFF (the first test, [0xD6AF00], is 0 in both,
-        // so it cannot tell them apart; nor can the call chains, the same from the sprite routine down). Other techniques
-        // hide the HUD with the word at 0xFFFF and draw the same glow after 118-380 3D draws, so a menu also has drawn no
-        // 3D yet this frame (menus draw none, 2.2.26; the shop's still at 0); without the routine that alone.
-        bool still = in_place && full_h && mnx <= 0.5f && mxx >= w - 2.0f && !hud_in_play();
-        const bool menu = g_wh.threed == 0 && (!g_hud_vars[2] || *(volatile uint16_t *)(uintptr_t)g_hud_vars[2] == 0xFFFF);
-        if (still && g_cfg.hud_trace) {
-            static std::set<std::string> seen_ip;
-            uint32_t by[8] = {};
-            int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 8);
-            std::string key = menu ? "menu" : "not a menu";
-            char t[16];
-            for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
-            char vars[64] = "";
-            if (g_hud_vars[0])
-                snprintf(vars, sizeof vars, " vars %u %u 0x%04x", *(volatile uint32_t *)(uintptr_t)g_hud_vars[0],
-                         *(volatile uint8_t *)(uintptr_t)g_hud_vars[1], *(volatile uint16_t *)(uintptr_t)g_hud_vars[2]);
-            key += vars;
-            if (seen_ip.size() < 3000 && seen_ip.insert(key).second)
-                logf("[hudtrace] frame %u 3d %u in-place full screen out of play, %s: %s", g_frame_count.load(), g_wh.threed,
-                     menu ? "kept to 16:9" : "drawn whole", key.c_str());
-        }
-        if (still && menu) {
+        if (in_place) {
             // Out of play, the whole screen so is a picture of the game kept for a menu to be drawn over: the shop
             // (Muramasa's) draws its still of the last frame of play (a 512x512 target filled as the shop opened,
             // FUN_00325810 from the task list) and a glow of it, its own art over that. On a 16:9 screen the art
             // covers it; wider, the still's sides showed the game and its HUD around the shop (the user, 2026-11-13,
-            // 21:9; trace r_shop frame 3137). Only its 16:9 middle is drawn, black beyond as by the menus that cover
+            // 21:9; trace r_shop frame 3137). Only its 16:9 middle is shown, black beyond as by the menus that cover
             // the screen with a plain quad (the pause menu's). In play (the underwater wobble) it stays as drawn.
-            float k = (16.0f / 9.0f) * g_cfg.aspect_h / g_cfg.aspect_w;
-            if (k < 1.0f) {
-                float c = w * 0.5f;
-                g_rhw_clip = {(LONG)((c - c * k) * sx + 0.5f), 0, (LONG)((c + c * k) * sx + 0.5f), (LONG)(h * sy + 0.5f)};
-            } else {
-                float c = h * 0.5f, ky = 1.0f / k;
-                g_rhw_clip = {0, (LONG)((c - c * ky) * sy + 0.5f), (LONG)(w * sx + 0.5f), (LONG)((c + c * ky) * sy + 0.5f)};
+            // A menu, as the game's HUD routine tells it: its third test, the word at [0xDB9C6E] (Black; read from the
+            // routine in each build), is 0xFFFF unless a move or an event hides the HUD. A wall run's slash and some
+            // techniques do (0x007C, 0x007E, 0x0086 measured) and add a glow of the scene this way (FUN_00315420, a
+            // 128x128 blur at ONE/ONE over -0.5..719.5); it was cut to the 16:9 middle (the user, 2026-11-17, 21:9;
+            // trace frame 4546). The shop and the menus: 0xFFFF (the first test, [0xD6AF00], is 0 in both, so it
+            // cannot tell them apart; nor can the call chains, the same from the sprite routine down). Other
+            // techniques hide the HUD with the word at 0xFFFF and draw the same glow after 118-380 3D draws, so a menu
+            // also has drawn no 3D yet this frame (menus draw none, 2.2.26; the shop's still at 0); without the
+            // routine that alone.
+            const bool still = full_h && full_w && !hud_in_play();
+            const bool menu = g_wh.threed == 0 && (!g_hud_vars[2] || hud_word() == 0xFFFF);
+            if (still && g_cfg.hud_trace) {
+                static std::set<std::string> seen;
+                std::string key = (menu ? "menu" : "not a menu") + Callers(sp, 8).text();
+                char vars[64] = "";
+                if (g_hud_vars[0])
+                    snprintf(vars, sizeof vars, " vars %u %u 0x%04x", *(volatile uint32_t *)(uintptr_t)g_hud_vars[0],
+                             *(volatile uint8_t *)(uintptr_t)g_hud_vars[1], hud_word());
+                key += vars;
+                if (trace_first(seen, 3000, key))
+                    logf("[hudtrace] frame %u 3d %u in-place full screen out of play, %s: %s", g_frame_count.load(), g_wh.threed,
+                         menu ? "kept to 16:9" : "drawn whole", key.c_str());
             }
+            f.kind = still && menu ? Fit2D::AsDrawnMiddle : Fit2D::AsDrawn;
+            return f;
         }
-        if (in_place) return;
-        if (g_cfg.hud_trace) { // a screen copy sampled elsewhere than in place: its chain, box and texture coordinates
-            static std::set<std::string> seen_sc;
-            uint32_t by[8] = {};
-            int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 8);
-            std::string key;
-            char t[16];
-            for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
+        if (g_cfg.hud_trace) { // sampled elsewhere than in place: its chain, box and texture coordinates
+            static std::set<std::string> seen;
+            const std::string key = Callers(sp, 8).text();
             float u0 = 1e30f, u1 = -1e30f, v0 = 1e30f, v1 = -1e30f;
             for (uint32_t v = 0; v < count && uv + 8 <= stride; v++) {
                 const float *q = (const float *)&verts[(size_t)v * stride + uv];
                 u0 = std::min(u0, q[0]), u1 = std::max(u1, q[0]), v0 = std::min(v0, q[1]), v1 = std::max(v1, q[1]);
             }
-            if (seen_sc.size() < 3000 && seen_sc.insert(key).second)
+            if (trace_first(seen, 3000, key))
                 logf("[hudtrace] frame %u 3d %u screen copy, %u verts, box %.1f-%.1f,%.1f-%.1f uv %.3f-%.3f,%.3f-%.3f in play %d:%s",
-                     g_frame_count.load(), g_wh.threed, count, mnx, mxx, mny, mxy, u0, u1, v0, v1, (int)hud_in_play(), key.c_str());
+                     g_frame_count.load(), g_wh.threed, count, b.x0, b.x1, b.y0, b.y1, u0, u1, v0, v1, (int)hud_in_play(), key.c_str());
         }
     }
-    if (art && full_h && mnx <= 0.5f && mxx >= w - 2.0f) {
-        // A picture over the whole 3D view is no 2D: the underwater ripples (FUN_0013A050, its draw returning to
-        // 0x13A8E6: a 128x128 DXT5 picture, -0.5..719.5 at full height) were squeezed and cut to the 16:9 middle,
-        // the picture beside them left without (the user, 2026-10-24, r503 at 64:27)
-        // (among the first three return addresses: older ones left on the stack can come first, as with the movies)
-        uint32_t by[3] = {};
-        first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 3);
-        const uint32_t r = g_cfg.profile && g_cfg.profile->wide2d ? g_cfg.profile->wide2d->ripples_ret : 0;
-        if (r && (by[0] == r || by[1] == r || by[2] == r)) return;
+
+    const Wide2D *w2 = g_cfg.profile ? g_cfg.profile->wide2d : nullptr;
+    // A picture over the whole 3D view is no 2D: the underwater ripples (FUN_0013A050, its draw returning to 0x13A8E6:
+    // a 128x128 DXT5 picture, -0.5..719.5 at full height) were squeezed and cut to the 16:9 middle, the picture beside
+    // them left without (the user, 2026-10-24, r503 at 64:27)
+    if (f.art && full_h && full_w && w2 && Callers(sp, 3).among_first3(w2->ripples_ret)) return f;
+
+    if (f.art || !(b.x0 <= 0.5f || b.x1 >= w - 2.0f || full_h)) { // the game's art, or a small untextured piece
+        f.kind = Fit2D::Squeezed;
+        f.clip = f.art;
+        f.sides = true;
+        return f;
     }
-    if (!squeeze) {
-        uint32_t by[3] = {};
-        first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 3);
-        // a menu's band or rule: the menus' 2D (FUN_00222730, 234 bytes; its calls at 0x222795 and 0x222805) draws
-        // sprites through FUN_00325810, and their lines through 0x3273B8 (r375)
-        const Wide2D *w2 = g_cfg.profile ? g_cfg.profile->wide2d : nullptr;
-        auto menu = [w2](uint32_t a) { return w2 && a >= w2->menu_lo && a < w2->menu_hi; };
-        // a movie frame: the player's blit among the first return addresses found on the stack -- older ones left there
-        // can come first (NG2004 TU's prologue: 18C241 18C2E5 30F0EC, frames 369-370, drawn stretched at 21:9; the
-        // user, 2026-11-17)
-        if (full_h && w2 && (by[0] == w2->movie_ret || by[1] == w2->movie_ret || by[2] == w2->movie_ret)) squeeze = centre_only = true;
-        else if (!full_h && (menu(by[1]) || menu(by[2]))) squeeze = clip = centre_only = true;
-        if (g_cfg.hud_trace && full_h && !squeeze) { // a full-height picture left as drawn: its chain (a movie not known?)
-            static std::set<uint64_t> seen_fh;
-            uint32_t more[6] = {};
-            int nm = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), more, 6);
-            uint64_t k = (uint64_t)more[0] << 32 | more[1];
-            if (seen_fh.size() < 200 && seen_fh.insert(k).second) {
-                std::string key;
-                char t[16];
-                for (int i = 0; i < nm; i++) snprintf(t, sizeof t, " %06X", more[i]), key += t;
-                logf("[hudtrace] frame %u 3d %u full height as drawn, box %.1f-%.1f,%.1f-%.1f, fvf 0x%x, rendered %d:%s", g_frame_count.load(),
-                     g_wh.threed, mnx, mxx, mny, mxy, fvf, (int)g_stage0_rendered, key.c_str());
-            }
-        }
+    // Reaching a side or nearly full height, not the game's art: as drawn, unless it is a movie frame (the player's blit)
+    // or a menu's band or rule (the menus' 2D, FUN_00222730, 234 bytes, draws sprites through FUN_00325810 and their
+    // lines through 0x3273B8; its calls at 0x222795 and 0x222805, r375)
+    const Callers by(sp, 3);
+    auto menu = [w2](uint32_t a) { return w2 && a >= w2->menu_lo && a < w2->menu_hi; };
+    if (full_h && w2 && by.among_first3(w2->movie_ret)) f.kind = Fit2D::Squeezed;
+    else if (!full_h && (menu(by.at[1]) || menu(by.at[2]))) f.kind = Fit2D::Squeezed, f.clip = true;
+    else if (g_cfg.hud_trace && full_h) { // a full-height picture left as drawn: its chain (a movie not known?)
+        static std::set<std::string> seen;
+        const Callers more(sp, 6);
+        char t[32];
+        snprintf(t, sizeof t, "%08X%08X", more.at[0], more.at[1]);
+        if (trace_first(seen, 200, t))
+            logf("[hudtrace] frame %u 3d %u full height as drawn, box %.1f-%.1f,%.1f-%.1f, fvf 0x%x, rendered %d:%s", g_frame_count.load(),
+                 g_wh.threed, b.x0, b.x1, b.y0, b.y1, fvf, (int)g_stage0_rendered, more.text().c_str());
     }
-    if (!squeeze) return;
-    // In play (3D drawn into the back buffer this frame before this 2D) the HUD's elements keep to their sides
-    // (wide_hud_place); a picture over most of the screen there is a screen effect and fills it as drawn.
+    return f;
+}
+
+// The 2D squeezed along the shape's axis about c (Xbox pixels)
+void squeeze_about(uint8_t *verts, uint32_t count, uint32_t stride, const Shape169 &s, float c)
+{
+    const int axis = s.wider ? 0 : 1;
+    for (uint32_t v = 0; v < count; v++) {
+        float *p = (float *)&verts[(size_t)v * stride];
+        p[axis] = c + (p[axis] - c) * s.k;
+    }
+}
+
+void squeeze_169(uint8_t *verts, uint32_t count, uint32_t stride, float sx, float sy, uint32_t fvf)
+{
+    g_rhw_clip = {}; // none left from a draw that was not made
+    const Shape169 s = shape169();
+    if (!s.active || !g_st.render_target || !is_backbuffer(g_st.render_target)) return;
+    const uint32_t *sp = (const uint32_t *)_AddressOfReturnAddress(); // the game's calls are looked for from here up
+    const float w = (float)backbuffer_width(), h = (float)backbuffer_height();
+    const Box2D b = bounds(verts, count, stride);
+    const Fit2D f = fit_2d(verts, count, stride, fvf, b, w, h, sp);
+    if (f.kind == Fit2D::AsDrawnMiddle) g_rhw_clip = part169(s, w, h, sx, sy);
+    if (f.kind != Fit2D::Squeezed) return;
     if (g_cfg.hud_trace) { // which game routines draw the 2D: the call chain (8 return addresses) with its box
         static std::set<std::string> seen;
-        uint32_t by[8] = {};
-        int nb = first_game_callers((const uint32_t *)_AddressOfReturnAddress(), by, 8);
-        std::string key;
-        char t[16];
-        for (int i = 0; i < nb; i++) snprintf(t, sizeof t, " %06X", by[i]), key += t;
-        // one line per chain (its first box), at most 3000
-        if (seen.size() < 3000 && seen.insert(key).second)
+        const std::string key = Callers(sp, 8).text();
+        if (trace_first(seen, 3000, key))
             logf("[hudtrace] frame %u 3d %u%s%s box %.0f-%.0f,%.0f-%.0f:%s", g_frame_count.load(), g_wh.threed,
-                 centre_only ? " centre" : "", art ? " art" : "", mnx, mxx, mny, mxy, key.c_str());
+                 f.sides ? "" : " centre", f.art ? " art" : "", b.x0, b.x1, b.y0, b.y1, key.c_str());
     }
-    float ax = w * 0.5f, ay = h * 0.5f;
-    if (!centre_only) g_wh.pieces2d++;
-    if (!centre_only && !g_hud_seen_2d) g_hud_seen_2d = true, g_hud_before_2d = g_hud_shown != g_hud_shown_end;
-    if (!centre_only && hud_in_play() && !g_cfg.hud_centre) {
-        if (art && mxx - mnx >= 0.85f * w && mxy - mny >= 0.75f * h) return;
-        wide_hud_place(mnx, mxx, mny, mxy, w, h, ax, ay);
-        if (mxx - mnx < 0.89f * w && mxy - mny < 0.9f * h && g_wh.boxes.size() < 2048)
-            g_wh.boxes.push_back({mnx, mxx, mny, mxy, g_wh.draws});
+    float ax = w * 0.5f, ay = h * 0.5f; // the point it is squeezed about
+    if (f.sides) {
+        g_wh.pieces2d++;
+        if (!g_hud_seen_2d) g_hud_seen_2d = true, g_hud_before_2d = g_hud_shown != g_hud_shown_end;
     }
-    float k = (16.0f / 9.0f) * g_cfg.aspect_h / g_cfg.aspect_w;
-    if (k < 1.0f) { // wider than 16:9 (21:9): narrowed about the centre (or the HUD element's side), the game beyond
-        float c = ax;
-        if (c != w * 0.5f) clip = false; // a corner's piece is whole as narrowed
-        for (uint32_t v = 0; v < count; v++) {
-            float *p = (float *)&verts[(size_t)v * stride];
-            p[0] = c + (p[0] - c) * k;
-        }
-        if (clip && (mnx < c - c * k || mxx > c + c * k)) // only what would show outside the 16:9 part
-            g_rhw_clip = {(LONG)((c - c * k) * sx + 0.5f), 0, (LONG)((c + c * k) * sx + 0.5f), (LONG)(h * sy + 0.5f)};
-    } else { // narrower (16:10): widening it would cut its sides off (r392: the title's credits); lowered about the
-             // middle instead, the whole 16:9 layout shown with black or the game above and below
-        float ky = 1.0f / k, c = ay;
-        if (c != h * 0.5f) clip = false;
-        for (uint32_t v = 0; v < count; v++) {
-            float *p = (float *)&verts[(size_t)v * stride];
-            p[1] = c + (p[1] - c) * ky;
-        }
-        if (clip && (mny < c - c * ky || mxy > c + c * ky))
-            g_rhw_clip = {0, (LONG)((c - c * ky) * sy + 0.5f), (LONG)(w * sx + 0.5f), (LONG)((c + c * ky) * sy + 0.5f)};
+    // In play, wider than 16:9, the HUD's elements keep to their sides; a picture over most of the screen there is a
+    // screen effect and fills it as drawn. At 16:10 the whole 16:9 layout stays about the middle, a little lower, as
+    // before 2.2.6 (the user, 2026-11-25: no tuning wanted there).
+    if (f.sides && s.wider && hud_in_play() && !g_cfg.hud_centre) {
+        if (f.art && b.x1 - b.x0 >= 0.85f * w && b.y1 - b.y0 >= 0.75f * h) return;
+        wide_hud_place(b.x0, b.x1, b.y0, b.y1, w, h, ax, ay);
+        if (b.x1 - b.x0 < 0.89f * w && b.y1 - b.y0 < 0.9f * h && g_wh.boxes.size() < 2048)
+            g_wh.boxes.push_back({b.x0, b.x1, b.y0, b.y1, g_wh.draws});
     }
+    const float c = s.wider ? ax : ay, lo = s.wider ? b.x0 : b.y0, hi = s.wider ? b.x1 : b.y1;
+    squeeze_about(verts, count, stride, s, c);
+    // only what would show outside the 16:9 part, and not a corner's piece (whole as squeezed)
+    if (f.clip && c == (s.wider ? w : h) * 0.5f && (lo < c - c * s.k || hi > c + c * s.k)) g_rhw_clip = part169(s, w, h, sx, sy);
 }
 
 // QuadSnap (ngbrecomp #83: src/d3d/vk/backend.cpp QuadSnap, gpu::QuadHlsl): a 2D quad above 1x drawn as the console covers
