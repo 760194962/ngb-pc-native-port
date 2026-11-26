@@ -45,11 +45,10 @@ PresentTimes g_present_minute, g_present_recent;
 std::atomic<int64_t> g_hold{0};
 
 // Low-latency present (present_before_tick): the time by which a frame drawn after the last tick must be ready to go
-// before its own tick, QueryPerformanceCounter (0: no followed display, frames go at once); whether frames are shown
-// through a queue of flips (exclusive fullscreen with vsync), the one way going early works; the minute's counts
+// before its own tick, QueryPerformanceCounter (0: no one-refresh deadline; exclusive+vsync keeps the old at-once
+// path there); the minute's counts
 constexpr double kEarlyMargin = 0.004;
 std::atomic<int64_t> g_early_deadline{0};
-std::atomic<bool> g_early_queued{false};
 std::atomic<uint32_t> g_early_frames, g_early_gated, g_early_switches;
 
 // D3DKMT (gdi32): the display controller's scanline for a GDI display, read without waiting
@@ -515,7 +514,6 @@ void Ticker::after_tick()
     const bool one_a_refresh = m.clock.state() == State::Following && m.clock.refreshes() == 1;
     const double vblank = prev - m.clock.target_phase(m.clock.display_period());
     g_early_deadline.store(one_a_refresh ? m.q.ticks(vblank + m.clock.display_period() - kEarlyMargin) : 0);
-    g_early_queued.store(m.exclusive && g_cfg.vsync);
     m.due = m.clock.next(prev);
     m.rot = m.rot + 0.2 < 1 ? m.rot + 0.2 : m.rot - 0.8;
     m.mid = prev + (0.15 + 0.7 * m.rot) * (m.due - prev);
@@ -534,17 +532,20 @@ double tick_period() { return g_tick_period.load(); }
 
 bool present_before_tick(int64_t now)
 {
+    // Only consulted when black.ini low_latency_present is on: d3d/device.cpp short-circuits on g_cfg.present_early,
+    // so with the switch off nothing in this function runs and the frame always waits for its tick.
+    //
+    // 2.3.0.1 intent: a frame goes early only in an exclusive fullscreen device with vsync on. The compositor
+    // (window, borderless) and the vsync-off flip are excluded before looking at the deadline:
+    //   - no vsync: the Present is the tear position; it waits for the tick;
+    //   - window / borderless: the compositor keeps the newest picture; it waits for the tick.
+    // On an exclusive+vsync device with no one-refresh deadline (display not followed, or a multi-refresh tick)
+    // there is no deadline to judge and the old at-once path is kept.
     static bool early = true;       // render thread only
     static uint32_t would_make = 0; // frames in a row, waiting, that were ready by the deadline
+    if (!host3d::present_flip() || !g_cfg.vsync) return false;
     const int64_t deadline = g_early_deadline.load();
     if (!deadline) return true;
-    // Only through a queue of flips, an exclusive device with vsync: a frame that misses only shows a refresh late (1
-    // repeat, 0 skips, the input's age at the Present 1-5 ms against 16.6). The compositor (a window, borderless) keeps
-    // the newest picture, so a frame that goes early and one that does not land in the same refresh (60 Hz, RTX 3060,
-    // 150 s: window 13 repeats / 13 skips, borderless 16 / 15; with 30 s before going early again still 18 / 15 and frames
-    // early only 0-20% of the time, 2026-11-26). Without vsync a frame flips the moment it is presented: early, its tear
-    // would be anywhere instead of where the tick puts it (update_display).
-    if (!g_early_queued.load()) return false;
     g_early_gated.fetch_add(1, std::memory_order_relaxed);
     const bool makes = now < deadline;
     if (early && !makes) {

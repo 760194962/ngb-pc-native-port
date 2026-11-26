@@ -492,6 +492,7 @@ void set_fullscreen(bool on)
 
 bool fullscreen() { return g_hwnd && is_fullscreen(); }
 bool exclusive() { return g_window.actual_exclusive(); }
+bool present_flip() { return g_window.present_flip(); }
 
 D3DPRESENT_PARAMETERS g_pp; // as created; Reset uses the same
 

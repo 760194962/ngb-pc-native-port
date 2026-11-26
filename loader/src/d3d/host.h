@@ -69,6 +69,7 @@ void frame_layout(RECT *frame, RECT *picture);
 void set_fullscreen(bool on);  // from any thread (PC SETTINGS > VIDEO > FULLSCREEN)
 bool fullscreen();
 bool exclusive(); // the device that exists now is exclusive fullscreen (not merely requested)
+bool present_flip(); // the device that exists now presents with a queue of flips (exclusive with vsync)
 IDirect3DDevice9 *dev(); // an IDirect3DDevice9Ex (create_device)
 // A small texture the loader writes from the CPU (the gamma ramp, the white texel, the overlay's panels): written in
 // its D3DPOOL_SYSTEMMEM copy, copied into the D3DPOOL_DEFAULT one the draws sample when unlocked. A Direct3D 9Ex
