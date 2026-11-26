@@ -18,19 +18,19 @@ support is kept.
 
 ## Smoothness settings
 
-The game's speed is right with any setting (a fixed 59.94 Hz clock; a 60 Hz monitor in a window / borderless follows the
-desktop's composition). The settings below only change how evenly frames are shown and whether the picture tears.
+The game's speed is right with any setting: on a 60 / 120 / 240 Hz-class screen the game's clock lines up with the screen's
+refreshes (at most 0.4% from 59.94 Hz), at other refresh rates it is a fixed 59.94 Hz, and it never waits for the screen. The
+settings below only change how evenly frames are shown and whether the picture tears.
 
-| Monitor | Display mode | V-Sync | 60 Hz with V-Sync | Steady game speed | Low-latency present |
+| Monitor | Display mode | V-Sync | 60 Hz in fullscreen | Steady game speed | Low-latency present |
 |---|---|---|---|---|---|
-| G-SYNC / FreeSync on | Exclusive fullscreen | On or off | Off | Off | Off |
-| 60 Hz | Windowed / borderless | No effect | No effect | Off | Off |
-| 120 / 240 Hz | Exclusive fullscreen | On | Off | No effect | Off |
-| 144 / 165 Hz | Exclusive fullscreen | On | On | No effect | Off |
+| 60 Hz | Any | Exclusive: on or off | No effect | Off | For less lag: on, in exclusive fullscreen |
+| 120 / 240 Hz | Any | Exclusive: on | No effect | Off | No effect |
+| 144 / 165 Hz | Borderless or exclusive | Exclusive: on | On (default) | Off | Off |
+| G-SYNC / FreeSync on | Borderless or exclusive, defaults | On or off | On (default, the most even); off to keep the high refresh | Off | Off |
 
-Known: exclusive fullscreen with V-Sync shows one frame a refresh longer about every 17 s (about 8 s at 120 Hz, 4 s at
-240 Hz); at 120 Hz and above a window / borderless is clearly uneven: use exclusive fullscreen or set Windows' refresh rate to
-60 Hz. Details in `Smoothness-Settings-EN.md` in the package.
+A window on a 144 / 165 Hz screen still shows each frame for 3 and then 2 refreshes (a window cannot change the screen's refresh
+rate by itself); set Windows' refresh rate to 60 Hz for an even window. Details in `Smoothness-Settings-EN.md` in the package.
 
 ## Screenshots
 
@@ -259,6 +259,28 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `args = --vsh-record "<game folder>\vsh_record.bin" --hitch-detail`, play, then give the author `cache\shaders\`,
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
+
+### 2.3.0: a new frame clock, even frames in every display mode
+
+- **The game's clock lines up with the screen's refreshes**: on a 60 / 120 / 240 Hz-class screen (59.94, 60 and 60.1 Hz all
+  count) the game's steps line up with the screen's vblanks, every frame shown for the same number of refreshes; the speed is at
+  most 0.4% from 59.94 Hz and the clock never waits for the screen. When the screen refreshes is read from its scanline or from the
+  Windows desktop compositor's timestamps; with neither, a fixed 59.94 Hz.
+  - 60 Hz exclusive fullscreen with V-Sync: the extra refresh about every 17 s (51-72 a 150 s run measured) is down to 3-5.
+  - Borderless: the burst of repeats and drops in the first seconds is gone (0).
+- **Borderless on a 144 / 165 Hz screen switches to 60 Hz too**: as exclusive fullscreen does, entering borderless switches that
+  monitor to 60 Hz at the same size (launcher "60 Hz in fullscreen", on by default), and back when minimised, back in a window or on
+  exit. Measured: no repeats.
+- **G-SYNC / FreeSync with the high refresh kept is more even**: the screen refreshes as each frame is sent, and the game takes a
+  different time to draw each; every frame now goes out at the same time after its step: frame gaps within 16.7 +- 1 ms in exclusive
+  fullscreen 31% -> 93%.
+- **Low-latency present goes early only when it makes it**: in exclusive fullscreen a finished frame goes out early only when it makes
+  the next refresh, pad to picture going out about 16.6 ms -> 1-5 ms with no picture shown twice or lost; a window and borderless no
+  longer go early (one picture twice, one lost there).
+- **Exclusive fullscreen without V-Sync keeps the tear at the edges**: the step comes 1 ms before the vblank, so the flip falls between
+  refreshes or at the very top or bottom; tears in the middle of the picture about 66% -> 0.4%.
+- Performance unchanged (RTX 3060, 2+2 runs: game speed 93.70% vs 93.72%). Not tested yet on integrated graphics. Design and all the
+  measurements: `project/docs/27_帧节拍时钟_2.3.md` in the source repository.
 
 ### 2.2.37.13: the health bar steady through the Talisman of Rebirth, 16:10 back to the centred HUD
 

@@ -402,7 +402,6 @@ bool parse_args()
         else if (a == L"--frame-marker") g_cfg.frame_marker = true;
         else if (a == L"--tear-trace") g_cfg.tear_trace = true;
         else if (a == L"--no-scanline") g_cfg.no_scanline = true;
-        else if (a == L"--present-stats") g_cfg.present_stats = true;
         else if (a == L"--tick-phase") {
             std::wstring v;
             if (!next(v)) return false;

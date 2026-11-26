@@ -980,38 +980,6 @@ static void draw_frame_marker()
     bb->Release();
 }
 
-// Tests (--present-stats): how many refreshes each frame stayed on screen, from the swap chain's statistics (an exclusive
-// device has them; a windowed copy chain does not). Each Present notes which presented frame the screen took last and at
-// which refresh; consecutive frames' refreshes give each one's stay. A minute's histogram goes to the log.
-static void note_present_stats()
-{
-    static uint32_t last_count, last_refresh, stays[6], unknown, since;
-    IDirect3DSwapChain9 *sc = nullptr;
-    IDirect3DSwapChain9Ex *scx = nullptr;
-    if (FAILED(g_dev->GetSwapChain(0, &sc)) || !sc) return;
-    HRESULT q = sc->QueryInterface(__uuidof(IDirect3DSwapChain9Ex), (void **)&scx);
-    sc->Release();
-    if (FAILED(q) || !scx) return;
-    D3DPRESENTSTATS st = {};
-    if (SUCCEEDED(scx->GetPresentStats(&st)) && st.PresentCount != last_count) {
-        if (last_count && st.PresentCount == last_count + 1) {
-            uint32_t d = st.PresentRefreshCount - last_refresh;
-            stays[d < 5 ? d : 5]++;
-        } else if (last_count) {
-            unknown++;
-        }
-        last_count = st.PresentCount;
-        last_refresh = st.PresentRefreshCount;
-    }
-    scx->Release();
-    if (++since >= 3600) {
-        logf("[present] last %u presents, frames on screen for 0/1/2/3/4/5+ refreshes: %u %u %u %u %u %u, %u not seen one by one",
-             since, stays[0], stays[1], stays[2], stays[3], stays[4], stays[5], unknown);
-        since = unknown = 0;
-        for (uint32_t &s : stays) s = 0;
-    }
-}
-
 // Tests (--tear-trace): the scanline as an exclusive Present returns -- with vsync off the flip is made about then, so
 // the tear's line: 100-line bins and the blanking, every 3600 Presents
 static void note_tear()
@@ -1062,7 +1030,6 @@ HRESULT present()
     if (g_window.present_flip()) {
         HRESULT hr = g_dev->Present(nullptr, nullptr, nullptr, nullptr);
         if (g_cfg.tear_trace) note_tear();
-        if (g_cfg.present_stats) note_present_stats();
         return hr;
     }
     RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w, g_frame_h && !whole ? g_frame_h : g_bb_h};

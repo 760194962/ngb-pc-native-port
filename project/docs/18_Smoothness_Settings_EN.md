@@ -1,92 +1,89 @@
 # Smoothness Settings Guide
 
-Applies from 2.2.37.9. What the picture looks like on each kind of monitor and display mode, and how to set things up.
+Applies from 2.3.0. What the picture looks like on each kind of monitor and display mode, and how to set things up.
 
-## First: the game's speed is right with any setting
+## In short
 
-The game's clock is a fixed 59.94 beats a second, as on the original Xbox, whatever the monitor's refresh rate and whether
-G-SYNC / FreeSync is on. The one exception is **a 60 Hz monitor in a window / borderless**: there the clock follows Windows'
-desktop composition, which gives the most even picture, less than 0.1% from 59.94.
-
-So "cutscenes slow down" or "stuck at 24 / 40 fps" cannot happen. The settings below only change **how evenly the frames are
-shown and whether the picture tears**.
+- **The game's speed is right with any setting.** On a screen refreshing at 60, 120 or 240 Hz (59.94, 60 and 60.1 Hz all count) the
+  game's clock lines up with the screen's refreshes, at most 0.4% from the console's 59.94 Hz (a common 60.008 Hz screen: +0.11%); at
+  other refresh rates the clock is a fixed 59.94 Hz. The clock never waits for the screen: no "slow movies" or "stuck at 24 / 40 fps".
+- **60 Hz-class screens: a window, borderless and exclusive fullscreen are all even**, each frame shown exactly once. The old extra
+  refresh about every 17 s in exclusive fullscreen is gone.
+- **144 / 165 Hz screens: borderless and exclusive fullscreen switch the screen to 60 Hz by default**, each frame shown once as well.
 
 ## Quick choice
 
-| Monitor | Display mode | V-Sync | 60 Hz with V-Sync | Steady game speed | Low-latency present |
+| Monitor | Display mode | V-Sync | 60 Hz in fullscreen | Steady game speed | Low-latency present |
 |---|---|---|---|---|---|
-| G-SYNC / FreeSync on | Exclusive fullscreen | On or off | Off | Off | Off |
-| 60 Hz | Windowed / borderless | No effect | No effect | Off | Off |
-| 120 / 240 Hz | Exclusive fullscreen | On | Off | No effect | Off |
-| 144 / 165 Hz | Exclusive fullscreen | On | On | No effect | Off |
+| 60 Hz | Any | Exclusive: on or off (see below) | No effect | Off | For less lag: on, in exclusive fullscreen |
+| 120 / 240 Hz | Any | Exclusive: on | No effect | Off | No effect |
+| 144 / 165 Hz | Borderless or exclusive | Exclusive: on | On (default) | Off | Off |
+| G-SYNC / FreeSync on | Borderless or exclusive, defaults | On or off | On (default, the most even); off to keep the high refresh | Off | Off |
 
-"No effect" means the setting does nothing in that mode; on or off is the same.
+"No effect" means the setting does nothing in that case.
 
-## What you get in each case
+## What you see
+
+### 60 Hz monitors (59.94 and 60.1 Hz too)
+
+- **Window / borderless / exclusive fullscreen with V-Sync**: the game's clock lines up with the screen; each frame is shown exactly once.
+- **Exclusive fullscreen without V-Sync**: it still tears, but the tear is put between refreshes or at the very top or bottom of the
+  picture and is hardly ever in the middle (measured: about 66% -> 0.4% of frames). The lowest lag.
+
+### 120 / 240 Hz monitors
+
+- The game's clock takes one step every 2 / 4 refreshes; every frame stays for the same number of refreshes. (Worked out from the design
+  and a simulation; not measured on such a screen.)
+
+### 144 / 165 Hz monitors
+
+60 does not divide 144 / 165, so at a fixed refresh rate each frame stays for 3 and then 2 refreshes in turn: a steady judder.
+
+- **Borderless / exclusive fullscreen with "60 Hz in fullscreen" (on by default)**: entering fullscreen switches that monitor to 60 Hz
+  at the same size; each frame is shown once. Borderless switches back when minimised, back in a window or when the game exits, and to
+  60 Hz again when shown. Costs: about 1.5 s more of black screen at each switch; Alt+Tab away from borderless leaves the desktop at
+  60 Hz. Exclusive fullscreen switches only with V-Sync on.
+- **Window**: a window cannot change the screen's refresh rate by itself; still 3 / 2. For an even window, set Windows' refresh rate to 60 Hz.
 
 ### G-SYNC / FreeSync on
 
-- **Exclusive fullscreen**: the graphics card takes over the refresh and the monitor refreshes with the game's frames: even,
-  no tearing. The best combination.
-- **Windowed / borderless**: on some PCs G-SYNC / FreeSync does not take over there (Windows' desktop composes the picture);
-  it is then as with it off, see your refresh rate below.
-
-### 60 Hz monitor
-
-- **Windowed / borderless**: the clock follows the desktop's composition; each frame is shown exactly once, the most even.
-- **Exclusive fullscreen with V-Sync**: the game's clock is 59.94 Hz and the monitor 60 Hz, a little apart, so **about every
-  17 s one frame is shown twice**.
-- **Exclusive fullscreen without V-Sync**: the picture tears.
-
-### 120 / 240 Hz monitor
-
-- **Exclusive fullscreen with V-Sync**: each frame stays 2 / 4 refreshes; for the same 59.94-vs-60 reason, **about every 8 s at
-  120 Hz and every 4 s at 240 Hz** one frame stays one refresh longer.
-- **Windowed / borderless**: clearly uneven (many frames shown for 1 or 3 refreshes). A known issue, being worked on.
-  For an even window: set the refresh rate to 60 Hz in Windows' display settings.
-
-### 144 / 165 Hz monitor
-
-60 does not divide 144 / 165, so without a mode change frames alternate between 3 and 2 refreshes, a steady judder.
-
-- **Exclusive fullscreen with V-Sync and "60 Hz with V-Sync"**: entering exclusive fullscreen switches the monitor to 60 Hz;
-  each frame is shown once, as at 60 Hz exclusive (one shown twice about every 17 s). Cost: entering or leaving exclusive
-  fullscreen (Alt+Tab too) changes the display mode, **about 1.5 s more of black screen each time**.
-- **Windowed / borderless**: the 3/2-refresh judder. For an even window: set Windows' refresh rate to 60 Hz.
+- **Defaults (fullscreen switched to 60 Hz)**: as even as a 60 Hz screen, the most even choice.
+- **"60 Hz in fullscreen" off, the high refresh kept**: the screen refreshes as frames come. The game takes a different time to draw
+  each frame, so the program sends every frame out at the same time after its step (about 5 ms more lag) and the refreshes come evenly:
+  measured, 93% of frame gaps within 16.7 +- 1 ms in exclusive fullscreen, 86% borderless, 80% in a window.
 
 ## What each setting does
 
-- **Display mode**: windowed, borderless fullscreen, exclusive fullscreen.
-- **V-Sync**: exclusive fullscreen only; stops tearing. Windows and borderless never tear.
-- **60 Hz with V-Sync**: exclusive fullscreen with V-Sync only; switches the monitor to 60 Hz. For 144 / 165 Hz; at 120 /
-  240 Hz it makes little difference. It does not change the game's speed.
-- **Steady game speed** (Start page): only for **a 60 Hz monitor in a window / borderless**: the game's clock becomes a fixed
-  59.94 Hz instead of following the desktop's composition. Keep it off (off is more even); turn it on only if the speed feels
-  unsteady in that case. Anywhere else it does nothing.
-- **Low-latency present** (experimental): a frame goes out as soon as it is drawn, less delay from a key press to the
-  picture; windowed it may look less even than off. It does not change the game's speed.
-- **Alt+Enter**: goes round window -> borderless -> window -> exclusive fullscreen -> window ..., showing the mode at the
-  picture's bottom right. Quitting keeps the last mode and where the round is.
+- **Display mode**: window, borderless fullscreen, exclusive fullscreen.
+- **V-Sync**: exclusive fullscreen only. On: no tearing. Off: on a 60 Hz-class screen the tear is put at the picture's edges; the
+  lowest lag. A window and borderless never tear.
+- **60 Hz in fullscreen** (was "60 Hz with V-Sync"; still `exclusive_60hz` in `black.ini`): on a 144 / 165 Hz-class screen, borderless
+  and exclusive fullscreen (with V-Sync on) switch to 60 Hz. A 60 / 120 / 240 Hz screen is not switched. It never changes the game's speed.
+- **Steady game speed** (Play page): a fixed 59.94 Hz game clock that never lines up with the screen, in any mode. Keep it off unless
+  the game's speed seems unsteady.
+- **Low-latency present** (experimental): in exclusive fullscreen a finished frame goes out at once when it makes the next refresh,
+  pad to picture going out about 16.6 ms -> 1-5 ms, with no picture shown twice or lost. A window and borderless do not go early
+  (through the desktop compositor one picture would show twice and one never). It never changes the game's speed.
+- **Alt+Enter**: window -> borderless -> window -> exclusive fullscreen -> window ..., the mode shown at the picture's bottom right;
+  the last mode is kept on exit.
 
 ## Where the settings are
 
-- Launcher Start page: Steady game speed (written at once).
+- Launcher Play page: Steady game speed (saved at once).
 - Launcher Display page: display mode.
-- Launcher Graphics page: V-Sync, 60 Hz with V-Sync, Low-latency present (press Save after changing).
+- Launcher Graphics page: V-Sync, 60 Hz in fullscreen, Low-latency present (press Save).
 
 All settings apply from the next start of the game.
 
 ## Common questions
 
-**The picture judders**: see your monitor above. It is worst at 120 Hz and above in a window / borderless: use exclusive
-fullscreen, or set Windows' refresh rate to 60 Hz.
+**The picture judders**: most visible on a 144 / 165 Hz screen in a window. Use borderless or exclusive fullscreen (keep "60 Hz in
+fullscreen" on), or set Windows' refresh rate to 60 Hz.
 
-**A small hitch every dozen seconds or so**: known with exclusive fullscreen and V-Sync (the game's 59.94 Hz against the
-monitor's 60 Hz). Not with G-SYNC / FreeSync.
+**The screen goes black when entering or leaving fullscreen**: "60 Hz in fullscreen" switching the display mode, about 1.5 s. Turn it
+off if you prefer (a 144 / 165 Hz screen goes back to 3 / 2).
 
-**The picture tears**: turn V-Sync on in exclusive fullscreen.
+**Exclusive fullscreen without V-Sync tears at the edges when turning the camera**: the tear is kept at the very top or bottom; turn
+V-Sync on to never see it.
 
-**A black moment entering or leaving fullscreen**: "60 Hz with V-Sync" changing the display mode, about 1.5 s, normal. Turn it
-off if you do not want it.
-
-**The game's speed looks wrong**: check the version is 2.2.37.9 or newer. If it still is, send `logs\black.log` to the author.
+**The game's speed looks wrong**: send `logs\black.log` to the author; its `[clock]` lines tell what the clock was doing.
