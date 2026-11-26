@@ -1012,6 +1012,40 @@ static void note_present_stats()
     }
 }
 
+// Tests (--tear-trace): the scanline as an exclusive Present returns -- with vsync off the flip is made about then, so
+// the tear's line: 100-line bins and the blanking, every 3600 Presents
+static void note_tear()
+{
+    struct Open { WCHAR name[32]; UINT adapter; LUID luid; UINT source; };
+    struct Scan { UINT adapter; UINT source; BOOLEAN vblank; UINT line; };
+    static LONG(APIENTRY *scan)(Scan *);
+    static Open o;
+    static uint32_t bins[21], blank, n;
+    if (!scan) {
+        HMODULE g = GetModuleHandleW(L"gdi32.dll");
+        auto open = (LONG(APIENTRY *)(Open *))GetProcAddress(g, "D3DKMTOpenAdapterFromGdiDisplayName");
+        MONITORINFOEXW mi = {};
+        mi.cbSize = sizeof mi;
+        GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+        wcscpy_s(o.name, mi.szDevice);
+        if (!open || open(&o)) return;
+        scan = (LONG(APIENTRY *)(Scan *))GetProcAddress(g, "D3DKMTGetScanLine");
+        if (!scan) return;
+    }
+    Scan s = {o.adapter, o.source};
+    if (scan(&s)) return;
+    if (s.vblank) blank++;
+    else bins[s.line / 100 < 20 ? s.line / 100 : 20]++;
+    if (++n >= 3600) {
+        char b[400];
+        int at = snprintf(b, sizeof b, "[tear] last %u exclusive Presents, scanline as they returned: %u in the blanking; by 100 lines:", n, blank);
+        for (int i = 0; i < 21 && at < (int)sizeof b - 8; i++) at += snprintf(b + at, sizeof b - at, " %u", bins[i]);
+        logf("%s", b);
+        n = blank = 0;
+        for (uint32_t &x : bins) x = 0;
+    }
+}
+
 HRESULT present()
 {
     if (!g_dev) return D3D_OK;
@@ -1027,6 +1061,7 @@ HRESULT present()
     // The device decides this, not the Alt+Enter request: until ResetEx succeeds, Present still uses the old device.
     if (g_window.present_flip()) {
         HRESULT hr = g_dev->Present(nullptr, nullptr, nullptr, nullptr);
+        if (g_cfg.tear_trace) note_tear();
         if (g_cfg.present_stats) note_present_stats();
         return hr;
     }

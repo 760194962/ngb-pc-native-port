@@ -95,7 +95,8 @@ struct Config {
     bool display_vblank = false; // --display-vblank (tests): follow the display even with --background
     float tick_phase_ms = 0;     // --tick-phase MS (tests): a followed tick this long after the vblank (0: by the refresh)
     bool no_scanline = false;    // --no-scanline (tests): the clock follows the compositor's timing as when the scanline cannot be read
-    bool frame_marker = false;   // --frame-marker (tests): each Present's number in the top-left corner (d3d/host.cpp present)
+    bool frame_marker = false;
+    bool tear_trace = false;     // --tear-trace (tests): the scanline at each exclusive Present (d3d/host.cpp)   // --frame-marker (tests): each Present's number in the top-left corner (d3d/host.cpp present)
     bool present_stats = false;  // --present-stats (tests): refreshes each frame stayed on screen, exclusive (d3d/host.cpp)
     bool move_flash = true;     // black.ini move_flash: the full-screen glow and blur some moves add (d3d/draw.cpp skip_move_flash)
     // black.ini exclusive_60hz (named so since 2.2.34) / --keep-refresh: on a screen the game's clock cannot follow (144,

@@ -377,6 +377,11 @@ struct Ticker::Impl {
         exclusive = ex;
         display.update(m);
         clock.set_timing(display.timing());
+        // Exclusive fullscreen without vsync flips the moment the Present is made: the tear is where the scanline is.
+        // A tick 1 ms before the vblank puts it in the blanking or at the picture's very top or bottom (60 Hz, RTX 3060:
+        // 3% of Presents in between, against 33% lines 200-500 of 1200 with the tick 2 ms after; 2026-11-26) -- what
+        // "scanline sync" tools do. Otherwise 2 ms after (phase_for). --tick-phase sets it for tests.
+        clock.phase = g_cfg.tick_phase_ms ? g_cfg.tick_phase_ms / 1000 : exclusive && !g_cfg.vsync ? -0.001 : 0;
     }
     std::string free_reason() const
     {
@@ -407,7 +412,7 @@ struct Ticker::Impl {
                  "vblank%s",
                  display.name(), phase_source(), 1 / p, display.timing().vtotal, display.timing().vactive, clock.refreshes(),
                  clock.refreshes() > 1 ? "es" : "", 1 / (clock.refreshes() * p),
-                 1000 * (clock.phase > 0 ? clock.phase : Clock::phase_for(p)), exclusive ? " (exclusive)" : "");
+                 1000 * clock.target_phase(p), exclusive ? " (exclusive)" : "");
         } else {
             logf("[clock] free 59.94 Hz timer: %s%s", reason.c_str(), exclusive ? " (exclusive)" : "");
         }
@@ -450,7 +455,6 @@ struct Ticker::Impl {
 Ticker::Ticker() : d(new Impl)
 {
     timeBeginPeriod(1);
-    d->clock.phase = g_cfg.tick_phase_ms / 1000; // tests: --tick-phase MS (0: by the refresh)
     d->clock.allow_follow(!g_cfg.timer_vblank && !(g_cfg.background && !g_cfg.display_vblank));
     double a = d->q.now();
     d->update_display(true);
@@ -491,7 +495,7 @@ void Ticker::after_tick()
     const double prev = m.due;
     // the next vblank after this tick, less the margin: the deadline for a frame drawn now to go before the next tick
     const bool one_a_refresh = m.clock.state() == State::Following && m.clock.refreshes() == 1;
-    const double vblank = prev - (m.clock.phase > 0 ? m.clock.phase : Clock::phase_for(m.clock.display_period()));
+    const double vblank = prev - m.clock.target_phase(m.clock.display_period());
     g_early_deadline.store(one_a_refresh ? m.q.ticks(vblank + m.clock.display_period() - kEarlyMargin) : 0);
     g_early_composed.store(!m.exclusive);
     m.due = m.clock.next(prev);

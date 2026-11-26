@@ -400,6 +400,7 @@ bool parse_args()
         else if (a == L"--timer-vblank") { g_cfg.timer_vblank = true; settings_mark_cli("timer_vblank"); }
         else if (a == L"--display-vblank") g_cfg.display_vblank = true;
         else if (a == L"--frame-marker") g_cfg.frame_marker = true;
+        else if (a == L"--tear-trace") g_cfg.tear_trace = true;
         else if (a == L"--no-scanline") g_cfg.no_scanline = true;
         else if (a == L"--present-stats") g_cfg.present_stats = true;
         else if (a == L"--tick-phase") {

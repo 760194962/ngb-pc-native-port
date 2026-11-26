@@ -166,6 +166,8 @@ public:
     // 2 ms at 60 and 120 Hz, 0.5 ms at 240: at high refresh the work after the tick is most of a refresh, and a tick
     // just before the compositor's latch still has its frame ready only after it (the simulation, tools/clock_sim.cpp)
     static double phase_for(double period) { return period * 0.12 < 0.002 ? period * 0.12 : 0.002; }
+    // The phase in use: `phase` when set (negative: before the vblank), else phase_for
+    double target_phase(double period) const { return phase != 0 ? phase : phase_for(period); }
 
     // A new display timing (mode change, another monitor, exclusive fullscreen); period 0 = unknown
     void set_timing(const Timing &tm)
@@ -196,7 +198,7 @@ public:
             base_ = span;
             far_since_ = unpinned_since_ = due;
         }
-        double e = g->since_vblank(due) - (phase > 0 ? phase : phase_for(p)); // the error, to the nearest vblank: [-p/2, p/2)
+        double e = g->since_vblank(due) - target_phase(p); // the error, to the nearest vblank: [-p/2, p/2)
         e -= p * std::floor(e / p + 0.5);
         error_ = e;
         // PI loop, critically damped (both poles 0.95: an error settles in ~20 ticks); the period clamps keep the
