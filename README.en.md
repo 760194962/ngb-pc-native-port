@@ -260,6 +260,13 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.3.0.2: low-latency present boundary fix
+
+- Low-latency present can now occur only in exclusive fullscreen with V-Sync on;
+- window / borderless and exclusive without V-Sync no longer send early;
+- exclusive + V-Sync still uses the deadline; with no deadline it keeps the old at-once path;
+- fixes the 2.3.0.1 / 2.3.0.1-t low-latency boundary bug; off by default, no change with the switch off.
+
 ### 2.3.0.1: exclusive fullscreen without V-Sync, cleaned up
 
 - Exclusive fullscreen without V-Sync no longer holds the Present; about 6 ms less lag on a high-refresh screen, the tear stays at the picture edge from the tick 1 ms before vblank;
