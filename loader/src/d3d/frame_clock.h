@@ -36,6 +36,16 @@ double tick_period();
 // every tick (what most frames take, plus a margin), so the screen refreshes as evenly as the ticks come.
 void before_present(int64_t tick, bool may_hold);
 
+// Low-latency present (black.ini low_latency_present), Swap: whether the frame, ready at `now` (QueryPerformanceCounter
+// time), is presented before its tick. Presented at the tick a frame reaches the screen a refresh after it; presented as
+// soon as it is drawn, at the refresh before -- if it is there before that refresh's latch. A frame that misses it shows
+// a refresh late, and the next one, on time, lands in the same refresh: one picture twice, one never (2.2.34's windowed
+// complaint). On a followed display (one tick a refresh) the vblanks are known: in exclusive fullscreen a frame goes early
+// only when it is ready 4 ms before the next one (the GPU's last work); after a miss every frame waits for its tick until
+// 120 in a row would have made it. Through the compositor (window, borderless) frames wait for their tick. Where the
+// display is not followed the frame goes at once, as before.
+bool present_before_tick(int64_t now);
+
 // A refresh rate the clock can follow, as Windows and Direct3D 9 list modes in whole Hz: a whole multiple of ~60
 // (59/60/61, 119/120/121, 239/240/241...; 59.94 Hz modes are listed as 59 or 60). Which mode exclusive and borderless
 // fullscreen keep (host.cpp exclusive_mode, display_refresh.cpp); the clock itself checks the exact rate.

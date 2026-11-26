@@ -44,6 +44,14 @@ PresentTimes g_present_minute, g_present_recent;
 // (0: no hold)
 std::atomic<int64_t> g_hold{0};
 
+// Low-latency present (present_before_tick): the time by which a frame drawn after the last tick must be ready to go
+// before its own tick, QueryPerformanceCounter (0: no followed display, frames go at once); whether that display shows
+// our frames through the compositor; the minute's counts
+constexpr double kEarlyMargin = 0.004;
+std::atomic<int64_t> g_early_deadline{0};
+std::atomic<bool> g_early_composed{false};
+std::atomic<uint32_t> g_early_frames, g_early_gated, g_early_switches;
+
 // D3DKMT (gdi32): the display controller's scanline for a GDI display, read without waiting
 typedef UINT KmtHandle;
 struct KmtOpenFromName { WCHAR DeviceName[32]; KmtHandle hAdapter; LUID AdapterLuid; UINT VidPnSourceId; };
@@ -417,6 +425,9 @@ struct Ticker::Impl {
              now - minute_from, minute_ticks, minute_ticks / (now - minute_from), minute_following, pct(errors, 0.5),
              pct(errors, 0.99), pct(errors, 1.0), pct(wakes, 0.5), pct(wakes, 0.99), pct(wakes, 1.0), minute_late);
         uint32_t bins[PresentTimes::kBins];
+        if (uint32_t gated = g_early_gated.exchange(0))
+            logf("[clock] low-latency present: %u of %u frames before their tick, %u switches", g_early_frames.exchange(0), gated,
+                 g_early_switches.exchange(0));
         if (uint32_t presents = g_present_minute.take(bins))
             logf("[clock] Presents: %u, after their tick (before any hold) median %.2f ms, 90%% %.2f, 99%% %.2f, %u over 20 ms%s",
                  presents, PresentTimes::percentile(bins, presents, 0.5), PresentTimes::percentile(bins, presents, 0.9),
@@ -478,6 +489,11 @@ void Ticker::after_tick()
         m.update_display(false); // the window moved to another monitor, or went exclusive
     }
     const double prev = m.due;
+    // the next vblank after this tick, less the margin: the deadline for a frame drawn now to go before the next tick
+    const bool one_a_refresh = m.clock.state() == State::Following && m.clock.refreshes() == 1;
+    const double vblank = prev - (m.clock.phase > 0 ? m.clock.phase : Clock::phase_for(m.clock.display_period()));
+    g_early_deadline.store(one_a_refresh ? m.q.ticks(vblank + m.clock.display_period() - kEarlyMargin) : 0);
+    g_early_composed.store(!m.exclusive);
     m.due = m.clock.next(prev);
     m.rot = m.rot + 0.2 < 1 ? m.rot + 0.2 : m.rot - 0.8;
     m.mid = prev + (0.15 + 0.7 * m.rot) * (m.due - prev);
@@ -493,6 +509,35 @@ void Ticker::after_tick()
 }
 
 double tick_period() { return g_tick_period.load(); }
+
+bool present_before_tick(int64_t now)
+{
+    static bool early = true;       // render thread only
+    static uint32_t would_make = 0; // frames in a row, waiting, that were ready by the deadline
+    const int64_t deadline = g_early_deadline.load();
+    if (!deadline) return true;
+    // Through the compositor (a window, borderless) never: it keeps the newest picture, so a frame that goes early and
+    // one that does not land in the same refresh (60 Hz, RTX 3060, 150 s: window 13 repeats / 13 skips, borderless 16 /
+    // 15; with 30 s before going early again still 18 / 15 and frames early only 0-20% of the time, 2026-11-26). An
+    // exclusive device queues its flips: a frame that misses only shows a refresh late (1 repeat, 0 skips, the input's
+    // age at the Present 1-5 ms against 16.6).
+    if (g_early_composed.load()) return false;
+    g_early_gated.fetch_add(1, std::memory_order_relaxed);
+    const bool makes = now < deadline;
+    if (early && !makes) {
+        early = false;
+        would_make = 0;
+        g_early_switches.fetch_add(1, std::memory_order_relaxed);
+    } else if (!early) {
+        would_make = makes ? would_make + 1 : 0;
+        if (would_make >= 120) {
+            early = true;
+            g_early_switches.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    if (early) g_early_frames.fetch_add(1, std::memory_order_relaxed);
+    return early;
+}
 
 void before_present(int64_t tick, bool may_hold)
 {

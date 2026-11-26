@@ -2563,7 +2563,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     compile_later_report(); // the shaders compiled on the thread and the draws left out meanwhile (shader_cache.cpp)
     pb_flush();
     perf::swap_begin();
-    const bool early = g_cfg.present_early && g_frame_count.load() >= kEarlyAfter;
+    const bool early = g_cfg.present_early && g_frame_count.load() >= kEarlyAfter && frame_clock::present_before_tick(qpc_now());
     auto pace = [early] {
         perf::DetScope ds(perf::kDetPace);
         if (perf::g_detail && !early) gpu_frame_marks(g_frame_count.load(), 2);
