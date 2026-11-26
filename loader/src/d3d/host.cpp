@@ -989,16 +989,19 @@ static void note_tear()
     static LONG(APIENTRY *scan)(Scan *);
     static Open o;
     static uint32_t bins[21], blank, n;
+    static bool tried;
     if (!scan) {
+        if (tried) return; // no scanline here: once
+        tried = true;
         HMODULE g = GetModuleHandleW(L"gdi32.dll");
         auto open = (LONG(APIENTRY *)(Open *))GetProcAddress(g, "D3DKMTOpenAdapterFromGdiDisplayName");
         MONITORINFOEXW mi = {};
         mi.cbSize = sizeof mi;
         GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
         wcscpy_s(o.name, mi.szDevice);
-        if (!open || open(&o)) return;
-        scan = (LONG(APIENTRY *)(Scan *))GetProcAddress(g, "D3DKMTGetScanLine");
-        if (!scan) return;
+        auto get = (LONG(APIENTRY *)(Scan *))GetProcAddress(g, "D3DKMTGetScanLine");
+        if (!open || !get || open(&o)) return;
+        scan = get;
     }
     Scan s = {o.adapter, o.source};
     if (scan(&s)) return;

@@ -723,26 +723,27 @@ const Pair kText[(int)Str::Count] = {
      L"A shader compiled once is kept in the cache and never affects later play. Keep it off if missing pieces bother you more than a brief stutter."},
     {L"低延迟呈现（实验性）",
      L"Low-latency present"},
-    {L"独占全屏下画完立刻显示，延迟更低",
-     L"Exclusive fullscreen: frames shown as soon as drawn, lower lag"},
+    {L"独占全屏开垂直同步时画完立刻显示，延迟更低",
+     L"Exclusive fullscreen with V-Sync: frames shown as soon as drawn, lower lag"},
     {L"实验性，默认关闭。\n\n"
      L"游戏按主机的节奏每秒 60 帧：每帧开头读手柄，算好、画好，再等到下一个节拍才换下一帧。"
-     L"画好的帧通常也要等到节拍那一刻才送去显示。开启后，在独占全屏下画完立刻送去显示，游戏本身的节奏完全不变，只是画面早一次刷新出来。\n\n"
+     L"画好的帧通常也要等到节拍那一刻才送去显示。开启后，在独占全屏并打开垂直同步时，画完立刻送去显示，游戏本身的节奏完全不变，只是画面早一次刷新出来。\n\n"
      L"从 2.3 起只在赶得上下一次刷新时才提前送：程序知道屏幕刷新的准确时刻，赶不上的帧照常等节拍，之后连续 120 帧都赶得上才再提前。"
      L"实测（60 Hz 独占全屏）：从游戏读到手柄输入到画面送出约 16.6 ms → 1–5 ms，画面没有多出重复或丢失的帧。\n\n"
      L"窗口和无边框全屏不提前：画面经过 Windows 桌面合成，赶不上的一帧会和下一帧挤进同一次刷新，一帧重复、一帧丢失"
-     L"（实测每分钟十几次），这正是以前有玩家觉得窗口下开了反而不顺的原因。屏幕刷新率不能跟随时（例如 G-SYNC / FreeSync 保持高刷），仍按以前的方式画完就送。\n\n"
+     L"（实测每分钟十几次），这正是以前有玩家觉得窗口下开了反而不顺的原因。独占全屏关掉垂直同步时也不提前：那时节拍会把撕裂线放到画面边缘，提前送出的帧会让撕裂线回到画面中间。屏幕刷新率不能跟随时（例如 G-SYNC / FreeSync 保持高刷），仍按以前的方式画完就送。\n\n"
      L"它只改变画面送出的时刻，不改变游戏速度。",
      L"Experimental, off by default.\n\n"
      L"The game runs on the console's beat, 60 frames a second: each frame reads the pad at its start, is worked out and drawn, then waits for the next beat. "
-     L"A finished frame usually waits for that beat too before it goes to the screen. On, in exclusive fullscreen it goes out as soon as it is drawn: the game's own "
+     L"A finished frame usually waits for that beat too before it goes to the screen. On, in exclusive fullscreen with V-Sync it goes out as soon as it is drawn: the game's own "
      L"timing is exactly as before, only the picture comes out a refresh sooner.\n\n"
      L"Since 2.3 a frame goes early only when it makes the next refresh: the program knows when the screen refreshes; a frame that would miss it waits for the beat "
      L"as usual, and frames go early again after 120 in a row would have made it. Measured (60 Hz, exclusive fullscreen): from the game reading the pad to the "
      L"picture going out, about 16.6 ms -> 1-5 ms, with no picture shown twice or lost.\n\n"
      L"Windows and borderless fullscreen do not go early: Windows' desktop compositor shows the picture, and a frame that misses lands in the same refresh as the "
      L"next one, one picture twice and one lost (a dozen times a minute measured), which is why some players found windowed play less smooth with it on. Where the "
-     L"screen's refresh cannot be followed (G-SYNC / FreeSync kept at a high refresh rate) frames still go out as soon as drawn.\n\n"
+     L"screen's refresh cannot be followed (G-SYNC / FreeSync kept at a high refresh rate) frames still go out as soon as drawn. Exclusive fullscreen "
+     L"without V-Sync does not go early either: there the beat keeps the tear at the picture's edges, and an early frame would put it back in the middle.\n\n"
      L"It only changes when a picture goes out, never the game's speed."},
     {L"全屏时用 60 Hz",
      L"60 Hz in fullscreen"},

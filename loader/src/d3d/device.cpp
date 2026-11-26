@@ -2507,7 +2507,9 @@ void swap_callback_after_swap()
 // Off by default again (the user, 2026-11-17): on another PC (a 60 Hz display, integrated graphics) it looked less smooth
 // windowed. Those measurements were of the game's pacing and of the Present calls, not of what the desktop showed: a frame
 // presented as soon as it is drawn has until the compositor's deadline before the next vblank, not a whole frame, so a
-// heavy frame can miss it (the last picture shown twice) and the next one land with it (one never shown). Not measured yet.
+// heavy frame can miss it (the last picture shown twice) and the next one land with it (one never shown). Measured in 2.3
+// (frames read off the screen): so it is; frame_clock::present_before_tick now lets a frame go early only in exclusive
+// fullscreen with vsync, and only when it makes the next refresh.
 // Not in the first kEarlyAfter frames: at the boot, around frame 30 (the title loading its files, a black screen), a frame
 // with it now and then took 50-56 ms, its render thread waiting in the driver (12 ms of CPU): 6 of 31 starts against 0
 // of 30 without it (Iris Xe, no recorder; with the recorder from frame 1 neither showed it, 0 of 24). Nobody plays there.

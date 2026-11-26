@@ -40,10 +40,10 @@ void before_present(int64_t tick, bool may_hold);
 // time), is presented before its tick. Presented at the tick a frame reaches the screen a refresh after it; presented as
 // soon as it is drawn, at the refresh before -- if it is there before that refresh's latch. A frame that misses it shows
 // a refresh late, and the next one, on time, lands in the same refresh: one picture twice, one never (2.2.34's windowed
-// complaint). On a followed display (one tick a refresh) the vblanks are known: in exclusive fullscreen a frame goes early
-// only when it is ready 4 ms before the next one (the GPU's last work); after a miss every frame waits for its tick until
-// 120 in a row would have made it. Through the compositor (window, borderless) frames wait for their tick. Where the
-// display is not followed the frame goes at once, as before.
+// complaint). On a followed display (one tick a refresh) the vblanks are known: in exclusive fullscreen with vsync a frame
+// goes early only when it is ready 4 ms before the next one (the GPU's last work); after a miss every frame waits for its
+// tick until 120 in a row would have made it. Through the compositor (window, borderless), and without vsync (where the
+// tick places the tear), frames wait for their tick. Where the display is not followed the frame goes at once, as before.
 bool present_before_tick(int64_t now);
 
 // A refresh rate the clock can follow, as Windows and Direct3D 9 list modes in whole Hz: a whole multiple of ~60

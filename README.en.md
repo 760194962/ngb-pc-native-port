@@ -24,7 +24,7 @@ settings below only change how evenly frames are shown and whether the picture t
 
 | Monitor | Display mode | V-Sync | 60 Hz in fullscreen | Steady game speed | Low-latency present |
 |---|---|---|---|---|---|
-| 60 Hz | Any | Exclusive: on or off | No effect | Off | For less lag: on, in exclusive fullscreen |
+| 60 Hz | Any | Exclusive: on or off | No effect | Off | For less lag: on, in exclusive fullscreen with V-Sync |
 | 120 / 240 Hz | Any | Exclusive: on | No effect | Off | No effect |
 | 144 / 165 Hz | Borderless or exclusive | Exclusive: on | On (default) | Off | Off |
 | G-SYNC / FreeSync on | Borderless or exclusive, defaults | On or off | On (default, the most even); off to keep the high refresh | Off | Off |

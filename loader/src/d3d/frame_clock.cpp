@@ -45,11 +45,11 @@ PresentTimes g_present_minute, g_present_recent;
 std::atomic<int64_t> g_hold{0};
 
 // Low-latency present (present_before_tick): the time by which a frame drawn after the last tick must be ready to go
-// before its own tick, QueryPerformanceCounter (0: no followed display, frames go at once); whether that display shows
-// our frames through the compositor; the minute's counts
+// before its own tick, QueryPerformanceCounter (0: no followed display, frames go at once); whether frames are shown
+// through a queue of flips (exclusive fullscreen with vsync), the one way going early works; the minute's counts
 constexpr double kEarlyMargin = 0.004;
 std::atomic<int64_t> g_early_deadline{0};
-std::atomic<bool> g_early_composed{false};
+std::atomic<bool> g_early_queued{false};
 std::atomic<uint32_t> g_early_frames, g_early_gated, g_early_switches;
 
 // D3DKMT (gdi32): the display controller's scanline for a GDI display, read without waiting
@@ -116,6 +116,17 @@ public:
     }
     ~Display() { close(); }
 
+    // Whether the monitor's current mode (size, refresh, depth) differs from the one update last saw
+    bool mode_changed(HMONITOR mon) const
+    {
+        MONITORINFOEXW mi = {};
+        mi.cbSize = sizeof mi;
+        DEVMODEW dm = {};
+        dm.dmSize = sizeof dm;
+        if (!mon || !GetMonitorInfoW(mon, &mi) || !EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm)) return true;
+        return dm.dmPelsWidth != mode_.dmPelsWidth || dm.dmPelsHeight != mode_.dmPelsHeight ||
+               dm.dmDisplayFrequency != mode_.dmDisplayFrequency || dm.dmBitsPerPel != mode_.dmBitsPerPel;
+    }
     // The monitor's GDI name and timing (QueryDisplayConfig, ~0.1-0.3 ms); the scanline handle follows the name
     void update(HMONITOR mon)
     {
@@ -126,6 +137,8 @@ public:
             return;
         }
         timing_ = query_timing(mi.szDevice);
+        mode_.dmSize = sizeof mode_;
+        if (!EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &mode_)) mode_ = DEVMODEW{};
         if (wcscmp(mi.szDevice, name_)) {
             close();
             wcscpy_s(name_, mi.szDevice);
@@ -227,6 +240,7 @@ private:
     UINT source_ = 0;
     WCHAR name_[32] = {};
     Timing timing_;
+    DEVMODEW mode_ = {}; // the monitor's mode when timing_ was read
     uint32_t signal_w_ = 0, failures_ = 0;
     std::vector<DISPLAYCONFIG_PATH_INFO> paths_;
     std::vector<DISPLAYCONFIG_MODE_INFO> modes_;
@@ -353,7 +367,10 @@ struct Ticker::Impl {
         const uint32_t presents = g_present_recent.take(b);
         const Timing &tm = display.timing();
         const bool unfollowable = tm.period > 0 && 1 / tm.period > 61 && !clock.refreshes();
-        const bool wait = !g_cfg.present_early &&
+        // Not in exclusive fullscreen without vsync: a player who turned vsync off wants the least latency, and there the
+        // hold gave a fixed 165 Hz screen 6 ms more of it for nothing (2026-11-26)
+        const bool tearing = exclusive && !g_cfg.vsync;
+        const bool wait = !g_cfg.present_early && !tearing &&
                           (clock.state() == State::FollowsUs || (clock.state() == State::Free && unfollowable));
         double ms = 0;
         if (wait && presents >= 30) ms = std::min(8.0, std::max(1.5, PresentTimes::percentile(b, presents, 0.97) + 0.5));
@@ -367,21 +384,22 @@ struct Ticker::Impl {
         holding = hold;
     }
     const char *phase_source() const { return clock.source() == Source::Scanline ? "scanline" : "compositor"; }
-    void update_display(bool force)
+    // What to look at again: the window's monitor and exclusive fullscreen (every 15 ticks); also the monitor's current
+    // mode (EnumDisplaySettings, a few us; every 2 s); or the full timing whatever the mode says (every 30 s: a 59.94 Hz
+    // mode and a 60 Hz one may both be listed as 60). The full query (QueryDisplayConfig: 0.2-0.5 ms here, more with docks
+    // or many monitors) runs on this time-critical thread, so only when something changed.
+    enum class Recheck { Window, Mode, Full };
+    void update_display(Recheck what)
     {
         HWND w = host3d::window();
         HMONITOR m = w ? MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST) : MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
         bool ex = host3d::exclusive();
-        if (!force && m == monitor && ex == exclusive) return;
+        clock.phase = g_cfg.tick_phase_ms ? g_cfg.tick_phase_ms / 1000 : ex && !g_cfg.vsync ? -0.001 : 0;
+        if (what != Recheck::Full && m == monitor && ex == exclusive && !(what == Recheck::Mode && display.mode_changed(m))) return;
         monitor = m;
         exclusive = ex;
         display.update(m);
         clock.set_timing(display.timing());
-        // Exclusive fullscreen without vsync flips the moment the Present is made: the tear is where the scanline is.
-        // A tick 1 ms before the vblank puts it in the blanking or at the picture's very top or bottom (60 Hz, RTX 3060:
-        // 3% of Presents in between, against 33% lines 200-500 of 1200 with the tick 2 ms after; 2026-11-26) -- what
-        // "scanline sync" tools do. Otherwise 2 ms after (phase_for). --tick-phase sets it for tests.
-        clock.phase = g_cfg.tick_phase_ms ? g_cfg.tick_phase_ms / 1000 : exclusive && !g_cfg.vsync ? -0.001 : 0;
     }
     std::string free_reason() const
     {
@@ -457,7 +475,7 @@ Ticker::Ticker() : d(new Impl)
     timeBeginPeriod(1);
     d->clock.allow_follow(!g_cfg.timer_vblank && !(g_cfg.background && !g_cfg.display_vblank));
     double a = d->q.now();
-    d->update_display(true);
+    d->update_display(Impl::Recheck::Full);
     logf("[clock] display %ls: %.4f Hz, %u of %u lines shown, scanline %s (read in %.2f ms); %s timer", d->display.name(),
          d->display.timing().period > 0 ? 1 / d->display.timing().period : 0.0, d->display.timing().vactive,
          d->display.timing().vtotal, d->display.readable() ? "readable" : "not readable", (d->q.now() - a) * 1000,
@@ -487,17 +505,17 @@ void Ticker::after_tick()
     Impl &m = *d;
     m.sample();
     if (++m.ticks % 120 == 0) {
-        m.update_display(true); // a mode change on the same monitor: every 2 s
+        m.update_display(m.ticks % 1800 == 0 ? Impl::Recheck::Full : Impl::Recheck::Mode);
         m.decide_hold();
     } else if (m.ticks % 15 == 0) {
-        m.update_display(false); // the window moved to another monitor, or went exclusive
+        m.update_display(Impl::Recheck::Window);
     }
     const double prev = m.due;
     // the next vblank after this tick, less the margin: the deadline for a frame drawn now to go before the next tick
     const bool one_a_refresh = m.clock.state() == State::Following && m.clock.refreshes() == 1;
     const double vblank = prev - m.clock.target_phase(m.clock.display_period());
     g_early_deadline.store(one_a_refresh ? m.q.ticks(vblank + m.clock.display_period() - kEarlyMargin) : 0);
-    g_early_composed.store(!m.exclusive);
+    g_early_queued.store(m.exclusive && g_cfg.vsync);
     m.due = m.clock.next(prev);
     m.rot = m.rot + 0.2 < 1 ? m.rot + 0.2 : m.rot - 0.8;
     m.mid = prev + (0.15 + 0.7 * m.rot) * (m.due - prev);
@@ -520,12 +538,13 @@ bool present_before_tick(int64_t now)
     static uint32_t would_make = 0; // frames in a row, waiting, that were ready by the deadline
     const int64_t deadline = g_early_deadline.load();
     if (!deadline) return true;
-    // Through the compositor (a window, borderless) never: it keeps the newest picture, so a frame that goes early and
-    // one that does not land in the same refresh (60 Hz, RTX 3060, 150 s: window 13 repeats / 13 skips, borderless 16 /
-    // 15; with 30 s before going early again still 18 / 15 and frames early only 0-20% of the time, 2026-11-26). An
-    // exclusive device queues its flips: a frame that misses only shows a refresh late (1 repeat, 0 skips, the input's
-    // age at the Present 1-5 ms against 16.6).
-    if (g_early_composed.load()) return false;
+    // Only through a queue of flips, an exclusive device with vsync: a frame that misses only shows a refresh late (1
+    // repeat, 0 skips, the input's age at the Present 1-5 ms against 16.6). The compositor (a window, borderless) keeps
+    // the newest picture, so a frame that goes early and one that does not land in the same refresh (60 Hz, RTX 3060,
+    // 150 s: window 13 repeats / 13 skips, borderless 16 / 15; with 30 s before going early again still 18 / 15 and frames
+    // early only 0-20% of the time, 2026-11-26). Without vsync a frame flips the moment it is presented: early, its tear
+    // would be anywhere instead of where the tick puts it (update_display).
+    if (!g_early_queued.load()) return false;
     g_early_gated.fetch_add(1, std::memory_order_relaxed);
     const bool makes = now < deadline;
     if (early && !makes) {

@@ -178,7 +178,8 @@ public:
         comp_.reset(tm);
         k_ = refreshes_per_tick(tm.period);
         free_until_ = 0;
-        leave_following();
+        state_ = State::Free;
+        error_ = 0;
     }
     void sample(double t, bool in_vblank, uint32_t line) { scan_.sample(t, in_vblank, line); }
     void vblank_at(double t) { comp_.vblank_at(t); }
@@ -189,7 +190,7 @@ public:
     {
         const Grid *g = pick(due);
         if (!g) {
-            leave_following();
+            leave_following(due);
             return due + kConsolePeriod;
         }
         const double p = g->period(), span = k_ * p;
@@ -248,10 +249,10 @@ private:
             }
         return nullptr;
     }
-    void leave_following()
+    // Not following now: Free, or FollowsUs until its time is over (a display seen following our ticks)
+    void leave_following(double due)
     {
-        if (state_ == State::Following) state_ = State::Free;
-        if (state_ == State::FollowsUs && free_until_ == 0) state_ = State::Free;
+        if (state_ == State::Following || (state_ == State::FollowsUs && due >= free_until_)) state_ = State::Free;
         error_ = 0;
     }
 

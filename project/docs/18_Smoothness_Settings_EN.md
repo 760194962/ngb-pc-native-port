@@ -15,7 +15,7 @@ Applies from 2.3.0. What the picture looks like on each kind of monitor and disp
 
 | Monitor | Display mode | V-Sync | 60 Hz in fullscreen | Steady game speed | Low-latency present |
 |---|---|---|---|---|---|
-| 60 Hz | Any | Exclusive: on or off (see below) | No effect | Off | For less lag: on, in exclusive fullscreen |
+| 60 Hz | Any | Exclusive: on or off (see below) | No effect | Off | For less lag: on, in exclusive fullscreen with V-Sync |
 | 120 / 240 Hz | Any | Exclusive: on | No effect | Off | No effect |
 | 144 / 165 Hz | Borderless or exclusive | Exclusive: on | On (default) | Off | Off |
 | G-SYNC / FreeSync on | Borderless or exclusive, defaults | On or off | On (default, the most even); off to keep the high refresh | Off | Off |
@@ -50,7 +50,8 @@ Applies from 2.3.0. What the picture looks like on each kind of monitor and disp
 - **Defaults (fullscreen switched to 60 Hz)**: as even as a 60 Hz screen, the most even choice.
 - **"60 Hz in fullscreen" off, the high refresh kept**: the screen refreshes as frames come. The game takes a different time to draw
   each frame, so the program sends every frame out at the same time after its step (about 5 ms more lag) and the refreshes come evenly:
-  measured, 93% of frame gaps within 16.7 +- 1 ms in exclusive fullscreen, 86% borderless, 80% in a window.
+  measured, 93% of frame gaps within 16.7 +- 1 ms in exclusive fullscreen, 86% borderless, 80% in a window. Not in exclusive fullscreen
+  without V-Sync (the least lag kept there).
 
 ## What each setting does
 
@@ -61,9 +62,10 @@ Applies from 2.3.0. What the picture looks like on each kind of monitor and disp
   and exclusive fullscreen (with V-Sync on) switch to 60 Hz. A 60 / 120 / 240 Hz screen is not switched. It never changes the game's speed.
 - **Steady game speed** (Play page): a fixed 59.94 Hz game clock that never lines up with the screen, in any mode. Keep it off unless
   the game's speed seems unsteady.
-- **Low-latency present** (experimental): in exclusive fullscreen a finished frame goes out at once when it makes the next refresh,
+- **Low-latency present** (experimental): in exclusive fullscreen with V-Sync a finished frame goes out at once when it makes the next refresh,
   pad to picture going out about 16.6 ms -> 1-5 ms, with no picture shown twice or lost. A window and borderless do not go early
-  (through the desktop compositor one picture would show twice and one never). It never changes the game's speed.
+  (through the desktop compositor one picture would show twice and one never), nor does exclusive fullscreen without V-Sync (it would put
+  the tear back in the middle). It never changes the game's speed.
 - **Alt+Enter**: window -> borderless -> window -> exclusive fullscreen -> window ..., the mode shown at the picture's bottom right;
   the last mode is kept on exit.
 
