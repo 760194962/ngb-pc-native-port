@@ -235,6 +235,13 @@ RTX 3060 约 3.0 → 3.1 s，Iris Xe 约 2.2 → 2.3 s；游戏过程的帧时�
 `cache\texture_pool.txt`、`cache\cpu_textures.bin`、`vsh_record.bin` 和 `logs\black.log` 交给作者。**要在更新到新版本之前交**：
 换版本时本地学到的绘制状态会被清掉。
 
+### 2.3.0.1：真全屏关 vsync 的收尾修正
+
+- 真全屏 + vsync 关不再压住 Present；高刷下少约 6ms 延迟，撕裂仍由 vblank 前 1ms 的节拍留在画面边缘；
+- 低延迟呈现只在真全屏 + vsync 时提前送帧；vsync 关不再提前送，避免撕裂线回到画面中间；
+- 显示模式每 2 秒轻量重查，完整 timing 每 30 秒一次；
+- 修正 clock model 在 timing 改变 / FollowsUs 期限上的状态切换。
+
 ### 2.3.0：新的帧节拍时钟，各种显示模式下画面都均匀
 
 - **游戏时钟对准屏幕的刷新**：屏幕是 60 / 120 / 240 Hz 一类（59.94、60、60.1 Hz 都算）时，游戏的节拍对准屏幕的 vblank，

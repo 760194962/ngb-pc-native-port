@@ -260,6 +260,13 @@ its textures were uploaded; its GPU timestamps show when the driver handed the G
 `cache\draw_states.bin`, `cache\texture_pool.txt`, `cache\cpu_textures.bin`, `vsh_record.bin` and `logs\black.log` -- **before
 updating to a new version**: a new version drops the draw states learned locally.
 
+### 2.3.0.1: exclusive fullscreen without V-Sync, cleaned up
+
+- Exclusive fullscreen without V-Sync no longer holds the Present; about 6 ms less lag on a high-refresh screen, the tear stays at the picture edge from the tick 1 ms before vblank;
+- low-latency present only sends early in exclusive fullscreen with V-Sync; without V-Sync it no longer does, so the tear does not move back into the picture;
+- display mode is rechecked lightly every 2 s; the full timing every 30 s;
+- clock model state changes on a timing change / FollowsUs deadline fixed.
+
 ### 2.3.0: a new frame clock, even frames in every display mode
 
 - **The game's clock lines up with the screen's refreshes**: on a 60 / 120 / 240 Hz-class screen (59.94, 60 and 60.1 Hz all
