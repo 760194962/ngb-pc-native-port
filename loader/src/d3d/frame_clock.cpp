@@ -17,6 +17,33 @@ namespace {
 
 std::atomic<double> g_tick_period{kConsolePeriod};
 
+// How long after its tick each Present came (before any hold): 0.25 ms bins to 20 ms, the last one beyond. Two copies:
+// one for the minute log, one for the hold's estimate every 2 s.
+struct PresentTimes {
+    static constexpr int kBins = 81;
+    std::atomic<uint32_t> bins[kBins];
+    void add(double ms) { bins[ms < 0 ? 0 : ms >= 20 ? kBins - 1 : (int)(ms * 4)].fetch_add(1, std::memory_order_relaxed); }
+    // Takes the counts (and empties them): how many, and the time p of them came within
+    uint32_t take(uint32_t (&out)[kBins])
+    {
+        uint32_t n = 0;
+        for (int i = 0; i < kBins; i++) n += out[i] = bins[i].exchange(0);
+        return n;
+    }
+    static double percentile(const uint32_t (&b)[kBins], uint32_t n, double p)
+    {
+        uint32_t want = (uint32_t)(p * n), seen = 0;
+        for (int i = 0; i < kBins; i++)
+            if ((seen += b[i]) > want) return (i + 1) * 0.25;
+        return kBins * 0.25;
+    }
+};
+PresentTimes g_present_minute, g_present_recent;
+
+// The variable-refresh hold (before_present): how long after its tick a Present waits, QueryPerformanceCounter units
+// (0: no hold)
+std::atomic<int64_t> g_hold{0};
+
 // D3DKMT (gdi32): the display controller's scanline for a GDI display, read without waiting
 typedef UINT KmtHandle;
 struct KmtOpenFromName { WCHAR DeviceName[32]; KmtHandle hAdapter; LUID AdapterLuid; UINT VidPnSourceId; };
@@ -293,6 +320,7 @@ struct Ticker::Impl {
     double minute_from = 0;
     uint32_t minute_ticks = 0, minute_following = 0, minute_late = 0;
     std::vector<float> errors, wakes; // phase errors while following; how late each tick woke, us
+    bool holding = false; // the variable-refresh hold, as the log last said
 
     // Readings of where the display is: its scanline and the compositor's last vblank, each to its own grid
     void sample()
@@ -302,6 +330,33 @@ struct Ticker::Impl {
         uint32_t line;
         if (display.read(q, &t, &vb, &line)) clock.sample(t, vb, line);
         if (compositor.last_vblank(q, display.timing().period, &t)) clock.vblank_at(t);
+    }
+    // Every 2 s: whether Presents are held, and to what 97% of them took after their tick plus 0.5 ms (1.5-8 ms). Held
+    // where the screen may refresh when a frame comes, which is where it cannot be followed: a display seen following our
+    // ticks (variable refresh), or a refresh above 61 Hz that is no multiple of ~60 (144, 165 Hz). There a variable
+    // refresh rate shows each frame as it is presented (G-SYNC at 165 Hz: 30% of frames 16.2-17.2 ms apart, the rest
+    // 13-20 ms, 2026-11-26); a fixed one shows them unevenly whatever is done, and the hold costs ~4 ms of latency. By
+    // default exclusive and borderless fullscreen switch such screens to 60 Hz and are followed (display_refresh.cpp):
+    // the hold is for windows and for players who keep the high refresh. (A check of the scanline's share in the
+    // blanking was tried first: it flapped around its threshold and never saw G-SYNC in a window.)
+    void decide_hold()
+    {
+        uint32_t b[PresentTimes::kBins];
+        const uint32_t presents = g_present_recent.take(b);
+        const Timing &tm = display.timing();
+        const bool unfollowable = tm.period > 0 && 1 / tm.period > 61 && !clock.refreshes();
+        const bool wait = !g_cfg.present_early &&
+                          (clock.state() == State::FollowsUs || (clock.state() == State::Free && unfollowable));
+        double ms = 0;
+        if (wait && presents >= 30) ms = std::min(8.0, std::max(1.5, PresentTimes::percentile(b, presents, 0.97) + 0.5));
+        else if (wait) ms = holding ? (double)g_hold.load() / q.f.QuadPart * 1000 : 0; // too few frames to judge: as it was
+        g_hold.store((int64_t)(ms / 1000 * q.f.QuadPart));
+        const bool hold = ms > 0;
+        if (hold != holding && said++ < 200) {
+            if (hold) logf("[clock] Presents held %.2f ms after their tick (a refresh that may follow the frames)", ms);
+            else logf("[clock] Presents no longer held");
+        }
+        holding = hold;
     }
     const char *phase_source() const { return clock.source() == Source::Scanline ? "scanline" : "compositor"; }
     void update_display(bool force)
@@ -361,6 +416,11 @@ struct Ticker::Impl {
              "median %.0f us, 99%% %.0f, max %.0f; %u more than a tick behind",
              now - minute_from, minute_ticks, minute_ticks / (now - minute_from), minute_following, pct(errors, 0.5),
              pct(errors, 0.99), pct(errors, 1.0), pct(wakes, 0.5), pct(wakes, 0.99), pct(wakes, 1.0), minute_late);
+        uint32_t bins[PresentTimes::kBins];
+        if (uint32_t presents = g_present_minute.take(bins))
+            logf("[clock] Presents: %u, after their tick (before any hold) median %.2f ms, 90%% %.2f, 99%% %.2f, %u over 20 ms%s",
+                 presents, PresentTimes::percentile(bins, presents, 0.5), PresentTimes::percentile(bins, presents, 0.9),
+                 PresentTimes::percentile(bins, presents, 0.99), bins[PresentTimes::kBins - 1], holding ? "; held" : "");
         const Grid &gs = clock.grid(Source::Scanline), &gc = clock.grid(Source::Compositor);
         logf("[clock] scanline: %zu calls (median %.0f us, 99%% %.0f), %u failed, %u too slow, %u in the blanking, lines %u-%u, "
              "%u on its grid, %u off, %u restarts; compositor: %u on its grid, %u off, %u restarts; following the %s",
@@ -411,8 +471,12 @@ void Ticker::after_tick()
 {
     Impl &m = *d;
     m.sample();
-    if (++m.ticks % 120 == 0) m.update_display(true);       // a mode change on the same monitor: every 2 s
-    else if (m.ticks % 15 == 0) m.update_display(false);     // the window moved to another monitor, or went exclusive
+    if (++m.ticks % 120 == 0) {
+        m.update_display(true); // a mode change on the same monitor: every 2 s
+        m.decide_hold();
+    } else if (m.ticks % 15 == 0) {
+        m.update_display(false); // the window moved to another monitor, or went exclusive
+    }
     const double prev = m.due;
     m.due = m.clock.next(prev);
     m.rot = m.rot + 0.2 < 1 ? m.rot + 0.2 : m.rot - 0.8;
@@ -429,5 +493,17 @@ void Ticker::after_tick()
 }
 
 double tick_period() { return g_tick_period.load(); }
+
+void before_present(int64_t tick, bool may_hold)
+{
+    static const Qpc q;
+    const double ms = (q.ticks(q.now()) - tick) * 1000.0 / q.f.QuadPart;
+    g_present_minute.add(ms);
+    g_present_recent.add(ms);
+    const int64_t hold = may_hold ? g_hold.load() : 0;
+    if (!hold) return;
+    thread_local Sleeper sleeper; // the game's render thread: its own timer
+    sleeper.until(q, q.seconds(tick + hold), true);
+}
 
 } // namespace frame_clock

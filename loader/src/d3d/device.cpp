@@ -2616,6 +2616,10 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     }
     HRESULT presented;
     if (perf::g_detail) gpu_frame_marks(frames, 1);
+    // The game itself often waits for the vblank, then draws its frame and presents at once (0.3-4 ms after the tick),
+    // so the time to the Present follows its work; moving the port's last passes before the wait changed nothing (tried,
+    // measured, taken back, 2026-11-26). With a variable refresh rate the Present waits for a fixed time after the tick.
+    frame_clock::before_present(g_vblank_qpc.load(), !early);
     {
         perf::DetScope ds(perf::kDetPresent);
         presented = host3d::present();

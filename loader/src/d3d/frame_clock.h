@@ -29,6 +29,13 @@ private:
 // The tick period now, s (59.94 Hz, or the followed display's refreshes): what pace_swap expects before a target vblank
 double tick_period();
 
+// Swap, just before a Present (tick: the last tick's QueryPerformanceCounter time). Notes how long after it the Present
+// comes. With a variable refresh rate the screen shows each frame as it is presented, and the game presents 0.3-4 ms
+// after the tick (it often waits for the vblank, then draws): G-SYNC at 165 Hz showed 60 frames a second spread over
+// 14-19 ms (30% within 16.2-17.2 ms, 2026-11-26). There, when `may_hold`, the Present waits until the same time after
+// every tick (what most frames take, plus a margin), so the screen refreshes as evenly as the ticks come.
+void before_present(int64_t tick, bool may_hold);
+
 // A refresh rate the clock can follow, as Windows and Direct3D 9 list modes in whole Hz: a whole multiple of ~60
 // (59/60/61, 119/120/121, 239/240/241...; 59.94 Hz modes are listed as 59 or 60). Which mode exclusive and borderless
 // fullscreen keep (host.cpp exclusive_mode, display_refresh.cpp); the clock itself checks the exact rate.
