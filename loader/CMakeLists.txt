@@ -94,6 +94,7 @@ add_library(blackrt SHARED
   src/d3d/dispatch.cpp
   src/d3d/device.cpp
   src/d3d/frame_clock.cpp
+  src/d3d/display_refresh.cpp
   src/d3d/host.cpp
   src/d3d/apicount.cpp
   src/d3d/pushbuf.cpp

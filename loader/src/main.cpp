@@ -306,7 +306,7 @@ bool parse_args()
         }
         else if (a == L"--cpu-tex-verify") g_cfg.cpu_tex_verify = true;
         else if (a == L"--compile-port-shaders") g_cfg.compile_port_shaders = true;
-        else if (a == L"--keep-refresh") { g_cfg.exclusive_60hz = false; settings_mark_cli("exclusive_60hz"); }
+        else if (a == L"--keep-refresh") { g_cfg.fullscreen_60hz = false; settings_mark_cli("exclusive_60hz"); }
         else if (a == L"--present-early" && i + 1 < argc) { g_cfg.present_early = _wtoi(argv[++i]) != 0; settings_mark_cli("low_latency_present"); }
         else if (a == L"--vsh-record") {
             if (!next(g_cfg.vsh_record)) return false;
@@ -794,7 +794,7 @@ int run(void *reserve, unsigned reserve_size)
          g_cfg.aa, g_cfg.seam_fill, g_cfg.effects_native, g_cfg.shadow_scale, g_cfg.vsync, g_cfg.perfhud, g_cfg.aniso, g_cfg.widescreen,
          (int)g_cfg.display, (int)g_cfg.next_fullscreen,
          g_cfg.window_w, g_cfg.window_h, g_cfg.fs_window_res ? "window" : "screen", g_cfg.gain, g_cfg.gamma, g_cfg.shadow_pcf, g_cfg.msaa,
-         g_cfg.present_early ? 1 : 0, g_cfg.exclusive_60hz ? 1 : 0, g_cfg.timer_vblank ? 1 : 0, g_cfg.move_flash ? 1 : 0);
+         g_cfg.present_early ? 1 : 0, g_cfg.fullscreen_60hz ? 1 : 0, g_cfg.timer_vblank ? 1 : 0, g_cfg.move_flash ? 1 : 0);
 
     std::string err;
     if (!g_xbe.load(g_cfg.xbe_path, err)) {

@@ -29,4 +29,13 @@ private:
 // The tick period now, s (59.94 Hz, or the followed display's refreshes): what pace_swap expects before a target vblank
 double tick_period();
 
+// A refresh rate the clock can follow, as Windows and Direct3D 9 list modes in whole Hz: a whole multiple of ~60
+// (59/60/61, 119/120/121, 239/240/241...; 59.94 Hz modes are listed as 59 or 60). Which mode exclusive and borderless
+// fullscreen keep (host.cpp exclusive_mode, display_refresh.cpp); the clock itself checks the exact rate.
+inline bool followable_hz(unsigned hz)
+{
+    int k = (int)((hz + 30) / 60);
+    return k >= 1 && k <= 8 && (int)hz - 60 * k <= k && 60 * k - (int)hz <= k;
+}
+
 } // namespace frame_clock

@@ -745,25 +745,30 @@ const Pair kText[(int)Str::Count] = {
      L"composition, one of them never shown. The measurements above covered the game's pacing and when pictures were sent, not what the screen "
      L"showed, so it is off by default again; until this is sorted out, turn it on only if it feels right to you.\n\n"
      L"It only changes when a picture goes out, never the game's speed."},
-    {L"垂直同步时用 60 Hz",
-     L"60 Hz with V-Sync"},
-    {L"独占全屏开垂直同步时，144/165 Hz 这类屏幕切到 60 Hz，每帧一次刷新",
-     L"Exclusive fullscreen with V-Sync switches a 144 / 165 Hz screen to 60 Hz, one refresh a frame"},
-    {L"默认开启。只在“独占全屏”并且打开了“垂直同步”时起作用；窗口、无边框全屏和关掉垂直同步时都不受影响。\n\n"
+    {L"全屏时用 60 Hz",
+     L"60 Hz in fullscreen"},
+    {L"144/165 Hz 屏全屏时切到 60 Hz，每帧一次刷新",
+     L"Fullscreen on a 144 / 165 Hz screen switches it to 60 Hz, one refresh a frame"},
+    {L"默认开启。在“无边框全屏”，以及打开了“垂直同步”的“独占全屏”时起作用；窗口模式不受影响（窗口不能单独改屏幕刷新率）。\n\n"
      L"游戏每秒 60 帧。屏幕是 144、165 Hz 这类不能被 60 整除的刷新率时，垂直同步只能对齐屏幕的刷新：在 165 Hz 上每帧停 3、3、3、2 次刷新交替，"
-     L"也就是 18 ms 和 12 ms 来回变，画面一顿一顿的。开启后进入独占全屏时把屏幕换成同分辨率的 60 Hz（屏幕要支持），每帧显示一次。\n\n"
+     L"也就是 18 ms 和 12 ms 来回变，画面一顿一顿的。开启后进入全屏时把屏幕换成同分辨率的 60 Hz（屏幕要支持），每帧显示一次。"
+     L"无边框最小化或回到窗口时换回原来的刷新率，再显示时又换成 60 Hz；游戏退出时也会换回。\n\n"
      L"60、120、240 Hz 的屏幕不用切换：从 2.3 起游戏时钟对齐这类屏幕的刷新（每 1、2、4 次刷新一帧），每帧显示的刷新次数相同，"
      L"不再有以前那种大约每 17 秒多显示一帧的情况。开了 G-SYNC / FreeSync 时屏幕跟着画面刷新，游戏时钟保持固定的 59.94 Hz。\n\n"
-     L"代价：进出独占全屏（包括 Alt+Tab）要切换显示模式，会多黑约 1.5 秒；画面要等 60 Hz 的刷新才显示，比 165 Hz 时稍晚几毫秒。\n\n"
+     L"代价：进出全屏（包括独占全屏的 Alt+Tab、无边框的最小化）要切换显示模式，会多黑约 1.5 秒；无边框时 Alt+Tab 到别的程序，桌面也是 60 Hz；"
+     L"画面要等 60 Hz 的刷新才显示，比 165 Hz 时稍晚几毫秒。\n\n"
      L"关闭则沿用桌面的刷新率（以前的方式）。",
-     L"On by default. It only applies to exclusive fullscreen with V-Sync on; windows, borderless fullscreen and V-Sync off are not affected.\n\n"
+     L"On by default. It applies to borderless fullscreen, and to exclusive fullscreen with V-Sync on; a window is not affected (a window "
+     L"cannot change the screen's refresh rate for itself).\n\n"
      L"The game makes 60 frames a second. On a screen 60 does not divide, such as 144 or 165 Hz, V-Sync can only line them up with the "
      L"screen's refreshes: at 165 Hz each frame stays for 3, 3, 3, 2 refreshes in turn, 18 ms and 12 ms back and forth, and the picture "
-     L"judders. On, entering exclusive fullscreen switches the screen to 60 Hz at the same size (if the screen has it): each frame is shown once.\n\n"
+     L"judders. On, entering fullscreen switches the screen to 60 Hz at the same size (if the screen has it): each frame is shown once. "
+     L"Borderless switches back when minimised or back in a window, and to 60 Hz again when shown; the game's exit switches back too.\n\n"
      L"60, 120 and 240 Hz screens are not switched: since 2.3 the game's clock lines up with their refreshes (a frame every 1, 2 or 4), "
      L"every frame stays for the same number of refreshes, and the old extra refresh about every 17 s is gone. With G-SYNC / FreeSync the "
      L"screen refreshes with the picture and the game's clock stays at a fixed 59.94 Hz.\n\n"
-     L"Costs: entering or leaving exclusive fullscreen (Alt+Tab too) changes the display mode, about 1.5 s more of black screen; "
+     L"Costs: entering or leaving fullscreen (Alt+Tab in exclusive, minimising in borderless) changes the display mode, about 1.5 s more "
+     L"of black screen; Alt+Tab away from borderless leaves the desktop at 60 Hz; "
      L"a picture waits for a 60 Hz refresh, a few ms later than at 165 Hz.\n\n"
      L"Off keeps the desktop's refresh rate (the old way)."},
     {L"屏幕白光",

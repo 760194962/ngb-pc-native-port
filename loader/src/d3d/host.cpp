@@ -1,7 +1,9 @@
 #include "d3d/apicount.h"
 #include "game_features.h"
+#include "d3d/display_refresh.h"
 #include "d3d/draw.h"
 #include "d3d/drawwarm.h"
+#include "d3d/frame_clock.h"
 #include "d3d/host.h"
 #include "d3d/perfhud.h"
 #include "d3d/shader_cache.h"
@@ -137,12 +139,15 @@ void enter_fullscreen(DisplayMode m)
     if (m == DisplayMode::Fullscreen) {
         g_window.request(WindowMode::Exclusive);
         if (g_dev) xd3d::request_device_reset("exclusive fullscreen");
+    } else {
+        display_refresh::enter(g_hwnd); // 144 / 165 Hz: the screen to 60 Hz while the game fills it
     }
 }
 
 // Back to the framed window. An exclusive device goes windowed first (reset_device_here restyles once it is).
 void leave_fullscreen()
 {
+    display_refresh::leave();
     g_cfg.display = DisplayMode::Window;
     g_window.request(WindowMode::Windowed);
     if (g_window.actual_exclusive()) {
@@ -239,6 +244,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         if (wp == PBT_APMRESUMEAUTOMATIC) tsc_host_sleep(true);
         break;
     case WM_CLOSE:
+        display_refresh::leave();
         g_closed = true;
         settings_save();
         request_exit(0, "window closed");
@@ -256,6 +262,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         PostQuitMessage(0);
         return 0;
     case WM_SIZE:
+        // Borderless at 60 Hz on a faster screen: the desktop's rate back while minimised, 60 Hz again when shown
+        if (g_cfg.display == DisplayMode::Borderless) wp == SIZE_MINIMIZED ? display_refresh::leave() : display_refresh::enter(h);
         if (wp != SIZE_MINIMIZED && LOWORD(lp) && HIWORD(lp)) {
             g_win_w = LOWORD(lp);
             g_win_h = HIWORD(lp);
@@ -487,25 +495,17 @@ bool exclusive() { return g_window.actual_exclusive(); }
 
 D3DPRESENT_PARAMETERS g_pp; // as created; Reset uses the same
 
-// A refresh rate the game's clock can follow (d3d/frame_clock.h): a whole multiple of ~60 Hz as Direct3D 9 counts it
-// (59/60/61, 119/120/121, 239/240/241...: 59.94 Hz modes are listed as 59 or 60)
-static bool followable_refresh(UINT hz)
-{
-    int k = (int)((hz + 30) / 60);
-    return k >= 1 && k <= 8 && abs((int)hz - 60 * k) <= k;
-}
-
 // The display mode of an exclusive device (9Ex takes it besides the parameters): the desktop's. With vsync on and a desktop
 // refreshing at a rate the game's clock cannot follow (a 144 or 165 Hz panel), a mode of the same size at 59-61 Hz when the
 // display has one: the game makes 60 frames a second, and at 165 Hz vsync showed them for 3, 3, 3, 2 refreshes (18.2 /
 // 12.1 ms, judder); at 60 Hz each is shown for one. A 120 or 240 Hz desktop is kept since 2.3: the clock follows every
 // second or fourth refresh there, and a mode change costs ~1.5 s of black screen each way. black.ini exclusive_60hz = 0
-// (the launcher's Graphics page) or --keep-refresh keeps the desktop's.
+// (the launcher's Graphics page) or --keep-refresh keeps the desktop's. Borderless does the same: display_refresh.cpp.
 D3DDISPLAYMODEEX exclusive_mode()
 {
     D3DDISPLAYMODEEX m = {sizeof m};
     if (FAILED(g_d3d->GetAdapterDisplayModeEx(D3DADAPTER_DEFAULT, &m, nullptr))) m.Width = 0;
-    if (!m.Width || !g_cfg.vsync || !g_cfg.exclusive_60hz || followable_refresh(m.RefreshRate)) return m;
+    if (!m.Width || !g_cfg.vsync || !g_cfg.fullscreen_60hz || frame_clock::followable_hz(m.RefreshRate)) return m;
     D3DDISPLAYMODEFILTER f = {sizeof f, m.Format, D3DSCANLINEORDERING_PROGRESSIVE};
     UINT n = g_d3d->GetAdapterModeCountEx(D3DADAPTER_DEFAULT, &f);
     D3DDISPLAYMODEEX best = m;

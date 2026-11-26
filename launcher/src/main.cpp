@@ -2360,7 +2360,7 @@ struct Painter {
         segmented(kHitVsync, cx, y, {S(Str::On), S(Str::Off)}, black_ini("vsync") == "1" ? 0 : 1, 72);
         text(S(Str::VSyncNote), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
         y += 40;
-        label(Str::Exclusive60); // black.ini exclusive_60hz: exclusive + vsync at 60 Hz on a faster desktop (on unless 0, 2.2.34)
+        label(Str::Exclusive60); // black.ini exclusive_60hz: 60 Hz in borderless and exclusive + vsync on a faster screen (on unless 0)
         segmented(kHitExcl60, cx, y, {S(Str::On), S(Str::Off)}, black_ini("exclusive_60hz") == "0" ? 1 : 0, 72);
         text(S(Str::Exclusive60Note), {cx + 2 * 78 + 12, y, c.right - 20, y + 30}, 12, kAsh, 0.7f);
         y += 40;

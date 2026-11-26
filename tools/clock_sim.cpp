@@ -33,6 +33,8 @@ struct Result {
     State end_state;
 };
 
+static double g_bias = 0; // added to every reading's time: a source that is off by this much
+
 static Result run(Display d, bool follow, double seconds, uint32_t seed, double latch, Display *after = nullptr, double switch_at = 1e9)
 {
     std::mt19937 rng(seed);
@@ -98,17 +100,17 @@ static Result run(Display d, bool follow, double seconds, uint32_t seed, double 
             double v0 = t0 + d.period * d.vactive / d.vtotal;
             double last = v0 + std::floor((wake - v0) / d.period) * d.period;
             double late = u(rng) < 0.03 ? 0.0003 + u(rng) * 0.0007 : u(rng) * 0.0003;
-            if (last + late < wake) c.vblank_at(last + late);
+            if (last + late < wake) c.vblank_at(last + late + g_bias);
         }
         if (d.readable) {
             bool vb;
             double ts = wake + 0.00003;
             uint32_t l = line_at(ts, &vb);
-            c.sample(ts + (u(rng) - 0.5) * 80e-6, vb, l); // a reading takes ~62 us: its time is the middle of the call
+            c.sample(ts + (u(rng) - 0.5) * 80e-6 + g_bias, vb, l); // a reading takes ~62 us: its time is the middle of the call
             rot = std::fmod(rot + 0.2, 1.0);
             double tm = due + (0.15 + 0.7 * rot) * kConsolePeriod;
             l = line_at(tm, &vb);
-            c.sample(tm + (u(rng) - 0.5) * 80e-6, vb, l);
+            c.sample(tm + (u(rng) - 0.5) * 80e-6 + g_bias, vb, l);
         }
         if (c.state() == State::Following) {
             following++;
@@ -178,6 +180,14 @@ int main()
                    state_name(r.end_state), r.rate, r.follow_share * 100, r.lock_time, r.err_p99, r.uneven, r.frames, o.uneven, o.frames);
         }
     }
+    // the margin: every reading off by a fixed time
+    printf("\nreadings off by a fixed time (60.008 Hz / 120 Hz, judder new):\n");
+    for (double bias : {-0.004, -0.003, -0.002, -0.001, 0.001, 0.002, 0.003, 0.004}) {
+        g_bias = bias;
+        Result a = run({1 / 60.008, 1732, 1600}, true, 60, 5, 0.00075), b = run({1 / 120.0, 1144, 1080}, true, 60, 5, 0.00075);
+        printf("  %+.0f ms: %d / %d, %d / %d\n", bias * 1000, a.uneven, a.frames, b.uneven, b.frames);
+    }
+    g_bias = 0;
     // a mode change while running: 165 Hz desktop -> 60 Hz exclusive -> back
     Display a{1 / 165.019, 1666, 1600}, b{1 / 60.008, 1732, 1600};
     Result r = run(a, true, 60, 3, 0, &b, 20);

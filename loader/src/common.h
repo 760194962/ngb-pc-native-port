@@ -98,7 +98,9 @@ struct Config {
     bool frame_marker = false;   // --frame-marker (tests): each Present's number in the top-left corner (d3d/host.cpp present)
     bool present_stats = false;  // --present-stats (tests): refreshes each frame stayed on screen, exclusive (d3d/host.cpp)
     bool move_flash = true;     // black.ini move_flash: the full-screen glow and blur some moves add (d3d/draw.cpp skip_move_flash)
-    bool exclusive_60hz = true; // black.ini exclusive_60hz / --keep-refresh: exclusive fullscreen with vsync at 60 Hz on a faster desktop (d3d/host.cpp exclusive_mode)
+    // black.ini exclusive_60hz (named so since 2.2.34) / --keep-refresh: on a screen the game's clock cannot follow (144,
+    // 165 Hz), exclusive fullscreen with vsync (d3d/host.cpp exclusive_mode) and borderless (d3d/display_refresh.cpp) at 60 Hz
+    bool fullscreen_60hz = true;
     bool effects_native = false; // the small effect buffers at their Xbox size (PC SETTINGS); default: render scale, smoothed
     int shadow_scale = 4;        // shadow maps at this many times their Xbox size (black.ini shadow: 1, 2, 4, 8, 16)
     bool vsync = false;          // present on the display's refresh (black.ini vsync); off: frames paced by the Xbox vblank only

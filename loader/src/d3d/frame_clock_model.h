@@ -92,6 +92,11 @@ public:
     uint32_t hits = 0, offs = 0, restarts = 0; // readings on / off the grid, and starts again, for the log
 
 private:
+    double clamp_period(double p) const
+    {
+        const double lo = tm_.period * (1 - 1e-4), hi = tm_.period * (1 + 1e-4);
+        return p < lo ? lo : p > hi ? hi : p;
+    }
     // A frame started at `start` (read at t)
     void frame_start(double t, double start)
     {
@@ -121,11 +126,10 @@ private:
         // Small gains: a reading's time is only known to ~+-30 us (the call takes ~60 us), and the nominal period is
         // already right to ~1e-5 (60.008 Hz nominal, 60.0077 fitted on the user's panel), so the period moves slowly
         g_ += n * p_ + r / 8;
-        if (n >= 1) p_ += r / (32 * n);
-        if (std::fabs(p_ - tm_.period) > tm_.period * 0.005) { // not this display's refresh: start again
-            Timing tm = tm_;
-            reset(tm);
-        }
+        // The period stays within 0.01% of the nominal one: QueryDisplayConfig's timing is right to a few ppm (60.008 Hz
+        // nominal, 60.0077 fitted from the scanline), while readings that wander (the compositor's in exclusive
+        // fullscreen) once took it to 59.984 Hz and the ticks drifted across the latch with it
+        if (n >= 1) p_ = clamp_period(p_ + r / (32 * n));
     }
 
     const double tolerance_;
@@ -153,13 +157,14 @@ enum class Source : uint8_t { Scanline, Compositor };
 class Clock {
 public:
     // Where a tick falls after a vblank start (0: by the refresh, phase_for). The frame is drawn before its tick (Swap
-    // waits for it); what follows the tick (the last copy, the Present, the GPU's end of it) takes 0.5-2.5 ms. The tick
-    // must come after the latch of the refresh that just began (a flip latches at the vblank start, the desktop
-    // compositor ~0.5-1.4 ms after it: DwmFlush returned 0.86-5.2 ms, median 1.42, on the user's panel) and leave that
-    // work before the next latch, so every frame is taken at the same one.
+    // waits for it), but the GPU can still be on it well after the Present: the earlier the tick after the latch (a
+    // flip latches at the vblank start, the desktop compositor ~0.5-1.4 ms after it), the more time it has before the
+    // next one. Measured on the RTX 3060, exclusive fullscreen at 60 Hz, 150 s: 2 ms -> 6 / 26 repeats, a quarter of
+    // the refresh (4.2 ms) -> 77 / 88 (2026-11-26). The vblank readings agree to ~0.5 ms (kernel vblank event,
+    // compositor; srcprobe), so 2 ms clears the latch just passed.
     double phase = 0;
-    // 2 ms at 60 Hz, 1 at 120, 0.5 at 240: at high refresh the work after the tick is most of a refresh, and a tick just
-    // before the compositor's latch still has its frame ready only after it (the simulation, tools/clock_sim.cpp)
+    // 2 ms at 60 and 120 Hz, 0.5 ms at 240: at high refresh the work after the tick is most of a refresh, and a tick
+    // just before the compositor's latch still has its frame ready only after it (the simulation, tools/clock_sim.cpp)
     static double phase_for(double period) { return period * 0.12 < 0.002 ? period * 0.12 : 0.002; }
 
     // A new display timing (mode change, another monitor, exclusive fullscreen); period 0 = unknown
