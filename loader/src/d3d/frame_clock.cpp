@@ -39,9 +39,9 @@ struct Qpc {
     double seconds(int64_t ticks) const { return (double)(ticks - t0.QuadPart) / f.QuadPart; }
 };
 
-// The desktop compositor's last vblank (DwmGetCompositionTimingInfo: no wait), for a window or borderless when the
-// scanline cannot be read (remote and virtual displays, some drivers). Only when its refresh is the display's: with
-// several monitors it is the compositor's own clock.
+// The desktop compositor's last vblank (DwmGetCompositionTimingInfo: no wait). It is updated in exclusive fullscreen
+// too (2026-11-26, Iris Xe). Only when its refresh is the display's: with several monitors it is the compositor's own
+// clock.
 class CompositorTiming {
 public:
     CompositorTiming()
@@ -57,6 +57,8 @@ public:
         if (!get_ || FAILED(get_(nullptr, &ti)) || !ti.qpcRefreshPeriod || !ti.qpcVBlank) return false;
         double p = (double)ti.qpcRefreshPeriod / q.f.QuadPart;
         if (std::fabs(p - period) > period * 0.005) return false;
+        if (ti.qpcVBlank == last_) return false; // the same vblank again: it says nothing new, and a stalled one must not
+        last_ = ti.qpcVBlank;                    // keep the grid alive
         *t = q.seconds((int64_t)ti.qpcVBlank);
         return true;
     }
@@ -64,6 +66,7 @@ public:
 private:
     using Get = HRESULT(WINAPI *)(HWND, DWM_TIMING_INFO *);
     Get get_ = nullptr;
+    UINT64 last_ = 0;
 };
 
 // The display the game's window is on: its nominal timing and its scanline
@@ -112,15 +115,32 @@ public:
         double a = q.now();
         LONG st = scan_(&s);
         double b = q.now();
+        calls.push_back((float)((b - a) * 1e6));
         if (st != 0) {
+            failed++;
             if (failures_++ < 3) logf("[clock] %ls: D3DKMTGetScanLine 0x%08lx", name_, st);
             return false;
         }
-        if (b - a > 0.0002) return false; // preempted in the call (it takes ~60 us): its time says little
+        if (b - a > 0.0002) { // preempted in the call (it takes ~60 us): its time says little
+            slow++;
+            return false;
+        }
         *t = (a + b) / 2;
         *in_vblank = s.InVerticalBlank != 0;
         *line = s.ScanLine;
+        blank += *in_vblank;
+        lowest = std::min(lowest, *line);
+        highest = std::max(highest, *line);
         return true;
+    }
+    // the minute's readings, for the log
+    std::vector<float> calls; // us a call
+    uint32_t failed = 0, slow = 0, blank = 0, lowest = ~0u, highest = 0;
+    void clear_counts()
+    {
+        calls.clear();
+        failed = slow = blank = highest = 0;
+        lowest = ~0u;
     }
     const Timing &timing() const { return timing_; }
     const wchar_t *name() const { return name_; }
@@ -274,19 +294,16 @@ struct Ticker::Impl {
     uint32_t minute_ticks = 0, minute_following = 0, minute_late = 0;
     std::vector<float> errors, wakes; // phase errors while following; how late each tick woke, us
 
-    // A reading of where the display is: its scanline, or else (window, borderless) the compositor's last vblank
+    // Readings of where the display is: its scanline and the compositor's last vblank, each to its own grid
     void sample()
     {
         double t;
         bool vb;
         uint32_t line;
-        if (display.readable()) {
-            if (display.read(q, &t, &vb, &line)) clock.sample(t, vb, line);
-        } else if (!exclusive && compositor.last_vblank(q, display.timing().period, &t)) {
-            clock.vblank_at(t);
-        }
+        if (display.read(q, &t, &vb, &line)) clock.sample(t, vb, line);
+        if (compositor.last_vblank(q, display.timing().period, &t)) clock.vblank_at(t);
     }
-    const char *phase_source() const { return display.readable() ? "scanline" : "compositor"; }
+    const char *phase_source() const { return clock.source() == Source::Scanline ? "scanline" : "compositor"; }
     void update_display(bool force)
     {
         HWND w = host3d::window();
@@ -305,13 +322,13 @@ struct Ticker::Impl {
         if (g_cfg.timer_vblank) return "the fixed clock is asked (black.ini timer_vblank)";
         if (g_cfg.background && !g_cfg.display_vblank) return "--background";
         if (clock.state() == State::FollowsUs) return "the display's refreshes follow the presents (variable refresh)";
-        if (!display.readable() && (exclusive || !compositor.available())) return "the display's scanline cannot be read";
+        if (!display.readable() && !compositor.available()) return "neither the scanline nor the compositor's timing can be read";
         if (tm.period <= 0) return "the display's timing is unknown";
         if (!clock.refreshes()) {
             snprintf(b, sizeof b, "%.3f Hz is no whole multiple of a rate near 59.94 Hz", 1 / tm.period);
             return b;
         }
-        return "no steady reading of the display's scanline yet";
+        return "no steady reading of the display's vblanks (scanline or compositor)";
     }
     void note_state()
     {
@@ -344,6 +361,14 @@ struct Ticker::Impl {
              "median %.0f us, 99%% %.0f, max %.0f; %u more than a tick behind",
              now - minute_from, minute_ticks, minute_ticks / (now - minute_from), minute_following, pct(errors, 0.5),
              pct(errors, 0.99), pct(errors, 1.0), pct(wakes, 0.5), pct(wakes, 0.99), pct(wakes, 1.0), minute_late);
+        const Grid &gs = clock.grid(Source::Scanline), &gc = clock.grid(Source::Compositor);
+        logf("[clock] scanline: %zu calls (median %.0f us, 99%% %.0f), %u failed, %u too slow, %u in the blanking, lines %u-%u, "
+             "%u on its grid, %u off, %u restarts; compositor: %u on its grid, %u off, %u restarts; following the %s",
+             display.calls.size(), pct(display.calls, 0.5), pct(display.calls, 0.99), display.failed, display.slow, display.blank,
+             display.lowest == ~0u ? 0 : display.lowest, display.highest, gs.hits, gs.offs, gs.restarts, gc.hits, gc.offs,
+             gc.restarts, clock.state() == State::Following ? phase_source() : "timer");
+        display.clear_counts();
+        clock.clear_grid_counts();
         minute_from = now;
         minute_ticks = minute_following = minute_late = 0;
         errors.clear();

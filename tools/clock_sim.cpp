@@ -22,6 +22,9 @@ struct Display {
     bool vrr = false;          // starts a frame when one is presented (at most every `period`)
     double vrr_max_wait = 0.05; // a VRR display refreshes by itself after this
     bool readable = true;      // the scanline can be read
+    bool linear = true;        // false: the counter runs over 3/4 of the lines in the active time and jumps the rest (seen
+                               // on the user's laptop after an exclusive mode change)
+    bool compositor = true;    // the compositor's vblank times (each 0-300 us late, ~3% 0.3-1 ms late)
 };
 
 struct Result {
@@ -40,7 +43,7 @@ static Result run(Display d, bool follow, double seconds, uint32_t seed, double 
     // a VRR display reports its maximum rate as its mode
     auto timing_of = [&](const Display &x) { return Timing{x.period, x.vtotal, x.vactive}; };
     (void)timing;
-    c.set_timing(d.readable ? timing_of(d) : Timing{});
+    c.set_timing(timing_of(d)); // QueryDisplayConfig: known whatever can be read
     const double t0 = 0.0013; // the display's first frame start
     std::vector<double> vrr_starts{t0};
     auto line_at = [&](double t, bool *vb) -> uint32_t {
@@ -54,6 +57,7 @@ static Result run(Display d, bool follow, double seconds, uint32_t seed, double 
         }
         double l = (t - start) / d.period * d.vtotal;
         *vb = l >= d.vactive;
+        if (!d.linear && !*vb) l *= 0.75; // the source's lines, then a jump at the end of the active time
         return (uint32_t)std::min<double>(l, d.vtotal - 1);
     };
     double due = 0.01, last_change = 0;
@@ -66,7 +70,7 @@ static Result run(Display d, bool follow, double seconds, uint32_t seed, double 
         if (after && due >= switch_at) {
             d = *after;
             after = nullptr;
-            c.set_timing(d.readable ? timing_of(d) : Timing{});
+            c.set_timing(timing_of(d)); // QueryDisplayConfig: known whatever can be read
             last_change = due;
             lock_time = -1;
         }
@@ -90,6 +94,12 @@ static Result run(Display d, bool follow, double seconds, uint32_t seed, double 
             shown.push_back(start);
         }
         // readings
+        if (d.compositor && !d.vrr) { // the compositor's last vblank start, read right after the tick
+            double v0 = t0 + d.period * d.vactive / d.vtotal;
+            double last = v0 + std::floor((wake - v0) / d.period) * d.period;
+            double late = u(rng) < 0.03 ? 0.0003 + u(rng) * 0.0007 : u(rng) * 0.0003;
+            if (last + late < wake) c.vblank_at(last + late);
+        }
         if (d.readable) {
             bool vb;
             double ts = wake + 0.00003;
@@ -154,6 +164,9 @@ int main()
         {"VRR 40-120 Hz", {1 / 120.0, 1111, 1080, true}},
         {"VRR up to 60 Hz", {1 / 60.0, 1111, 1080, true}},
         {"60 Hz, no scanline", {1 / 60.0, 1125, 1080, false, 0.05, false}},
+        {"60.008 Hz, scanline jumps", {1 / 60.008, 1732, 1600, false, 0.05, true, false}},
+        {"120 Hz, scanline jumps", {1 / 120.0, 1144, 1080, false, 0.05, true, false}},
+        {"60 Hz, nothing readable", {1 / 60.0, 1125, 1080, false, 0.05, false, true, false}},
     };
     printf("%-30s %-6s %-10s %8s %9s %8s %8s %12s %12s\n", "display", "path", "clock", "tick Hz", "followed", "lock s", "err p99", "judder new",
            "judder old");
