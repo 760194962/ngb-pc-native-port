@@ -1,7 +1,9 @@
 #include "d3d/apicount.h"
 #include "game_features.h"
+#include "d3d/display_refresh.h"
 #include "d3d/draw.h"
 #include "d3d/drawwarm.h"
+#include "d3d/frame_clock.h"
 #include "d3d/host.h"
 #include "d3d/perfhud.h"
 #include "d3d/shader_cache.h"
@@ -137,12 +139,15 @@ void enter_fullscreen(DisplayMode m)
     if (m == DisplayMode::Fullscreen) {
         g_window.request(WindowMode::Exclusive);
         if (g_dev) xd3d::request_device_reset("exclusive fullscreen");
+    } else {
+        display_refresh::enter(g_hwnd); // 144 / 165 Hz: the screen to 60 Hz while the game fills it
     }
 }
 
 // Back to the framed window. An exclusive device goes windowed first (reset_device_here restyles once it is).
 void leave_fullscreen()
 {
+    display_refresh::leave();
     g_cfg.display = DisplayMode::Window;
     g_window.request(WindowMode::Windowed);
     if (g_window.actual_exclusive()) {
@@ -239,6 +244,7 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         if (wp == PBT_APMRESUMEAUTOMATIC) tsc_host_sleep(true);
         break;
     case WM_CLOSE:
+        display_refresh::leave();
         g_closed = true;
         settings_save();
         request_exit(0, "window closed");
@@ -256,6 +262,8 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         PostQuitMessage(0);
         return 0;
     case WM_SIZE:
+        // Borderless at 60 Hz on a faster screen: the desktop's rate back while minimised, 60 Hz again when shown
+        if (g_cfg.display == DisplayMode::Borderless) wp == SIZE_MINIMIZED ? display_refresh::leave() : display_refresh::enter(h);
         if (wp != SIZE_MINIMIZED && LOWORD(lp) && HIWORD(lp)) {
             g_win_w = LOWORD(lp);
             g_win_h = HIWORD(lp);
@@ -484,19 +492,21 @@ void set_fullscreen(bool on)
 
 bool fullscreen() { return g_hwnd && is_fullscreen(); }
 bool exclusive() { return g_window.actual_exclusive(); }
+bool present_flip() { return g_window.present_flip(); }
 
 D3DPRESENT_PARAMETERS g_pp; // as created; Reset uses the same
 
 // The display mode of an exclusive device (9Ex takes it besides the parameters): the desktop's. With vsync on and a desktop
-// refreshing outside 59-61 Hz (a 144 or 165 Hz panel), a mode of the same size at 59-61 Hz when the display has one: the
-// game makes 60 frames a second, and at 165 Hz vsync showed them for 3, 3, 3, 2 refreshes (18.2 / 12.1 ms, judder); at
-// 60 Hz each is shown for one. black.ini exclusive_60hz = 0 (the launcher's Graphics page) or --keep-refresh keeps the
-// desktop's.
+// refreshing at a rate the game's clock cannot follow (a 144 or 165 Hz panel), a mode of the same size at 59-61 Hz when the
+// display has one: the game makes 60 frames a second, and at 165 Hz vsync showed them for 3, 3, 3, 2 refreshes (18.2 /
+// 12.1 ms, judder); at 60 Hz each is shown for one. A 120 or 240 Hz desktop is kept since 2.3: the clock follows every
+// second or fourth refresh there, and a mode change costs ~1.5 s of black screen each way. black.ini exclusive_60hz = 0
+// (the launcher's Graphics page) or --keep-refresh keeps the desktop's. Borderless does the same: display_refresh.cpp.
 D3DDISPLAYMODEEX exclusive_mode()
 {
     D3DDISPLAYMODEEX m = {sizeof m};
     if (FAILED(g_d3d->GetAdapterDisplayModeEx(D3DADAPTER_DEFAULT, &m, nullptr))) m.Width = 0;
-    if (!m.Width || !g_cfg.vsync || !g_cfg.exclusive_60hz || (m.RefreshRate >= 59 && m.RefreshRate <= 61)) return m;
+    if (!m.Width || !g_cfg.vsync || !g_cfg.fullscreen_60hz || frame_clock::followable_hz(m.RefreshRate)) return m;
     D3DDISPLAYMODEFILTER f = {sizeof f, m.Format, D3DSCANLINEORDERING_PROGRESSIVE};
     UINT n = g_d3d->GetAdapterModeCountEx(D3DADAPTER_DEFAULT, &f);
     D3DDISPLAYMODEEX best = m;
@@ -513,7 +523,8 @@ D3DDISPLAYMODEEX exclusive_mode()
             logf("host: exclusive fullscreen with vsync: %ux%u at %u Hz instead of the desktop's %u Hz (60 frames a second shown evenly)",
                  best.Width, best.Height, best.RefreshRate, m.RefreshRate);
         else
-            logf("host: exclusive fullscreen with vsync: no 60 Hz mode at %ux%u, the desktop's %u Hz kept", m.Width, m.Height, m.RefreshRate);
+            logf("host: exclusive fullscreen with vsync: no 60 Hz mode at %ux%u, the desktop's %u Hz kept (the game's clock runs free)", m.Width,
+                 m.Height, m.RefreshRate);
     }
     return best;
 }
@@ -954,6 +965,59 @@ bool present_stretch()
 }
 } // namespace
 
+// Tests (--frame-marker): the Present's number in the top-left corner, for a capture tool to read back from the screen
+// (tools/frame_dup.cpp): 14 squares of 8x8, white, black (references), then bits 0-11 of the number, white = 1
+static void draw_frame_marker()
+{
+    static uint32_t presents;
+    uint32_t n = ++presents;
+    IDirect3DSurface9 *bb = nullptr;
+    if (FAILED(g_dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) return;
+    for (int i = 0; i < 14; i++) {
+        bool on = i == 0 ? true : i == 1 ? false : ((n >> (i - 2)) & 1) != 0;
+        RECT r = {i * 8, 0, i * 8 + 8, 8};
+        g_dev->ColorFill(bb, &r, on ? D3DCOLOR_XRGB(255, 255, 255) : D3DCOLOR_XRGB(0, 0, 0));
+    }
+    bb->Release();
+}
+
+// Tests (--tear-trace): the scanline as an exclusive Present returns -- with vsync off the flip is made about then, so
+// the tear's line: 100-line bins and the blanking, every 3600 Presents
+static void note_tear()
+{
+    struct Open { WCHAR name[32]; UINT adapter; LUID luid; UINT source; };
+    struct Scan { UINT adapter; UINT source; BOOLEAN vblank; UINT line; };
+    static LONG(APIENTRY *scan)(Scan *);
+    static Open o;
+    static uint32_t bins[21], blank, n;
+    static bool tried;
+    if (!scan) {
+        if (tried) return; // no scanline here: once
+        tried = true;
+        HMODULE g = GetModuleHandleW(L"gdi32.dll");
+        auto open = (LONG(APIENTRY *)(Open *))GetProcAddress(g, "D3DKMTOpenAdapterFromGdiDisplayName");
+        MONITORINFOEXW mi = {};
+        mi.cbSize = sizeof mi;
+        GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+        wcscpy_s(o.name, mi.szDevice);
+        auto get = (LONG(APIENTRY *)(Scan *))GetProcAddress(g, "D3DKMTGetScanLine");
+        if (!open || !get || open(&o)) return;
+        scan = get;
+    }
+    Scan s = {o.adapter, o.source};
+    if (scan(&s)) return;
+    if (s.vblank) blank++;
+    else bins[s.line / 100 < 20 ? s.line / 100 : 20]++;
+    if (++n >= 3600) {
+        char b[400];
+        int at = snprintf(b, sizeof b, "[tear] last %u exclusive Presents, scanline as they returned: %u in the blanking; by 100 lines:", n, blank);
+        for (int i = 0; i < 21 && at < (int)sizeof b - 8; i++) at += snprintf(b + at, sizeof b - at, " %u", bins[i]);
+        logf("%s", b);
+        n = blank = 0;
+        for (uint32_t &x : bins) x = 0;
+    }
+}
+
 HRESULT present()
 {
     if (!g_dev) return D3D_OK;
@@ -965,9 +1029,14 @@ HRESULT present()
     // 1-10 s, a black window with the game stopped (the user, 2026-10-24, borderless; r514-r518). Under plain Direct3D 9
     // an exclusive device was lost there and its Reset dropped the pile; a 9Ex device is not lost.
     bool whole = g_window.actual_exclusive() && g_frame_w > 0 && g_frame_h > 0 && (g_frame_w < g_bb_w || g_frame_h < g_bb_h) && present_stretch();
+    if (g_cfg.frame_marker) draw_frame_marker();
     // The device decides this, not the Alt+Enter request: until ResetEx succeeds, Present still uses the old device.
-    if (g_window.present_flip()) return g_dev->Present(nullptr, nullptr, nullptr, nullptr);
-    RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w.load(), g_frame_h && !whole ? g_frame_h : g_bb_h.load()};
+    if (g_window.present_flip()) {
+        HRESULT hr = g_dev->Present(nullptr, nullptr, nullptr, nullptr);
+        if (g_cfg.tear_trace) note_tear();
+        return hr;
+    }
+    RECT src = {0, 0, g_frame_w && !whole ? g_frame_w : g_bb_w, g_frame_h && !whole ? g_frame_h : g_bb_h};
     return g_dev->Present(&src, nullptr, nullptr, nullptr); // stretched to the client area (1:1 unless it outgrew the monitors)
 }
 

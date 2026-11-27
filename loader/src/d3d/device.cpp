@@ -14,6 +14,7 @@
 #include "d3d/ffp_ps.h"
 #include "d3d/ffp_vs.h"
 #include "d3d/drawwarm.h"
+#include "d3d/frame_clock.h"
 #include "d3d/nv2a_psh.h"
 #include "d3d/perfhud.h"
 #include "d3d/pshader.h"
@@ -1185,97 +1186,21 @@ std::atomic<uint32_t> g_vblank_count, g_swap_count;
 std::atomic<int64_t> g_vblank_qpc; // QueryPerformanceCounter at the last vblank (pace_swap: the time left before its target)
 HANDLE g_vblank_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr); // wakes pace_swap at each vblank
 
-// The emulated vblank follows the display's when the display refreshes at about 60 Hz, but only in a window:
-// DwmFlush returns after the desktop composition that shows the last Present, and composition runs at the display's
-// vblank. A free-running 59.94 Hz timer drifts against the display (59.95 Hz on the user's), and while the phase sat
-// near the composition deadline, frames were shown a refresh late or skipped: stutter now and then with no slow frames
-// in the performance recordings. When DwmFlush returns early (nothing presented yet, window minimised) the tick falls
-// back to the timer. Exclusive fullscreen never uses DwmFlush: kernel vblank measured 16.7 -> 19-21 ms in 2026-11-22
-// diagnostics, so its tick is the fixed timer. Other refresh rates, --background and --timer-vblank use the timer only.
-using DwmFlushFn = HRESULT(WINAPI *)();
-DwmFlushFn load_dwm()
-{
-    if (g_cfg.timer_vblank || (g_cfg.background && !g_cfg.display_vblank)) return nullptr;
-    HMODULE m = LoadLibraryW(L"dwmapi.dll");
-    return m ? (DwmFlushFn)GetProcAddress(m, "DwmFlush") : nullptr;
-}
-
-bool display_near_60()
-{
-    DEVMODEW dm = {};
-    dm.dmSize = sizeof dm;
-    return EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency >= 59 && dm.dmDisplayFrequency <= 61;
-}
-
+// Each tick of the game's clock is an Xbox vblank: the count, the vblank event, the game's vblank callback. When the
+// ticks come is frame_clock's (d3d/frame_clock.h): a timer that follows the display's vblanks when it can, never waits
+// on the display.
 void __stdcall vblank_thread(void *)
 {
     xthread_current()->base_priority = 15;
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-    timeBeginPeriod(1);
-    LARGE_INTEGER f, last, now;
-    QueryPerformanceFrequency(&f);
-    QueryPerformanceCounter(&last);
-    const int64_t period = f.QuadPart * 1001 / 60000; // 59.94 Hz
-    DwmFlushFn dwm = load_dwm();
-    bool near_60 = display_near_60();
-    auto follow_dwm = [&] {
-        // Exclusive fullscreen has no DWM clock and kernel vblank is not used as the game clock: its wait interval
-        // was measured at 16.7 -> 19-21 ms while the game must stay at 59.94. Windowed 60 Hz is the one case where
-        // DwmFlush is both valid and useful; every other case is the timer.
-        return !g_cfg.timer_vblank && !host3d::exclusive() && near_60 && dwm;
-    };
-    auto source_label = [](bool d) { return d ? "DwmFlush (window)" : "59.94 Hz timer"; };
-    bool use_dwm = follow_dwm();
-    logf("[d3d] vblank: source %s%s", source_label(use_dwm), host3d::exclusive() ? " (exclusive)" : "");
-    bool logged_dwm = use_dwm;
-    bool last_exclusive = host3d::exclusive();
-    uint32_t from_display = 0;
-    LARGE_INTEGER minute = last;
+    frame_clock::Ticker ticker;
     for (;;) {
-        bool synced = false;
-        const bool exclusive_now = host3d::exclusive();
-        if (exclusive_now != last_exclusive) {
-            // Alt+Enter changes the display mode and the window/exclusive state together; waiting for the 300-tick
-            // refresh would keep the old 60 Hz answer and could pick DwmFlush at 165 Hz for a moment.
-            last_exclusive = exclusive_now;
-            near_60 = display_near_60();
-        } else if (g_vblank_count % 300 == 0) {
-            near_60 = display_near_60(); // the mode can change with exclusive fullscreen
-        }
-        const bool next_dwm = follow_dwm();
-        if (next_dwm != logged_dwm) {
-            logf("[d3d] vblank: source %s%s", source_label(next_dwm), host3d::exclusive() ? " (exclusive)" : "");
-            logged_dwm = next_dwm;
-        }
-        use_dwm = next_dwm;
-        if (use_dwm && SUCCEEDED(dwm())) {
-            QueryPerformanceCounter(&now);
-            synced = now.QuadPart - last.QuadPart > period / 2;
-            from_display += synced;
-        }
-        if (!synced) {
-            int64_t due = last.QuadPart + period;
-            for (;;) {
-                QueryPerformanceCounter(&now);
-                int64_t left_ms = (due - now.QuadPart) * 1000 / f.QuadPart;
-                if (left_ms <= 0) break;
-                Sleep(left_ms > 2 ? (DWORD)(left_ms - 1) : 0);
-            }
-            // keep the timer's cadence (no drift from late wake-ups) unless it fell more than a frame behind
-            now.QuadPart = now.QuadPart - due < period ? due : now.QuadPart;
-        }
-        last = now;
+        int64_t at = ticker.wait();
         // the count first, then its time: a reader that races sees the new count with the old time and finds less time
         // left than there is (pace_swap's pool refill then does less), never more
         uint32_t vb = ++g_vblank_count;
-        g_vblank_qpc.store(now.QuadPart);
+        g_vblank_qpc.store(at);
         SetEvent(g_vblank_wake);
-        if (dwm && vb % 3600 == 0) {
-            logf("[d3d] vblank: %u of the last 3600 from DwmFlush, %.3f Hz", from_display,
-                 3600.0 * f.QuadPart / (double)(now.QuadPart - minute.QuadPart));
-            from_display = 0;
-            minute = now;
-        }
         ksync_signal_object(g_dev + DEV_VBLANKEVENT);
         if (auto cb = *(void(__cdecl **)(uint32_t *))(g_dev + DEV_VBLANKCALLBACK)) {
             uint32_t data[3] = {vb, g_swap_count.load(), 0};
@@ -1283,6 +1208,7 @@ void __stdcall vblank_thread(void *)
             cb(data);
             xthread_lower_irql(old);
         }
+        ticker.after_tick();
     }
 }
 
@@ -1950,16 +1876,16 @@ void pace_swap()
         if (now >= target && !(iv & 0x80000000)) target = now + 1;
         if (g_trace_d3d) logf("[d3d] pace_swap: interval 0x%x n %u last_vb %u now %u target %u", iv, n, last_vb, now, target);
         // Time to wait: the texture pool makes again what an area took (texture.cpp texture_pool_refill), by the target
-        // vblank's time: the last vblank's plus a period for each still to come (59.94 Hz, as the vblank thread counts)
+        // vblank's time: the last vblank's plus a tick for each still to come
         uint32_t c = g_vblank_count.load();
         int64_t q = g_vblank_qpc.load();
         if (q && c < target) {
-            static const int64_t period = [] {
+            static const double freq = [] {
                 LARGE_INTEGER f;
                 QueryPerformanceFrequency(&f);
-                return f.QuadPart * 1001 / 60000;
+                return (double)f.QuadPart;
             }();
-            texture_pool_refill(host3d::dev(), q + (int64_t)(target - c) * period);
+            texture_pool_refill(host3d::dev(), q + (int64_t)((target - c) * frame_clock::tick_period() * freq));
         }
         while (g_vblank_count.load() < target) WaitForSingleObject(g_vblank_wake, 4); // Sleep(1) polling woke 0-2 ms late
     }
@@ -2581,7 +2507,9 @@ void swap_callback_after_swap()
 // Off by default again (the user, 2026-11-17): on another PC (a 60 Hz display, integrated graphics) it looked less smooth
 // windowed. Those measurements were of the game's pacing and of the Present calls, not of what the desktop showed: a frame
 // presented as soon as it is drawn has until the compositor's deadline before the next vblank, not a whole frame, so a
-// heavy frame can miss it (the last picture shown twice) and the next one land with it (one never shown). Not measured yet.
+// heavy frame can miss it (the last picture shown twice) and the next one land with it (one never shown). Measured in 2.3
+// (frames read off the screen): so it is; frame_clock::present_before_tick now lets a frame go early only in exclusive
+// fullscreen with vsync, and only when it makes the next refresh.
 // Not in the first kEarlyAfter frames: at the boot, around frame 30 (the title loading its files, a black screen), a frame
 // with it now and then took 50-56 ms, its render thread waiting in the driver (12 ms of CPU): 6 of 31 starts against 0
 // of 30 without it (Iris Xe, no recorder; with the recorder from frame 1 neither showed it, 0 of 24). Nobody plays there.
@@ -2637,7 +2565,7 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     compile_later_report(); // the shaders compiled on the thread and the draws left out meanwhile (shader_cache.cpp)
     pb_flush();
     perf::swap_begin();
-    const bool early = g_cfg.present_early && g_frame_count.load() >= kEarlyAfter;
+    const bool early = g_cfg.present_early && g_frame_count.load() >= kEarlyAfter && frame_clock::present_before_tick(qpc_now());
     auto pace = [early] {
         perf::DetScope ds(perf::kDetPace);
         if (perf::g_detail && !early) gpu_frame_marks(g_frame_count.load(), 2);
@@ -2690,6 +2618,10 @@ uint32_t __stdcall D3DDevice_Swap(uint32_t Flags)
     }
     HRESULT presented;
     if (perf::g_detail) gpu_frame_marks(frames, 1);
+    // The game itself often waits for the vblank, then draws its frame and presents at once (0.3-4 ms after the tick),
+    // so the time to the Present follows its work; moving the port's last passes before the wait changed nothing (tried,
+    // measured, taken back, 2026-11-26). With a variable refresh rate the Present waits for a fixed time after the tick.
+    frame_clock::before_present(g_vblank_qpc.load(), !early);
     {
         perf::DetScope ds(perf::kDetPresent);
         presented = host3d::present();

@@ -93,11 +93,23 @@ jobs:
           echo "Merged: the fork's changes against upstream $tag"
           git diff --stat "upstream-$tag" HEAD
 
+      # Upstream builds with VS 2017; the VS 2022 compiler (v143) rejects some of its code (std::atomic in ?:, r6f8086b).
+      # The image has no v141 toolset, so add it to the image's VS 2022 (a few minutes).
+      - name: Install the VS 2017 toolset (v141)
+        if: steps.up.outputs.todo == '1'
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $p = Start-Process -Wait -PassThru "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList @(
+            'modify', '--installPath', "`"$vs`"", '--add', 'Microsoft.VisualStudio.Component.VC.v141.x86.x64',
+            '--quiet', '--norestart', '--nocache')
+          if ($p.ExitCode -notin 0, 3010) { throw "vs_installer exited with $($p.ExitCode)" }
+
       - name: Build
         if: steps.up.outputs.todo == '1'
         shell: pwsh
         run: |
-          cmake -S loader -B build -A Win32
+          cmake -S loader -B build -A Win32 -T v141
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cmake --build build --config RelWithDebInfo --parallel
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
